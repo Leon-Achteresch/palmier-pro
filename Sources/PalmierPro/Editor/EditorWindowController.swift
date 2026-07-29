@@ -227,7 +227,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         guard let responder = window?.firstResponder else { return false }
         if let textView = responder as? NSTextView { return textView.isEditable }
         if let textField = responder as? NSTextField { return textField.isEditable }
-        return false
+        return responder is NSTextInputClient
     }
 
     private func handlePanelClick(hitView: NSView?) {

@@ -339,6 +339,22 @@ enum EffectRegistry {
 
     private static let key: [EffectDescriptor] = [
         EffectDescriptor(
+            id: "key.subject", displayName: "Subject Key", category: "Key",
+            params: [
+                EffectParamSpec(key: "quality", label: "Quality", range: 0...2, defaultValue: 1, unit: ""),
+                EffectParamSpec(key: "feather", label: "Feather", range: 0...1, defaultValue: 0.15, unit: ""),
+                EffectParamSpec(key: "expand", label: "Expand", range: -1...1, defaultValue: 0, unit: ""),
+                EffectParamSpec(key: "invert", label: "Invert", range: 0...1, defaultValue: 0, unit: ""),
+            ],
+            apply: { image, p, extent in
+                SubjectMask.apply(
+                    image, extent: extent,
+                    quality: p.value("quality"), feather: p.value("feather"),
+                    expand: p.value("expand"), invert: p.value("invert")
+                )
+            }
+        ),
+        EffectDescriptor(
             id: "key.chroma", displayName: "Chroma Key", category: "Key",
             params: [
                 EffectParamSpec(key: "keyHue", label: "Key Hue", range: 0...1, defaultValue: 0.333, unit: ""),
@@ -363,7 +379,7 @@ enum EffectRegistry {
     static let canonicalOrder: [String] = [
         "color.exposure", "color.contrast", "color.highlightsShadows", "color.blacksWhites",
         "color.temperature", "color.vibrance", "color.saturation", "color.wheels", "color.curves",
-        "color.hueCurves", "color.lut", "detail.clarity", "key.chroma", "blur.gaussian", "blur.sharpen",
+        "color.hueCurves", "color.lut", "detail.clarity", "key.chroma", "key.subject", "blur.gaussian", "blur.sharpen",
         "blur.noiseReduction", "blur.motion", "stylize.invert", "stylize.grain", "stylize.vignette",
         "stylize.glow",
     ]

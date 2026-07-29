@@ -34,6 +34,14 @@ enum ToolName: String, CaseIterable, Sendable {
     case setKeyframes = "set_keyframes"
     case applyLayout = "apply_layout"
     case syncClips = "sync_clips"
+    case trimClips = "trim_clips"
+    case duplicateClips = "duplicate_clips"
+    case copyAttributes = "copy_attributes"
+    case linkClips = "link_clips"
+    case manageNest = "manage_nest"
+    case swapClipMedia = "swap_clip_media"
+    case relinkMedia = "relink_media"
+    case cutoutSubject = "cutout_subject"
     case undo = "undo"
 
     // Multicam
@@ -80,7 +88,7 @@ enum ToolDefinitions {
     static let all: [AgentTool] = [
         AgentTool(
             name: .getTimeline,
-            description: "Always call at the start of a session. Returns project settings (fps, resolution, totalFrames, durationSeconds), tracks with a stable trackId, their current index (what every trackIndex parameter takes), type, and clips, plus canGenerate (if false, generation/upscale tools will fail — tell the user to sign in to Palmier and subscribe before attempting them). Clip ids are accepted by clip mutation tools; trackId is accepted by manage_tracks.\n\nEvery clip occupies frames: [start, end) — timeline frames, end exclusive, duration = end − start. gaps on a track lists its empty [start, end) spans; no gaps key means contiguous. A video clip's linked audio partner is folded into it as audio: {id, track, …} carrying only what deviates (volumeDb, effects, differing trims); the partner is not repeated on its own track, which instead reports linkedClips (its folded count). Address the audio side by its nested id.\n\nFields equal to their defaults are omitted: mediaType 'video', sourceClipType = mediaType, speed 1, volumeDb 0, opacity 1, edgeRounding 0, edgeSoftness 0, trims/fades 0, identity transform/crop, default textStyle, track muted/hidden false. Text clips never report trims. Keyframe tracks that animate nothing are shown as what they are: identity tracks are dropped, constant ones appear as the static field (e.g. crop: {left: 0.31}). A graded clip carries `color` — its grade in apply_color's own vocabulary, pasteable to other clips via apply_color's color parameter. Other effects appear as effects: [{type, params}], the exact shape apply_effect accepts.\n\nCaption clips (sharing a captionGroupId) come back per track as captionGroups summaries: clipCount, frameRange, shared style, and a textPreview — individual caption clips and their ids are NOT listed. That summary is all you need to restyle (update_text with captionGroupId) or judge coverage; the spoken words live in get_transcript. Only when you must touch individual caption clips (retime one, delete one, fix one word's style), re-read with captionDetail:true — ideally windowed — to get [clipId, startFrame, endFrame, text] rows, capped at 200 per group. Caption clips whose properties deviate from the group always appear individually in clips.",
+            description: "Always call at the start of a session. Returns project settings (fps, resolution, totalFrames, durationSeconds), tracks with a stable trackId, their current index (what every trackIndex parameter takes), type, and clips, plus canGenerate (if false, generation/upscale tools will fail — tell the user to sign in to Palmier and subscribe, or to add their own OpenRouter/ElevenLabs API key in Settings, before attempting them). Clip ids are accepted by clip mutation tools; trackId is accepted by manage_tracks.\n\nEvery clip occupies frames: [start, end) — timeline frames, end exclusive, duration = end − start. gaps on a track lists its empty [start, end) spans; no gaps key means contiguous. A video clip's linked audio partner is folded into it as audio: {id, track, …} carrying only what deviates (volumeDb, effects, differing trims); the partner is not repeated on its own track, which instead reports linkedClips (its folded count). Address the audio side by its nested id.\n\nFields equal to their defaults are omitted: mediaType 'video', sourceClipType = mediaType, speed 1, volumeDb 0, opacity 1, edgeRounding 0, edgeSoftness 0, trims/fades 0, identity transform/crop, default textStyle, track muted/hidden false. Text clips never report trims. Keyframe tracks that animate nothing are shown as what they are: identity tracks are dropped, constant ones appear as the static field (e.g. crop: {left: 0.31}). A graded clip carries `color` — its grade in apply_color's own vocabulary, pasteable to other clips via apply_color's color parameter. Other effects appear as effects: [{type, params}], the exact shape apply_effect accepts.\n\nCaption clips (sharing a captionGroupId) come back per track as captionGroups summaries: clipCount, frameRange, shared style, and a textPreview — individual caption clips and their ids are NOT listed. That summary is all you need to restyle (update_text with captionGroupId) or judge coverage; the spoken words live in get_transcript. Only when you must touch individual caption clips (retime one, delete one, fix one word's style), re-read with captionDetail:true — ideally windowed — to get [clipId, startFrame, endFrame, text] rows, capped at 200 per group. Caption clips whose properties deviate from the group always appear individually in clips.",
             inputSchema: objectSchema(
                 properties: [
                     "startFrame": ["type": "integer", "description": "Optional. Window start (inclusive); only clips intersecting [startFrame, endFrame) are returned. Tracks report totalClips when the window hides some."],
@@ -517,22 +525,166 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .setKeyframes,
-            description: "Set animated keyframes on one property of one clip. Replaces the existing keyframe track for that property (pass an empty array to clear). Frames are CLIP-RELATIVE offsets (0 = first frame of the clip), so keyframes follow the clip when it moves. Rows are sorted by frame internally and the LAST row for any duplicate frame wins. Values must be finite numbers. Each row is `[frame, ...values, interp?]` where interp ∈ {linear, hold, smooth} (default smooth).\n\nProperties and their value layouts:\n  • volumeDb `[frame, decibels]` — −60 through +15 dB; 0 dB keeps source level and −60 dB is mute\n  • opacity `[frame, value]` — value 0.0–1.0\n  • rotation `[frame, degrees]` — clockwise degrees\n  • position `[frame, topLeftX, topLeftY]` — TOP-LEFT corner in 0–1 normalized canvas coords. NOT the center. (Default static transform centers a full-canvas clip, so top-left of the static is (0, 0); a centered half-size clip has top-left (0.25, 0.25).)\n  • scale `[frame, width, height]` — clip's normalized width and height in 0–1 canvas coords (1.0 = fills the canvas axis). NOT a scale factor.\n  • crop `[frame, top, right, bottom, left]` — side insets in 0–1 of the source media.\n\nMotion keyframes (position/scale/rotation) override the static `transform` value when active.",
+            description: "Set animated keyframes on clips — the tool for animation: moves, pushes-in, spins, fades, reveals, ducking. Replaces the existing keyframe track for each property you pass (empty array clears it); properties you don't pass are untouched.\n\nAnimate several properties at once with `tracks` ({property: rows}) — one atomic, single-undo action, so a push-in that ramps scale, position, and opacity together is ONE call, not three. `property`+`keyframes` still sets a single track. Target one clip with `clipId` or give the identical animation to several with `clipIds`.\n\nFrames are CLIP-RELATIVE offsets (0 = first frame of the clip), so keyframes follow the clip when it moves. Rows are sorted by frame internally and the LAST row for any duplicate frame wins. Values must be finite numbers. Each row is `[frame, ...values, interp?]` where interp ∈ {linear, hold, smooth} (default smooth) and describes the ease OUT of that keyframe — so per-segment easing is set on the keyframe that starts the segment: 'hold' freezes until the next one (step animation), 'linear' is constant speed (mechanical moves, volume ramps), 'smooth' eases in and out (natural motion). Curved motion, held beats, and non-linear timing come from placing more keyframes, not from a curve parameter — e.g. an overshoot is three keyframes (start → past target → settle back).\n\nProperties and their value layouts:\n  • volumeDb `[frame, decibels]` — −60 through +15 dB; 0 dB keeps source level and −60 dB is mute\n  • opacity `[frame, value]` — value 0.0–1.0\n  • rotation `[frame, degrees]` — clockwise degrees\n  • position `[frame, topLeftX, topLeftY]` — TOP-LEFT corner in 0–1 normalized canvas coords. NOT the center. (Default static transform centers a full-canvas clip, so top-left of the static is (0, 0); a centered half-size clip has top-left (0.25, 0.25).)\n  • scale `[frame, width, height]` — clip's normalized width and height in 0–1 canvas coords (1.0 = fills the canvas axis). NOT a scale factor.\n  • crop `[frame, top, right, bottom, left]` — side insets in 0–1 of the source media.\n\nMotion keyframes (position/scale/rotation) override the static `transform` value when active.",
             inputSchema: objectSchema(
                 properties: [
-                    "clipId": ["type": "string", "description": "The clip ID."],
+                    "clipId": ["type": "string", "description": "The clip to animate. Use clipIds instead to give several clips the same animation."],
+                    "clipIds": [
+                        "type": "array",
+                        "items": ["type": "string"],
+                        "description": "Several clips receiving the identical animation in one undoable action.",
+                    ],
+                    "tracks": [
+                        "type": "object",
+                        "description": "Animate several properties at once: {property: keyframe rows}, keys from volumeDb, opacity, rotation, position, scale, crop. Row shape depends on the property — see tool description. An empty array clears that property's track. Mutually exclusive with property/keyframes.",
+                        "additionalProperties": ["type": "array", "items": ["type": "array"]],
+                    ],
                     "property": [
                         "type": "string",
                         "enum": ["volumeDb", "opacity", "rotation", "position", "scale", "crop"],
-                        "description": "Which property's keyframe track to set.",
+                        "description": "Single-track form: which property's keyframe track to set.",
                     ],
                     "keyframes": [
                         "type": "array",
-                        "description": "Replacement keyframe rows. Empty array clears the track. Row shape depends on property — see tool description.",
+                        "description": "Single-track form: replacement keyframe rows for 'property'. Empty array clears the track. Row shape depends on property — see tool description.",
                         "items": ["type": "array"],
                     ],
+                ]
+            )
+        ),
+        AgentTool(
+            name: .trimClips,
+            description: "Trim one clip by dragging an edge or sliding its source range — the three edits a timeline offers that set_clip_properties' absolute trims can't express.\n\nmode:\n• normal (default) — moves the edge and leaves the surrounding clips alone, so trimming a right edge shorter opens a gap.\n• ripple — moves the edge and shifts everything after it on that track and on sync-locked tracks, so the cut closes up with no gap. This is how you tighten or extend a scene without re-positioning every later clip by hand.\n• slip — keeps the clip's position and length and slides WHICH part of the source plays (needs unused head/tail material). Use it to re-frame a take that's timed right but starts on the wrong moment. Don't pass 'edge' for a slip.\n\ndeltaFrames is in timeline frames and always signed by direction: positive moves the edge (or the source window) to the RIGHT, negative to the LEFT. So a right edge with +30 makes the clip 30 frames longer; a left edge with +30 makes it start 30 frames later (30 frames shorter).\n\nEdits are clamped to available source material, to a 1-frame minimum length, and to room on sync-locked tracks; the receipt says exactly how many frames were applied and notes any clamping. Linked audio follows by default (propagateToLinked). Multicam clips are refused — their timing is owned by the group. Nothing to change returns a no-op receipt instead of a fake success.",
+            inputSchema: objectSchema(
+                properties: [
+                    "clipId": ["type": "string", "description": "The clip to trim (from get_timeline)."],
+                    "mode": [
+                        "type": "string",
+                        "enum": ["normal", "ripple", "slip"],
+                        "description": "Default 'normal'. 'ripple' closes/opens the gap by shifting later clips; 'slip' slides the source range inside a fixed slot.",
+                    ],
+                    "edge": [
+                        "type": "string",
+                        "enum": ["left", "right"],
+                        "description": "Which edge to move. Required for normal/ripple, must be omitted for slip.",
+                    ],
+                    "deltaFrames": ["type": "integer", "description": "Signed timeline frames; positive moves right, negative left. Must not be 0."],
+                    "propagateToLinked": ["type": "boolean", "description": "Default true — linked audio/video trim together, as in the timeline UI."],
                 ],
-                required: ["clipId", "property", "keyframes"]
+                required: ["clipId", "deltaFrames"]
+            )
+        ),
+        AgentTool(
+            name: .duplicateClips,
+            description: "Copy existing clips to new positions, keeping everything about them — trims, speed, volume, fades, transform, crop, effects, grade, and keyframes. This is the tool for repeating a treated clip (a stinger on every beat, a lower third on each speaker, a B-roll insert reused later); add_clips only places raw media and would lose all of that.\n\nEach placement is {clipId, toFrame, toTrack?}; toTrack defaults to the clip's own track. Copies OVERWRITE what they land on, exactly like add_clips — check the gaps in get_timeline (or insert with insert_clips first) if you need to keep what's there. Linked audio comes along at the same offset unless includeLinked is false. Copies are independent: they get new ids (returned as newClipIds) and never rejoin the original's multicam group. One undoable action for the whole batch.",
+            inputSchema: objectSchema(
+                properties: [
+                    "placements": [
+                        "type": "array",
+                        "description": "Where each copy lands. Validated up front; one bad entry rejects the whole call.",
+                        "items": objectSchema(
+                            properties: [
+                                "clipId": ["type": "string", "description": "Clip to copy."],
+                                "toFrame": ["type": "integer", "description": "Project frame where the copy starts."],
+                                "toTrack": ["type": "integer", "description": "Optional destination track index; defaults to the source clip's track."],
+                            ],
+                            required: ["clipId", "toFrame"]
+                        ),
+                    ],
+                    "includeLinked": ["type": "boolean", "description": "Default true — a video clip's linked audio is copied at the same offset."],
+                ],
+                required: ["placements"]
+            )
+        ),
+        AgentTool(
+            name: .copyAttributes,
+            description: "Paste one clip's look onto other clips — the 'make these match' tool. Copies only the attributes you name; timing, media, track, and position are never touched.\n\nattributes defaults to the full look: transform, crop, opacity, volume, fades, edges, effects, color, keyframes, blendMode. Pass a subset to be surgical (e.g. ['color'] to spread a grade, ['keyframes'] to reuse an animation, ['transform','crop'] to repeat a framing). 'textStyle' is opt-in and needs text clips on both sides. Attribute groups: transform (position/scale/rotation/flip), crop, opacity (static), volume (static), fades (lengths + interpolation, clamped to each target's length), edges (rounding + softness), effects (non-color stack), color (the grade), keyframes (all six animation tracks, trimmed to each target's length), blendMode, textStyle (style + fill mode + text animation).\n\nUse this instead of re-sending the same apply_color/apply_effect/set_keyframes payload per clip: it's one undoable action and it can't drift between clips. The source clip is skipped if it appears in toClipIds.",
+            inputSchema: objectSchema(
+                properties: [
+                    "fromClipId": ["type": "string", "description": "The clip to copy from."],
+                    "toClipIds": ["type": "array", "items": ["type": "string"], "description": "Clips that receive the attributes."],
+                    "attributes": [
+                        "type": "array",
+                        "items": ["type": "string", "enum": copyableClipAttributes],
+                        "description": "Which attribute groups to copy. Omit for the full look (everything except textStyle).",
+                    ],
+                ],
+                required: ["fromClipId", "toClipIds"]
+            )
+        ),
+        AgentTool(
+            name: .linkClips,
+            description: "Links clips so they move, trim, and slip together, or unlinks them so they can be edited apart. Imported video and its audio are linked from the start.\n\nUnlink is what makes a J/L-cut possible: unlink the pair, then move or trim the audio past the picture cut so sound leads or lags the image. Link is for binding elements that should travel as one — a title with its background bar, music with the montage it was cut to.\n\naction 'unlink' always covers the whole link group of every id you pass (reported in the receipt), so you never end up with half a group linked. 'link' needs at least two clips and refuses multicam clips, whose sync is owned by their group.",
+            inputSchema: objectSchema(
+                properties: [
+                    "clipIds": ["type": "array", "items": ["type": "string"], "description": "Clips to link, or any member(s) of the groups to unlink."],
+                    "action": ["type": "string", "enum": ["link", "unlink"], "description": "'link' binds them into one group; 'unlink' frees the whole group."],
+                ],
+                required: ["clipIds", "action"]
+            )
+        ),
+        AgentTool(
+            name: .manageNest,
+            description: "Packs clips into a nested timeline (a compound clip) or unpacks one back onto the timeline.\n\nNesting turns a run of clips into ONE clip you can move, trim, grade, fade, animate, and reuse as a unit — the way to treat a built sequence (an intro, a montage, a multi-layer composite) as a single element without re-doing the arrangement. The clips leave the timeline and live in a new child timeline; linked video/audio carrier clips take their place at the same frames. Edit the contents later with set_active_timeline on the returned timelineId — changes there show up in every carrier.\n\ndecompose does the reverse for one nest clip: the child's clips are laid back out in place. Group-level looks applied to the carrier (its opacity, crop, effects, fades, keyframes) have no per-clip equivalent and are dropped, so decompose after grading a nest loses that grade — undo restores it.\n\nCaption clips and multicam clips are refused; both depend on staying on the top-level timeline.",
+            inputSchema: objectSchema(
+                properties: [
+                    "clipIds": ["type": "array", "items": ["type": "string"], "description": "Clips to pack into a new nested timeline. Mutually exclusive with 'decompose'."],
+                    "decompose": ["type": "string", "description": "Id of a nest clip (mediaType 'sequence') to unpack in place. Mutually exclusive with 'clipIds'."],
+                ]
+            )
+        ),
+        AgentTool(
+            name: .swapClipMedia,
+            description: "Points existing clips at different source media while keeping every edit decision — position, length, trims, speed, volume, fades, transform, crop, effects, grade, and keyframes all stay. Use it to swap a take for a better one, replace a placeholder or generated clip with the final asset, or push a re-render through a composite that's already built.\n\nThe replacement must be the same media kind as the clip (video for video, audio for audio, image for image). Trims are kept by default, so a shorter replacement can leave the tail reading empty — the receipt warns when that happens; pass resetTrim:true to start the clip at the new source's first frame instead. A clip's linked partner sharing the same media is repointed with it. Undoable.",
+            inputSchema: objectSchema(
+                properties: [
+                    "clipIds": ["type": "array", "items": ["type": "string"], "description": "Clips whose source media should change."],
+                    "mediaRef": ["type": "string", "description": "Replacement media asset id from get_media."],
+                    "resetTrim": ["type": "boolean", "description": "Default false (keep trims). true starts the clip at the new source's first frame."],
+                ],
+                required: ["clipIds", "mediaRef"]
+            )
+        ),
+        AgentTool(
+            name: .relinkMedia,
+            description: "Reconnects offline media — assets whose file moved, was renamed, or lives on a volume that wasn't mounted. get_media marks these; until they're relinked, they render black/silent and export incomplete.\n\nTwo modes: 'mediaRef'+'filePath' repoints one asset at an exact file, or 'searchFolder' walks a folder recursively and matches every offline asset by filename (the bulk fix after moving a footage folder). The replacement must be the same media kind.\n\nThis edits the project's media library, NOT the timeline: clips, edits, and effects are untouched, and it is NOT undoable. To point a clip at DIFFERENT footage on purpose, use swap_clip_media.",
+            inputSchema: objectSchema(
+                properties: [
+                    "mediaRef": ["type": "string", "description": "Offline asset id from get_media. Use with filePath."],
+                    "filePath": ["type": "string", "description": "Absolute path (~ allowed) of the relocated file."],
+                    "searchFolder": ["type": "string", "description": "Folder to scan recursively, matching offline assets by filename. Mutually exclusive with mediaRef/filePath."],
+                ]
+            )
+        ),
+        AgentTool(
+            name: .cutoutSubject,
+            description: "Cuts the subject out of a clip — the person (or the salient foreground object) stays, everything else becomes transparent so lower tracks show through. No green screen needed; the mask comes from on-device segmentation, per frame, and follows the subject as it moves.\n\nThis is the entry point for compositing a shot: cut the subject out, put something else behind them, then animate. Pass 'background' and the tool also drops that media on a new track below, spanning the same frames, in the SAME undoable action — one call for the whole 'replace the background' move. Without 'background', whatever already sits on lower tracks shows through.\n\nAfter cutting out, treat the clip like any other layer:\n• set_keyframes position/scale/rotation to push in, drift, or parallax the subject against the new background\n• apply_effect with animated params (blur, glow, grain, vignette) for the cinematic pass — blur the background clip, not the subject, to fake depth of field\n• copy_attributes to give every shot in the sequence the same treatment\n\nquality trades speed for accuracy: 'fast' and 'balanced' (default) use people segmentation and stay editable in real time; 'subject' uses the heavy any-object model — much better edges on non-people, but far too slow for playback, so switch to it right before export. feather softens the cut edge (0–1), expand grows (+) or shrinks (−) the mask to fix haloing or clipped hair. keep:'background' inverts the whole thing: the subject is removed and the background survives.\n\nFrames where the model finds nothing are left untouched rather than turning transparent, so a missed detection never blanks the shot — check the result with inspect_timeline. Pass remove:true to strip the key again. The key is a normal effect ('key.subject') in the clip's stack, so apply_effect can animate feather/expand afterwards.",
+            inputSchema: objectSchema(
+                properties: [
+                    "clipIds": ["type": "array", "items": ["type": "string"], "description": "Video or image clips to cut the subject out of."],
+                    "quality": [
+                        "type": "string",
+                        "enum": ["fast", "balanced", "subject"],
+                        "description": "Default 'balanced'. 'fast'/'balanced' = people, real-time. 'subject' = any foreground object, high quality, too slow for playback.",
+                    ],
+                    "feather": ["type": "number", "description": "Edge softness 0–1 (default 0.15). Raise to blend a hard cut into the new background."],
+                    "expand": ["type": "number", "description": "Mask grow (+) or shrink (−), −1 to 1. Positive rescues clipped hair; negative removes a background halo."],
+                    "keep": [
+                        "type": "string",
+                        "enum": ["subject", "background"],
+                        "description": "Default 'subject'. 'background' inverts the mask — the subject is cut OUT of the shot instead.",
+                    ],
+                    "background": [
+                        "type": "object",
+                        "description": "Optional background placed on a new track below, spanning the same frames. Exactly one of mediaRef or colorHex.",
+                        "properties": [
+                            "mediaRef": ["type": "string", "description": "Video or image asset id from get_media (or from generate_image/generate_video)."],
+                            "colorHex": ["type": "string", "description": "Solid color plate, e.g. '#101014'. Needs a saved project."],
+                        ],
+                    ],
+                    "remove": ["type": "boolean", "description": "true strips the subject key from the clips again. Ignores the other parameters."],
+                ],
+                required: ["clipIds"]
             )
         ),
         AgentTool(
@@ -887,6 +1039,12 @@ enum ToolDefinitions {
             effects as [{type, params}] — the same shape this tool accepts, so copying effects between clips \
             is passing a clip's effects array back in.
 
+            ANIMATED PARAMS: a param takes either a number (static) or keyframe rows \
+            [[frame, value, interp?], ...] — clip-relative frames and the same interp vocabulary as \
+            set_keyframes (linear, hold, smooth; default smooth). That's how you ramp a blur on a reveal, \
+            pulse a glow to the beat, or ease a vignette in. An empty array clears the animation and keeps \
+            the last static value. Values are clamped to the param's range.
+
             Available effects — type: param (range, default):
             \(Self.effectCatalog())
             """,
@@ -899,7 +1057,7 @@ enum ToolDefinitions {
                         "items": objectSchema(
                             properties: [
                                 "type": ["type": "string", "description": "Effect type id, e.g. stylize.glow (see list above)."],
-                                "params": ["type": "object", "description": "Param values keyed by name. Out-of-range values are clamped; omitted params keep their current/default value."],
+                                "params": ["type": "object", "description": "Param values keyed by name. Each value is a number (static) or keyframe rows [[frame, value, interp?], ...] for an animated param; empty array clears the animation. Out-of-range values are clamped; omitted params keep their current/default value."],
                                 "enabled": ["type": "boolean", "description": "Default true. false bypasses the effect without removing it."],
                             ],
                             required: ["type"]
@@ -936,7 +1094,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .listModels,
-            description: "Lists AI models with their capabilities (durations, aspect ratios, resolutions, first/last frame support, reference support, voices/category for audio, and configurable settings for upscalers). Always call before generate_video, generate_image, generate_audio, or upscale_media so the model you pick actually supports the constraints you need. Returns { models, loaded } — if loaded=false the catalog hasn't synced yet (e.g. user not signed in); the models array may be empty even when models exist, so do not conclude no models are available. Retry after the user signs in.",
+            description: "Lists AI models with their capabilities (durations, aspect ratios, resolutions, first/last frame support, reference support, voices/category for audio, and configurable settings for upscalers). Models with usesOwnApiKey:true run directly on the user's own provider key (OpenRouter for image/video, ElevenLabs for audio) and are billed there instead of in Palmier credits. Always call before generate_video, generate_image, generate_audio, or upscale_media so the model you pick actually supports the constraints you need. Returns { models, loaded } — if loaded=false the catalog hasn't synced yet (e.g. user not signed in); the models array may be empty even when models exist, so do not conclude no models are available. Retry after the user signs in.",
             inputSchema: objectSchema(
                 properties: [
                     "type": ["type": "string", "enum": ["video", "image", "audio", "upscale"], "description": "Filter by type. Omit to list all models."],
@@ -984,7 +1142,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .generateAudio,
-            description: "Starts an async AI audio generation or transformation. Returns a placeholder asset ID immediately; the asset appears in get_media and becomes usable in add_clips once ready. TTS converts text into speech. Generative audio models create dialogue, music, or sound effects from a prompt, video, or supported image/audio references. Voice Cleanup isolates speech from background audio. Dubbing translates source speech while preserving speaker delivery; pass targetLanguage. For models whose inputs include audio or video, provide sourceMediaRef. Video-to-audio scoring models also accept videoSourceStartFrame+videoSourceEndFrame and place the result on the timeline automatically. Other results land in the media library for placement with add_clips. Use list_models with type='audio' to inspect inputs, category, voices, reference caps, and limits. Costs real money and is not undoable.",
+            description: "Starts an async AI audio generation or transformation. Returns a placeholder asset ID immediately; the asset appears in get_media and becomes usable in add_clips once ready. TTS converts text into speech. Generative audio models create dialogue, music, or sound effects from a prompt, video, or supported image/audio references. Voice Cleanup isolates speech from background audio. Dubbing translates source speech while preserving speaker delivery; pass targetLanguage. For models whose inputs include audio or video, provide sourceMediaRef. Video-to-audio scoring models also accept videoSourceStartFrame+videoSourceEndFrame and place the result on the timeline automatically. Other results land in the media library for placement with add_clips. Use list_models with type='audio' to inspect inputs, category, voices, reference caps, and limits. Models marked usesOwnApiKey run directly on the user's own ElevenLabs key and are billed by ElevenLabs, not in Palmier credits; they need no Palmier account. Costs real money and is not undoable.",
             inputSchema: objectSchema(
                 properties: [
                     "prompt": ["type": "string", "description": "Required for text-driven models. TTS uses it as spoken text; generative audio models use it as the scene, music, or sound description. Omit for Voice Cleanup and Dubbing."],

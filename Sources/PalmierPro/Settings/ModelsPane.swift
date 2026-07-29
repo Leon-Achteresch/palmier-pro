@@ -40,6 +40,19 @@ struct ModelsPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.lg) {
+            SettingsSection(title: "Own API Keys") {
+                APIKeyField(
+                    title: "ElevenLabs API Key",
+                    explanation: "Generate speech, sound effects, and music straight from your ElevenLabs account. Billed by ElevenLabs, not in credits. Stored in the macOS Keychain.",
+                    linkTitle: "Get ElevenLabs API key",
+                    linkURL: URL(string: "https://elevenlabs.io/app/settings/api-keys")!,
+                    placeholder: "sk_…",
+                    load: { ElevenLabsKeychain.load() },
+                    save: { ElevenLabsKeychain.save($0) },
+                    remove: { ElevenLabsKeychain.delete() }
+                )
+            }
+
             searchBar
 
             if sections.isEmpty {

@@ -40,6 +40,9 @@ final class ModelCatalog {
     private(set) var isLoaded: Bool = false
     private(set) var lastError: String?
 
+    @ObservationIgnored private var backendEntries: [CatalogEntry] = []
+    @ObservationIgnored private var elevenLabsEntries: [CatalogEntry] = []
+    @ObservationIgnored private var openRouterEntries: [CatalogEntry] = []
     @ObservationIgnored private var subscription: AnyCancellable?
     @ObservationIgnored private var didConfigure = false
     @ObservationIgnored private var retryTask: Task<Void, Never>?
@@ -95,6 +98,26 @@ final class ModelCatalog {
     }
 
     private func apply(_ entries: [CatalogEntry]) {
+        backendEntries = entries
+        isLoaded = true
+        lastError = nil
+        rebuild()
+    }
+
+    /// Models the user runs on their own ElevenLabs key; they live alongside the backend catalog.
+    func setElevenLabsEntries(_ entries: [CatalogEntry]) {
+        elevenLabsEntries = entries
+        rebuild()
+    }
+
+    /// Image and video models the user runs on their own OpenRouter key.
+    func setOpenRouterEntries(_ entries: [CatalogEntry]) {
+        openRouterEntries = entries
+        rebuild()
+    }
+
+    private func rebuild() {
+        let entries = backendEntries + elevenLabsEntries + openRouterEntries
         var newVideo: [VideoModelConfig] = []
         var newImage: [ImageModelConfig] = []
         var newAudio: [AudioModelConfig] = []
@@ -132,8 +155,6 @@ final class ModelCatalog {
         self.audio = newAudio
         self.upscale = newUpscale
         self.byId = newById
-        self.isLoaded = true
-        self.lastError = nil
     }
 }
 

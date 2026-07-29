@@ -19,15 +19,19 @@ extension GenerationView {
     var audioModel: AudioModelConfig { selectedModel(audioModels, at: selectedAudioModelIndex) }
     var upscaleModel: UpscaleModelConfig { selectedModel(upscaleModels, at: selectedUpscaleModelIndex) }
 
-    var catalogReady: Bool {
-        !videoModels.isEmpty
-            && !imageModels.isEmpty
-            && !audioModels.isEmpty
-            && (selectedType != .upscale || !upscaleModels.isEmpty)
-    }
+    var catalogReady: Bool { availableGenerationTypes.contains(selectedType) }
 
     var availableGenerationTypes: [GenerationType] {
-        upscaleModels.isEmpty ? GenerationType.allCases.filter { $0 != .upscale } : GenerationType.allCases
+        GenerationType.allCases.filter(hasModels(for:))
+    }
+
+    private func hasModels(for type: GenerationType) -> Bool {
+        switch type {
+        case .video: !videoModels.isEmpty
+        case .image: !imageModels.isEmpty
+        case .audio: !audioModels.isEmpty
+        case .upscale: !upscaleModels.isEmpty
+        }
     }
 
     var aiAllowed: Bool { account.aiAllowed }

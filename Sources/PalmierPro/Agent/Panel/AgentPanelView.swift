@@ -1,3 +1,4 @@
+import SwiftTerm
 import SwiftUI
 
 struct AgentPanelView: View {
@@ -49,15 +50,61 @@ struct AgentPanelView: View {
         !service.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    @State private var terminals = AgentTerminalStore()
+    @State private var activeTerminal: AgentTerminalCLI?
+
+    private var terminalView: LocalProcessTerminalView? {
+        activeTerminal.flatMap { terminals.existingView(for: $0) }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ZStack(alignment: .top) {
-                messageList
+                if let terminalView {
+                    AgentTerminalView(terminal: terminalView)
+                        .padding(.top, Layout.panelHeaderHeight)
+                } else {
+                    messageList
+                }
                 floatingTabBar
             }
-            footer
+            if terminalView == nil { footer }
         }
         .background(AppTheme.Background.surfaceColor)
+    }
+
+    private var terminalDirectory: URL? {
+        editor.projectURL?.deletingLastPathComponent()
+    }
+
+    private var terminalButton: some View {
+        Menu {
+            ForEach(AgentTerminalCLI.allCases) { cli in
+                Button {
+                    terminals.view(for: cli, workingDirectory: terminalDirectory)
+                    activeTerminal = cli
+                } label: {
+                    Label(cli.title, systemImage: cli.systemImage)
+                }
+            }
+            if let activeTerminal, terminalView != nil {
+                Divider()
+                Button("Hide Terminal") { self.activeTerminal = nil }
+                Button("Quit \(activeTerminal.title)") {
+                    terminals.terminate(activeTerminal)
+                    self.activeTerminal = nil
+                }
+            }
+        } label: {
+            Image(systemName: "terminal")
+                .font(.system(size: AppTheme.FontSize.sm, weight: .medium))
+                .foregroundStyle(terminalView == nil ? AppTheme.Text.tertiaryColor : AppTheme.Text.primaryColor)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .focusable(false)
+        .help("Terminal")
     }
 
     private var floatingTabBar: some View {
@@ -84,6 +131,7 @@ struct AgentPanelView: View {
                 }
                 newTabButton
                 historyButton
+                terminalButton
                 ViewSkillsButton()
             }
             .padding(.horizontal, AppTheme.Spacing.sm)
@@ -136,37 +184,25 @@ struct AgentPanelView: View {
         }
     }
 
-    @ViewBuilder
     private var modelPicker: some View {
-        if service.hasApiKey {
-            Menu {
-                ForEach(service.availableModels, id: \.self) { m in
-                    Button(m.displayName) { service.model = m }
-                }
-            } label: {
-                HStack(spacing: AppTheme.Spacing.xs) {
-                    Text(service.effectiveModel.displayName)
-                        .font(.system(size: AppTheme.FontSize.xs, weight: .medium))
-                        .foregroundStyle(AppTheme.Text.secondaryColor)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: AppTheme.FontSize.micro, weight: .semibold))
-                        .foregroundStyle(AppTheme.Text.tertiaryColor)
-                }
+        Menu {
+            ForEach(service.availableModels, id: \.self) { m in
+                Button(m.displayName) { service.model = m }
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
+        } label: {
+            HStack(spacing: AppTheme.Spacing.xs) {
+                Text(service.effectiveModel.displayName)
+                    .font(.system(size: AppTheme.FontSize.xs, weight: .medium))
+                    .foregroundStyle(AppTheme.Text.secondaryColor)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: AppTheme.FontSize.micro, weight: .semibold))
+                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+            }
         }
-    }
-
-    @ViewBuilder
-    private var byokIndicator: some View {
-        if service.hasApiKey {
-            Text("using API key")
-                .font(.system(size: AppTheme.FontSize.xs).italic())
-                .foregroundStyle(AppTheme.Text.tertiaryColor)
-                .help("Streaming through your Anthropic API key (BYOK)")
-        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Model routed through OpenRouter")
     }
 
     private var toolResults: [String: ToolRunResult] {
@@ -278,16 +314,12 @@ struct AgentPanelView: View {
         let action: () -> Void
     }
 
-    private func errorCTA(for error: PalmierClientError?) -> ErrorCTA? {
+    private func errorCTA(for error: AgentStreamError?) -> ErrorCTA? {
         guard let error else { return nil }
         switch error {
-        case .unauthenticated:
-            return ErrorCTA(title: "Sign in") {
-                SettingsWindowController.shared.show(tab: .account)
-            }
-        case .insufficientCredits:
-            return ErrorCTA(title: "View plans") {
-                SettingsWindowController.shared.show(tab: .account)
+        case .missingKey:
+            return ErrorCTA(title: "Add API key") {
+                SettingsWindowController.shared.show(tab: .agent)
             }
         case .upstream:
             return nil
@@ -315,54 +347,18 @@ struct AgentPanelView: View {
         }
     }
 
-    @ViewBuilder
     private var missingKeyState: some View {
-        let account = AccountService.shared
         VStack(spacing: AppTheme.Spacing.mdLg) {
-            Button {
-                missingKeyPrimaryAction(account: account)
-            } label: {
-                Label(missingKeyPrimaryLabel(account: account), systemImage: missingKeyPrimaryIcon(account: account))
+            Button(action: { SettingsWindowController.shared.show(tab: .agent) }) {
+                Label("Add OpenRouter API key", systemImage: "key.fill")
                     .font(.system(size: AppTheme.FontSize.mdLg, weight: .semibold))
             }
             .buttonStyle(.capsule(.prominent, size: .regular))
 
-            if !account.isSignedIn {
-                Text("First-time sign-ups only")
-                    .font(.system(size: AppTheme.FontSize.sm))
-                    .foregroundStyle(AppTheme.Text.mutedColor)
-            }
-
-            Button(action: { SettingsWindowController.shared.show(tab: .agent) }) {
-                Text("or use your own Anthropic key")
-                    .underline()
-                    .foregroundStyle(AppTheme.Text.secondaryColor)
-                    .padding(.horizontal, AppTheme.Spacing.sm)
-                    .padding(.vertical, AppTheme.Spacing.xxs)
-            }
-            .buttonStyle(.plain)
-            .font(.system(size: AppTheme.FontSize.smMd, weight: .medium))
-            .hoverHighlight(cornerRadius: AppTheme.Radius.sm)
-        }
-    }
-
-    private func missingKeyPrimaryLabel(account: AccountService) -> LocalizedStringKey {
-        if !account.isSignedIn { return "Log in for 250 free credits" }
-        if !account.isPaid { return "Subscribe" }
-        return "Open Settings"
-    }
-
-    private func missingKeyPrimaryIcon(account: AccountService) -> String {
-        if !account.isSignedIn { return "gift.fill" }
-        if !account.isPaid { return "sparkles" }
-        return "gearshape"
-    }
-
-    private func missingKeyPrimaryAction(account: AccountService) {
-        if !account.isSignedIn {
-            Task { await account.signInWithGoogle() }
-        } else {
-            SettingsWindowController.shared.show(tab: .account)
+            Text("AI chat runs on your own OpenRouter key. No Palmier account needed.")
+                .font(.system(size: AppTheme.FontSize.sm))
+                .foregroundStyle(AppTheme.Text.mutedColor)
+                .multilineTextAlignment(.center)
         }
     }
 
@@ -393,7 +389,6 @@ struct AgentPanelView: View {
                 onCancel: { service.cancel() }
             ) {
                 modelPicker
-                byokIndicator
             }
         }
         .padding(.horizontal, AppTheme.Spacing.mdLg)

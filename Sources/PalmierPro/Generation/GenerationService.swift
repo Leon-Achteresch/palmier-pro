@@ -73,6 +73,19 @@ final class GenerationService {
         let primaryId = placeholders[0].id
 
         Task { @MainActor in
+            if OwnKeyGeneration.handles(genInput.model) {
+                await self.runOwnKeyJob(
+                    placeholders: placeholders,
+                    buildParams: buildParams,
+                    genInput: genInput,
+                    references: references,
+                    trimmedSource: trimmedSourceOverride,
+                    editor: editor,
+                    onComplete: onComplete,
+                    onFailure: onFailure
+                )
+                return
+            }
             do {
                 let prepared = try await self.prepareReferences(
                     references: references,
@@ -248,26 +261,130 @@ final class GenerationService {
         }
         do {
             let (tempURL, _) = try await URLSession.shared.download(from: remoteURL)
-            let realExt = remoteURL.pathExtension.lowercased()
-            if !realExt.isEmpty, realExt != asset.url.pathExtension.lowercased(),
-               ClipType(fileExtension: realExt) != nil {
-                asset.url = asset.url.deletingPathExtension().appendingPathExtension(realExt)
-            }
-            asset.url = try await editor.commitStagedProjectMedia(tempURL, filename: asset.url.lastPathComponent)
-
-            asset.pendingDownloadURL = nil
-            editor.importMediaAsset(asset, skipAppend: true)
-            let finalized = await editor.finalizeImportedAsset(asset)
-            if finalized {
-                editor.appendGenerationLog(for: asset)
-            }
-            return finalized
+            return try await installGeneratedFile(
+                asset: asset,
+                stagedURL: tempURL,
+                fileExtension: remoteURL.pathExtension.lowercased(),
+                editor: editor
+            )
         } catch {
             let message = error.localizedDescription
             Log.generation.error("download failed url=\(remoteURL.absoluteString) error=\(message)")
             asset.pendingDownloadURL = remoteURL
             updateGenerationMetadata(asset, editor: editor, status: .failed(message))
             return false
+        }
+    }
+
+    private func installGeneratedFile(
+        asset: MediaAsset,
+        stagedURL: URL,
+        fileExtension: String,
+        editor: EditorViewModel
+    ) async throws -> Bool {
+        if !fileExtension.isEmpty, fileExtension != asset.url.pathExtension.lowercased(),
+           ClipType(fileExtension: fileExtension) != nil {
+            asset.url = asset.url.deletingPathExtension().appendingPathExtension(fileExtension)
+        }
+        asset.url = try await editor.commitStagedProjectMedia(stagedURL, filename: asset.url.lastPathComponent)
+
+        asset.pendingDownloadURL = nil
+        editor.importMediaAsset(asset, skipAppend: true)
+        let finalized = await editor.finalizeImportedAsset(asset)
+        if finalized {
+            editor.appendGenerationLog(for: asset)
+        }
+        return finalized
+    }
+
+    /// Runs a job on the user's own provider key — no backend job, no credits.
+    private func runOwnKeyJob(
+        placeholders: [MediaAsset],
+        buildParams: ([String]) -> BackendGenerationParams,
+        genInput: GenerationInput,
+        references: [MediaAsset],
+        trimmedSource: TrimmedSource?,
+        editor: EditorViewModel,
+        onComplete: (@MainActor (MediaAsset) -> Void)?,
+        onFailure: (@MainActor () -> Void)?
+    ) async {
+        func fail(_ message: String, placeholders: [MediaAsset]) {
+            Log.generation.error("own-key job failed model=\(genInput.model) error=\(message)")
+            for placeholder in placeholders {
+                updateGenerationMetadata(placeholder, editor: editor, status: .failed(message))
+            }
+            editor.onProjectCheckpointRequired?()
+            onFailure?()
+        }
+
+        var input = genInput
+        if input.createdAt == nil { input.createdAt = Date() }
+        for (outputIndex, placeholder) in placeholders.enumerated() {
+            var stored = input
+            stored.outputIndex = outputIndex
+            updateGenerationMetadata(placeholder, editor: editor, status: .generating) { current in
+                current = stored
+            }
+        }
+        editor.onProjectCheckpointRequired?()
+
+        var files: [URL] = []
+        do {
+            files = try await OwnKeyGeneration.run(
+                modelId: genInput.model,
+                buildParams: buildParams,
+                references: references,
+                trimmedSource: trimmedSource
+            )
+        } catch {
+            fail(error.localizedDescription, placeholders: placeholders)
+            return
+        }
+        guard !files.isEmpty else {
+            fail("The provider returned no file", placeholders: placeholders)
+            return
+        }
+
+        var finalized: [MediaAsset] = []
+        var unfinished: [MediaAsset] = []
+        var failure: String?
+        for (index, placeholder) in placeholders.enumerated() {
+            let outputIndex = placeholder.generationInput?.outputIndex ?? index
+            guard outputIndex < files.count else {
+                unfinished.append(placeholder)
+                continue
+            }
+            let file = files[outputIndex]
+            do {
+                if try await installGeneratedFile(
+                    asset: placeholder,
+                    stagedURL: file,
+                    fileExtension: file.pathExtension.lowercased(),
+                    editor: editor
+                ) {
+                    onComplete?(placeholder)
+                    finalized.append(placeholder)
+                } else {
+                    unfinished.append(placeholder)
+                }
+            } catch {
+                failure = error.localizedDescription
+                unfinished.append(placeholder)
+            }
+        }
+        Self.cleanupTempFiles(Array(files.dropFirst(placeholders.count)))
+
+        if !unfinished.isEmpty {
+            fail(failure ?? "No output for this placeholder", placeholders: unfinished)
+        }
+        if let first = finalized.first {
+            AppNotifications.generationComplete(
+                assetId: first.id,
+                projectURL: editor.projectURL,
+                assetName: first.name,
+                assetType: first.type,
+                count: finalized.count
+            )
         }
     }
 
@@ -288,6 +405,14 @@ final class GenerationService {
         }
 
         let pending = editor.mediaAssets.filter(\.isRecoveringGeneration)
+
+        // Own-key jobs have no resumable server job; a relaunch means the request is gone.
+        for asset in pending where OwnKeyGeneration.handles(asset.generationInput?.model ?? "") {
+            updateGenerationMetadata(
+                asset, editor: editor,
+                status: .failed("Generation was interrupted. Run it again.")
+            )
+        }
 
         let byBackendJob = Dictionary(grouping: pending.compactMap { asset -> (String, MediaAsset)? in
             guard let backendJobId = asset.generationInput?.backendJobId, !backendJobId.isEmpty else { return nil }

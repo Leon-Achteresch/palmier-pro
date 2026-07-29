@@ -89,13 +89,30 @@ extension GenerationView {
         return cost > left
     }
 
+    /// Models running on the user's own provider key never touch the credit balance.
+    var usesOwnAPIKey: Bool {
+        switch selectedType {
+        case .video: OwnKeyGeneration.handles(videoModel.id)
+        case .image: OwnKeyGeneration.handles(imageModel.id)
+        case .audio: OwnKeyGeneration.handles(audioModel.id)
+        case .upscale: false
+        }
+    }
+
+    /// Own-key models need no Palmier account, so the sign-in gate only covers backend models.
+    var generationAllowed: Bool { aiAllowed || usesOwnAPIKey }
+
     private var canAffordGeneration: Bool {
+        guard !usesOwnAPIKey else { return true }
         guard let left = remainingCredits else { return true }
         if let cost = estimatedCost { return cost <= left }
         return left > 0
     }
 
     private var costHelpText: String {
+        if usesOwnAPIKey {
+            return "Billed on your own provider API key — no Palmier credits."
+        }
         guard let cost = estimatedCost else {
             return "Estimated cost. Actual billing may differ slightly."
         }
@@ -123,10 +140,10 @@ extension GenerationView {
 
     var submitButton: some View {
         Button {
-            if aiAllowed { submitGeneration() }
+            if generationAllowed { submitGeneration() }
             else if !account.isMisconfigured { Task { await account.signInWithGoogle() } }
         } label: {
-            Image(systemName: aiAllowed ? "arrow.up" : "person.crop.circle")
+            Image(systemName: generationAllowed ? "arrow.up" : "person.crop.circle")
                 .font(.system(size: AppTheme.FontSize.sm, weight: .bold))
                 .frame(width: AppTheme.IconSize.sm, height: AppTheme.IconSize.sm)
         }
@@ -134,10 +151,10 @@ extension GenerationView {
         .buttonBorderShape(.circle)
         .controlSize(.regular)
         .tint(AppTheme.Accent.primary)
-        .accessibilityLabel(aiAllowed ? (selectedType == .upscale ? "Upscale" : "Generate") : "Sign in")
-        .disabled(aiAllowed ? !canSubmit : account.isMisconfigured || account.isSigningIn)
-        .opacity((aiAllowed ? canSubmit : !account.isMisconfigured && !account.isSigningIn) ? AppTheme.Opacity.opaque : AppTheme.Opacity.strong)
-        .help(aiAllowed
+        .accessibilityLabel(generationAllowed ? (selectedType == .upscale ? "Upscale" : "Generate") : "Sign in")
+        .disabled(generationAllowed ? !canSubmit : account.isMisconfigured || account.isSigningIn)
+        .opacity((generationAllowed ? canSubmit : !account.isMisconfigured && !account.isSigningIn) ? AppTheme.Opacity.opaque : AppTheme.Opacity.strong)
+        .help(generationAllowed
             ? (selectedType == .upscale ? "Upscale source media" : "")
             : (account.isMisconfigured ? "AI is unavailable" : account.isSigningIn ? "Opening Google" : "Sign in to generate"))
     }

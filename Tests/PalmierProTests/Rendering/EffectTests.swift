@@ -213,9 +213,11 @@ struct EffectRenderingTests {
         // (catches a bad filter key) but don't assert a pixel change.
         let noOpOnSaturated: Set<String> = ["color.vibrance"]
         // color.curves / color.hueCurves carry JSON curves, not Double params — covered by their own tests.
-        let jsonCurveEffects: Set<String> = ["color.curves", "color.hueCurves"]
+        // key.subject is a passthrough on footage with no subject, which this synthetic pattern is —
+        // its masking is covered by SubjectMaskTests.
+        let excluded: Set<String> = ["color.curves", "color.hueCurves", "key.subject"]
         let base = try await frame(nil)
-        for descriptor in EffectRegistry.all where descriptor.resourceKey == nil && !jsonCurveEffects.contains(descriptor.id) {
+        for descriptor in EffectRegistry.all where descriptor.resourceKey == nil && !excluded.contains(descriptor.id) {
             let params = nonDefault[descriptor.id]
             #expect(params != nil, "add non-default params for \(descriptor.id) to this test")
             let rendered = try await frame([Effect.make(descriptor.id, params ?? [:])])

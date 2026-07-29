@@ -480,7 +480,7 @@ class VideoProject: NSDocument {
                 TourOverlay()
                     .environment(editorViewModel)
             }
-        let hostingController = NSHostingController(rootView: editorView.tint(AppTheme.Accent.primary))
+        let hostingController = NSHostingController(rootView: editorView.tint(AppTheme.Accent.primary).hotReloadable())
         hostingController.sizingOptions = .minSize
 
         let window = NSWindow(contentViewController: hostingController)

@@ -118,15 +118,16 @@ extension EditorViewModel {
     }
 }
 
-private struct ClonePlacement {
+struct ClonePlacement {
     let source: Clip
     let trackId: String
     let dstStart: Int
 }
 
-private extension EditorViewModel {
+extension EditorViewModel {
 
-    /// Shared cloning core for paste + opt-drag-duplicate.
+    /// Shared cloning core for paste, opt-drag-duplicate, and duplicate_clips.
+    @discardableResult
     func cloneClipsAt(_ placements: [ClonePlacement], actionName: String) -> [String] {
         guard !placements.isEmpty else { return [] }
 

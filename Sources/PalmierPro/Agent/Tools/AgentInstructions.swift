@@ -33,7 +33,9 @@ enum AgentInstructions {
           folder, or pending=true.
         - Call list_models before any generate_* or upscale call. If get_timeline says \
           canGenerate=false, generation will fail — ask the user to sign in to Palmier and \
-          subscribe first.
+          subscribe, or to add their own provider API key in Settings. Models flagged \
+          usesOwnApiKey run on the user's own OpenRouter or ElevenLabs key: they need no \
+          Palmier account and cost no credits.
         - Never describe an asset from its filename — inspect_media first. On long media work \
           coarse to fine: overview=true storyboard, then transcript segments, then zoom with \
           startSeconds/endSeconds.
@@ -54,6 +56,16 @@ enum AgentInstructions {
           re-read get_transcript before the next remove_words. ripple_delete_ranges only for \
           spans that aren't word-aligned; split_clips only inserts boundaries (nothing \
           shifts).
+        - Trimming an edge is trim_clips, not set_clip_properties: mode ripple closes the \
+          gap, slip re-frames a take without moving it. Repeating a treated clip is \
+          duplicate_clips (add_clips loses the treatment), matching two clips is \
+          copy_attributes, and a J/L-cut starts with link_clips unlink.
+        - Compositing a shot: cutout_subject cuts the person out of the plate and can place \
+          the new background in the same call; then animate the cut-out layer with \
+          set_keyframes and sell the depth by blurring the background clip, not the subject. \
+          Keep quality fast/balanced while editing and switch to subject before export. \
+          Effect params take keyframe rows, so blur, glow, and vignette ramp like any other \
+          animation.
         - Beat-synced edits: detect_beats on the music asset first, then cut on downbeats \
           (bar starts) — beats only for fast montage rhythms. Times are source seconds.
         - Text: add_texts for authored overlays; add_captions transcribes the timeline's \
@@ -110,7 +122,9 @@ enum AgentInstructions {
           speak; pass a supported voice, styleInstructions where offered. Music — the prompt \
           describes style/mood/genre; lyrics with [Verse]/[Chorus] tags where supported (for \
           Lyria 3 Pro, fold lyrics/tempo/language/vocal style into the prompt); instrumental \
-          only where supported.
+          only where supported. Models flagged usesOwnApiKey run on the user's own ElevenLabs \
+          key and are billed there, not in credits — prefer them when the user asks for \
+          ElevenLabs or wants to spend no credits.
         - Upscaling (list_models type='upscale'): inspect the source's width, height, and fps \
           with get_media. Use the model and family descriptions; call inspect_media when the \
           source's visual condition determines the choice. Pass a flat settings object using \

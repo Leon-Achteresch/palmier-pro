@@ -103,9 +103,16 @@ fileprivate struct RippleDeleteRangesInput: DecodableToolArgs {
 }
 
 fileprivate struct SetKeyframesInput: DecodableToolArgs {
-    let clipId: String
-    let property: String
-    static let allowedKeys: Set<String> = ["clipId", "property", "keyframes"]
+    let clipId: String?
+    let clipIds: [String]?
+    let property: String?
+    static let allowedKeys: Set<String> = ["clipId", "clipIds", "property", "keyframes", "tracks"]
+}
+
+fileprivate struct LinkClipsInput: DecodableToolArgs {
+    let clipIds: [String]
+    let action: String
+    static let allowedKeys: Set<String> = ["clipIds", "action"]
 }
 
 /// Partial transform shared by clip and text property tools.
@@ -771,64 +778,116 @@ extension ToolExecutor {
 
     func setKeyframes(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
         let input: SetKeyframesInput = try decodeToolArgs(args, path: "set_keyframes")
-        guard let rows = args["keyframes"] as? [Any] else {
-            throw ToolError("Missing required field 'keyframes' (must be an array)")
-        }
-        guard Self.keyframePropertyNames.contains(input.property) else {
-            throw ToolError("Unknown property '\(input.property)'. Expected one of: \(Self.keyframePropertyNames.sorted().joined(separator: ", "))")
-        }
-        guard editor.findClip(id: input.clipId) != nil else {
-            throw ToolError("Clip not found: \(input.clipId)")
+
+        let clipIds = input.clipIds ?? input.clipId.map { [$0] } ?? []
+        guard !clipIds.isEmpty else { throw ToolError("Provide 'clipId' or a non-empty 'clipIds'.") }
+        guard Set(clipIds).count == clipIds.count else { throw ToolError("clipIds contains duplicates.") }
+        for id in clipIds where editor.findClip(id: id) == nil {
+            throw ToolError("Clip not found: \(id)")
         }
 
-        let applyKeyframes: () -> Void
-        switch input.property {
-        case "volumeDb":
-            let kfs = try Self.parseScalarKeyframes(
-                rows,
-                path: "keyframes",
-                valueName: "decibels",
-                range: VolumeScale.floorDb...VolumeScale.ceilingDb
-            )
-            applyKeyframes = {
-                editor.commitClipProperty(clipId: input.clipId) { $0.volumeTrack = kfs.keyframes.isEmpty ? nil : kfs }
+        var requested: [(property: String, path: String, rows: [Any])] = []
+        if let rawTracks = args["tracks"] {
+            guard args["property"] == nil, args["keyframes"] == nil else {
+                throw ToolError("Use either 'tracks' or 'property'+'keyframes', not both.")
             }
-        case "opacity":
-            let kfs = try Self.parseScalarKeyframes(rows, path: "keyframes", range: 0...1)
-            applyKeyframes = {
-                editor.commitClipProperty(clipId: input.clipId) { $0.opacityTrack = kfs.keyframes.isEmpty ? nil : kfs }
+            guard let dict = rawTracks as? [String: Any], !dict.isEmpty else {
+                throw ToolError("'tracks' must be a non-empty object mapping a property name to its keyframe rows.")
             }
-        case "rotation":
-            let kfs = try Self.parseScalarKeyframes(rows, path: "keyframes")
-            applyKeyframes = {
-                editor.commitClipProperty(clipId: input.clipId) { $0.rotationTrack = kfs.keyframes.isEmpty ? nil : kfs }
+            for (property, rawRows) in dict.sorted(by: { $0.key < $1.key }) {
+                guard let rows = rawRows as? [Any] else {
+                    throw ToolError("tracks.\(property): expected an array of keyframe rows")
+                }
+                requested.append((property, "tracks.\(property)", rows))
             }
-        case "position":
-            let kfs = try Self.parsePairKeyframes(rows, path: "keyframes")
-            applyKeyframes = {
-                editor.commitClipProperty(clipId: input.clipId) { $0.positionTrack = kfs.keyframes.isEmpty ? nil : kfs }
+        } else {
+            guard let property = input.property else {
+                throw ToolError("Missing required field 'property' (or pass 'tracks' to set several properties at once)")
             }
-        case "scale":
-            let kfs = try Self.parsePairKeyframes(rows, path: "keyframes")
-            applyKeyframes = {
-                editor.commitClipProperty(clipId: input.clipId) { $0.scaleTrack = kfs.keyframes.isEmpty ? nil : kfs }
+            guard let rows = args["keyframes"] as? [Any] else {
+                throw ToolError("Missing required field 'keyframes' (must be an array)")
             }
-        case "crop":
-            let kfs = try Self.parseCropKeyframes(rows, path: "keyframes")
-            applyKeyframes = {
-                editor.commitClipProperty(clipId: input.clipId) { $0.cropTrack = kfs.keyframes.isEmpty ? nil : kfs }
-            }
-        default:
-            throw ToolError("Unknown property '\(input.property)'")
+            requested.append((property, "keyframes", rows))
         }
+
+        let writers = try requested.map { try Self.keyframeWriter(property: $0.property, path: $0.path, rows: $0.rows) }
 
         let snapshot = timelineSnapshot(editor)
         editor.undo.perform("Set Keyframes (Agent)") {
-            applyKeyframes()
+            editor.commitClipProperties(clipIds: clipIds, actionName: "Set Keyframes (Agent)") { clip in
+                for write in writers { write(&clip) }
+            }
         }
 
-        let notes = rows.isEmpty ? ["Cleared \(input.property) keyframes."] : []
-        return mutationResult(editor, since: snapshot, touched: [input.clipId], notes: notes)
+        let cleared = requested.filter { $0.rows.isEmpty }.map(\.property)
+        let notes = cleared.isEmpty ? [] : ["Cleared \(cleared.joined(separator: ", ")) keyframes."]
+        return mutationResult(editor, since: snapshot, touched: clipIds, notes: notes)
+    }
+
+    private static func keyframeWriter(property: String, path: String, rows: [Any]) throws -> (inout Clip) -> Void {
+        switch property {
+        case "volumeDb":
+            let kfs = try parseScalarKeyframes(
+                rows,
+                path: path,
+                valueName: "decibels",
+                range: VolumeScale.floorDb...VolumeScale.ceilingDb
+            )
+            return { $0.volumeTrack = kfs.keyframes.isEmpty ? nil : kfs }
+        case "opacity":
+            let kfs = try parseScalarKeyframes(rows, path: path, range: 0...1)
+            return { $0.opacityTrack = kfs.keyframes.isEmpty ? nil : kfs }
+        case "rotation":
+            let kfs = try parseScalarKeyframes(rows, path: path)
+            return { $0.rotationTrack = kfs.keyframes.isEmpty ? nil : kfs }
+        case "position":
+            let kfs = try parsePairKeyframes(rows, path: path)
+            return { $0.positionTrack = kfs.keyframes.isEmpty ? nil : kfs }
+        case "scale":
+            let kfs = try parsePairKeyframes(rows, path: path)
+            return { $0.scaleTrack = kfs.keyframes.isEmpty ? nil : kfs }
+        case "crop":
+            let kfs = try parseCropKeyframes(rows, path: path)
+            return { $0.cropTrack = kfs.keyframes.isEmpty ? nil : kfs }
+        default:
+            throw ToolError("Unknown property '\(property)'. Expected one of: \(keyframePropertyNames.sorted().joined(separator: ", "))")
+        }
+    }
+
+    // MARK: link_clips
+
+    func linkClips(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
+        let input: LinkClipsInput = try decodeToolArgs(args, path: "link_clips")
+        guard input.action == "link" || input.action == "unlink" else {
+            throw ToolError("action must be 'link' or 'unlink' (got '\(input.action)')")
+        }
+        let ids = Set(input.clipIds)
+        guard !ids.isEmpty else { throw ToolError("clipIds is empty.") }
+        for id in input.clipIds where editor.findClip(id: id) == nil {
+            throw ToolError("Clip not found: \(id)")
+        }
+
+        let snapshot = timelineSnapshot(editor)
+        var notes: [String] = []
+        if input.action == "link" {
+            guard ids.count >= 2 else { throw ToolError("Linking needs at least 2 distinct clips.") }
+            if let multicam = input.clipIds.first(where: { editor.clipFor(id: $0)?.multicamGroupId != nil }) {
+                throw ToolError("Clip \(multicam) belongs to a multicam group; its sync is managed by change_cam.")
+            }
+            editor.undo.perform("Link Clips (Agent)") { editor.linkClips(ids: ids) }
+            return mutationResult(editor, since: snapshot, touched: input.clipIds)
+        }
+
+        let expanded = editor.expandToLinkGroup(ids)
+        let linked = expanded.filter { editor.clipFor(id: $0)?.linkGroupId != nil }
+        guard !linked.isEmpty else {
+            return .ok(Self.jsonString(["status": "noop", "reason": "None of these clips are linked."]) ?? "{}")
+        }
+        if linked.count > ids.count {
+            notes.append("Unlinking covered the whole link group: \(linked.sorted().joined(separator: ", ")).")
+        }
+        editor.undo.perform("Unlink Clips (Agent)") { editor.unlinkClips(ids: ids) }
+        return mutationResult(editor, since: snapshot, touched: Array(linked), notes: notes)
     }
 
     // MARK: split_clips
@@ -1002,7 +1061,7 @@ extension ToolExecutor {
         return KeyframeTrack(keyframes: sortAndDedupe(out))
     }
 
-    fileprivate static func parseScalarKeyframes(
+    static func parseScalarKeyframes(
         _ rows: [Any],
         path: String,
         valueName: String = "value",

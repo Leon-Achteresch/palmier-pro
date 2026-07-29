@@ -24,14 +24,31 @@ extension ToolExecutor {
         return match.id
     }
 
-    func generate(_ editor: EditorViewModel, _ args: [String: Any], type: ClipType) throws -> ToolResult {
-        let prompt = args["prompt"] == nil ? "" : try args.requireString("prompt")
+    /// Own-key models bill the user's provider account, so the Palmier plan and credits don't apply.
+    func requireGenerationAccess(modelId: String, paidOnly: Bool) throws {
+        if OwnKeyGeneration.handles(modelId) {
+            guard providerKeyPresent(for: modelId) else {
+                throw ToolError("Model '\(modelId)' runs on the user's own API key. Tell them to add it in Settings.")
+            }
+            return
+        }
         guard AccountService.shared.isSignedIn else {
             throw ToolError("Generation requires signing in to Palmier. Tell the user to sign in.")
         }
         guard AccountService.shared.hasCredits else {
             throw ToolError("Out of credits. Tell the user to add credits or subscribe to keep generating.")
         }
+        try requirePlan(for: modelId, paidOnly: paidOnly)
+    }
+
+    private func providerKeyPresent(for modelId: String) -> Bool {
+        OpenRouterRunner.handles(modelId)
+            ? OpenRouterService.shared.hasKey
+            : ElevenLabsService.shared.hasKey
+    }
+
+    func generate(_ editor: EditorViewModel, _ args: [String: Any], type: ClipType) throws -> ToolResult {
+        let prompt = args["prompt"] == nil ? "" : try args.requireString("prompt")
         switch type {
         case .sequence:
             throw ToolError("Cannot generate a sequence. Sequences are timelines.")
@@ -41,7 +58,7 @@ extension ToolExecutor {
             guard let model = VideoModelConfig.allModels.first(where: { $0.id == modelId }) else {
                 throw ToolError("Unknown model '\(modelId)'. Available: \(VideoModelConfig.allModels.map(\.id).joined(separator: ", "))")
             }
-            try requirePlan(for: model.id, paidOnly: model.paidOnly)
+            try requireGenerationAccess(modelId: model.id, paidOnly: model.paidOnly)
             return model.requiresSourceVideo
                 ? try generateVideoEdit(editor, args, prompt: prompt, model: model)
                 : try generateVideoText(editor, args, prompt: prompt, model: model)
@@ -216,7 +233,7 @@ extension ToolExecutor {
         guard let model = ImageModelConfig.allModels.first(where: { $0.id == modelId }) else {
             throw ToolError("Unknown model '\(modelId)'. Available: \(ImageModelConfig.allModels.map(\.id).joined(separator: ", "))")
         }
-        try requirePlan(for: model.id, paidOnly: model.paidOnly)
+        try requireGenerationAccess(modelId: model.id, paidOnly: model.paidOnly)
         let aspectRatio = args.string("aspectRatio") ?? model.aspectRatios.first ?? ""
         let resolution = args.string("resolution") ?? model.resolutions?.first
         let quality = args.string("quality") ?? model.qualities?.last
@@ -255,18 +272,13 @@ extension ToolExecutor {
     }
 
     func generateAudio(_ editor: EditorViewModel, _ args: [String: Any]) async throws -> ToolResult {
-        guard AccountService.shared.isSignedIn else {
-            throw ToolError("Generation requires signing in to Palmier. Tell the user to sign in.")
-        }
-        guard AccountService.shared.hasCredits else {
-            throw ToolError("Out of credits. Tell the user to add credits or subscribe to keep generating.")
-        }
         let modelId = try args.string("model") ?? defaultModelId(
             AudioModelConfig.allModels.map { (id: $0.id, paidOnly: $0.paidOnly) }, kind: "audio")
         guard let model = AudioModelConfig.allModels.first(where: { $0.id == modelId }) else {
             throw ToolError("Unknown model '\(modelId)'. Available: \(AudioModelConfig.allModels.map(\.id).joined(separator: ", "))")
         }
-        try requirePlan(for: model.id, paidOnly: model.paidOnly)
+        let usesOwnKey = OwnKeyGeneration.handles(model.id)
+        try requireGenerationAccess(modelId: model.id, paidOnly: model.paidOnly)
 
         let prompt = (args.string("prompt") ?? "").trimmingCharacters(in: .whitespaces)
         let inputAssets = AudioGenerationSubmission.InputAssets(
@@ -307,7 +319,7 @@ extension ToolExecutor {
             guard acceptsVideo else {
                 throw ToolError("Model '\(model.id)' does not accept a video input (see list_models 'inputs').")
             }
-            guard !model.usesSourceURL else {
+            guard !model.usesSourceURL, !usesOwnKey else {
                 throw ToolError("Use sourceMediaRef for \(model.displayName).")
             }
             guard start >= 0, end > start else {
@@ -588,6 +600,8 @@ extension ToolExecutor {
             "supportsPrompt": m.supportsPrompt,
         ]
         if includeType { info["type"] = "video" }
+        if let provider = m.entry.providerName { info["provider"] = provider }
+        if OwnKeyGeneration.handles(m.id) { info["usesOwnApiKey"] = true }
         if let r = m.resolutions { info["resolutions"] = r }
         if m.supportsReferences {
             if m.maxReferenceImages > 0 { info["maxReferenceImages"] = m.maxReferenceImages }
@@ -613,6 +627,8 @@ extension ToolExecutor {
             "supportsImageReference": m.supportsImageReference,
         ]
         if includeType { info["type"] = "image" }
+        if let provider = m.entry.providerName { info["provider"] = provider }
+        if OwnKeyGeneration.handles(m.id) { info["usesOwnApiKey"] = true }
         if let r = m.resolutions { info["resolutions"] = r }
         if let q = m.qualities { info["qualities"] = q }
         return info
@@ -630,6 +646,8 @@ extension ToolExecutor {
             "supportsInstrumental": m.supportsInstrumental,
             "supportsStyleInstructions": m.supportsStyleInstructions,
         ]
+        if let provider = m.entry.providerName { info["provider"] = provider }
+        if OwnKeyGeneration.handles(m.id) { info["usesOwnApiKey"] = true }
         if let voices = m.voices {
             info["voicesSample"] = Array(voices.prefix(3))
             info["voiceCount"] = voices.count

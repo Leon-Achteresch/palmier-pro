@@ -98,6 +98,15 @@ extension InspectorView {
         ]
     }
 
+    private var subjectKeyControls: [EffectControl] {
+        [
+            EffectControl(effectId: "key.subject", paramKey: "quality", label: "Quality"),
+            EffectControl(effectId: "key.subject", paramKey: "feather", label: "Feather"),
+            EffectControl(effectId: "key.subject", paramKey: "expand", label: "Expand"),
+            EffectControl(effectId: "key.subject", paramKey: "invert", label: "Invert"),
+        ]
+    }
+
     private var grainControls: [EffectControl] {
         [
             EffectControl(effectId: "stylize.grain", paramKey: "amount", label: "Amount"),
@@ -119,7 +128,7 @@ extension InspectorView {
     }
 
     private var effectsEffectIds: Set<String> {
-        Set((detailControls + blurControls + motionBlurControls + vignetteControls + grainControls + glowControls + chromaKeyControls).map(\.effectId))
+        Set((detailControls + blurControls + motionBlurControls + vignetteControls + grainControls + glowControls + chromaKeyControls + subjectKeyControls).map(\.effectId))
             .union(["stylize.invert"])
     }
 
@@ -151,6 +160,7 @@ extension InspectorView {
                 adjustSubgroup(title: "Film Grain", controls: grainControls, clips: clips)
                 adjustSubgroup(title: "Glow", controls: glowControls, clips: clips)
                 adjustSubgroup(title: "Chroma Key", controls: chromaKeyControls, clips: clips)
+                adjustSubgroup(title: "Subject Key", controls: subjectKeyControls, clips: clips)
                 adjustToggleRow(
                     title: "Invert Colors",
                     isOn: Binding(

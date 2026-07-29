@@ -38,4 +38,29 @@ extension EditorViewModel {
     func clearTimelineRange() {
         selectedTimelineRange = nil
     }
+
+    /// Removes the selected range on every track, either lifting it (leaving a gap) or rippling the rest left.
+    func deleteSelectedTimelineRange(ripple: Bool) {
+        guard let selection = validSelectedTimelineRange else { return }
+        let range = FrameRange(start: selection.startFrame, end: selection.endFrame)
+        guard timeline.tracks.contains(where: { track in
+            track.clips.contains { $0.startFrame < range.end && $0.endFrame > range.start }
+        }) else { return }
+
+        withTimelineSwap(actionName: ripple ? "Ripple Delete Range" : "Delete Range") {
+            for trackIndex in timeline.tracks.indices {
+                clearRegion(trackIndex: trackIndex, start: range.start, end: range.end, prune: false)
+            }
+            for trackIndex in timeline.tracks.indices {
+                if ripple {
+                    applyShifts(RippleEngine.computeRippleShiftsForRanges(
+                        clips: timeline.tracks[trackIndex].clips,
+                        removedRanges: [range]
+                    ))
+                }
+                sortClips(trackIndex: trackIndex)
+            }
+        }
+        if ripple { clearTimelineRange() }
+    }
 }

@@ -38,7 +38,12 @@ extension ToolExecutor {
         return .ok(json)
     }
 
-    static var canGenerate: Bool { AccountService.shared.isSignedIn && AccountService.shared.hasCredits }
+    @MainActor
+    static var canGenerate: Bool {
+        (AccountService.shared.isSignedIn && AccountService.shared.hasCredits)
+            || OpenRouterService.shared.hasKey
+            || ElevenLabsService.shared.hasKey
+    }
 
     static func rawTimelineDict(_ timeline: Timeline) -> [String: Any]? {
         try? JSONSerialization.jsonObject(with: JSONEncoder().encode(timeline)) as? [String: Any]

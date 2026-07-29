@@ -1056,6 +1056,14 @@ final class TimelineView: NSView {
             pasteItem.representedObject = ["trackIndex": hit.trackIndex, "frame": clickFrame] as [String: Any]
             timelineItems.append(pasteItem)
         }
+        let deleteItem = NSMenuItem(title: "Delete", action: #selector(performDeleteClips(_:)), keyEquivalent: "")
+        deleteItem.target = self
+        timelineItems.append(deleteItem)
+
+        let rippleDeleteItem = NSMenuItem(title: "Ripple Delete", action: #selector(performRippleDeleteClips(_:)), keyEquivalent: "")
+        rippleDeleteItem.target = self
+        timelineItems.append(rippleDeleteItem)
+
         if editor.canLinkSelected {
             let item = NSMenuItem(title: "Link", action: #selector(performLink(_:)), keyEquivalent: "")
             item.target = self
@@ -1219,6 +1227,14 @@ final class TimelineView: NSView {
             menu.addItem(item)
         }
 
+        let deleteItem = NSMenuItem(title: "Delete Range", action: #selector(performDeleteTimelineRange(_:)), keyEquivalent: "")
+        deleteItem.target = self
+        menu.addItem(deleteItem)
+
+        let rippleDeleteItem = NSMenuItem(title: "Ripple Delete Range", action: #selector(performRippleDeleteTimelineRange(_:)), keyEquivalent: "")
+        rippleDeleteItem.target = self
+        menu.addItem(rippleDeleteItem)
+
         addClearRangeItem(to: menu)
     }
 
@@ -1316,6 +1332,26 @@ final class TimelineView: NSView {
 
     @objc private func performSaveTimelineRangeAsMedia(_ sender: Any?) {
         editor.saveTimelineRangeAsMedia()
+    }
+
+    @objc private func performDeleteClips(_ sender: Any?) {
+        editor.deleteSelectedClips()
+        needsDisplay = true
+    }
+
+    @objc private func performRippleDeleteClips(_ sender: Any?) {
+        editor.rippleDeleteSelectedClips()
+        needsDisplay = true
+    }
+
+    @objc private func performDeleteTimelineRange(_ sender: Any?) {
+        editor.deleteSelectedTimelineRange(ripple: false)
+        needsDisplay = true
+    }
+
+    @objc private func performRippleDeleteTimelineRange(_ sender: Any?) {
+        editor.deleteSelectedTimelineRange(ripple: true)
+        needsDisplay = true
     }
 
     @objc private func performClearTimelineRange(_ sender: Any?) {

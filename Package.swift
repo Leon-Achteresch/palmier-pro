@@ -11,6 +11,7 @@ let package = Package(
     traits: [
         .trait(name: "BundledSpeech", description: "Include on-device speech models and MLX."),
         .trait(name: "ProductionTelemetry", description: "Include Sentry and PostHog telemetry."),
+        .trait(name: "HotReload", description: "Link interposable so InjectionIII can hot-reload SwiftUI."),
     ],
     dependencies: [
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0"),
@@ -24,6 +25,8 @@ let package = Package(
         .package(url: "https://github.com/ml-explore/mlx-swift", exact: "0.31.5"),
         .package(url: "https://github.com/airbnb/lottie-ios", from: "4.6.1"),
         .package(url: "https://github.com/soniqo/speech-swift", exact: "0.0.21"),
+        .package(url: "https://github.com/krzysztofzablocki/Inject", from: "1.5.2"),
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.15.0"),
     ],
     targets: [
         .executableTarget(
@@ -46,6 +49,7 @@ let package = Package(
                 .product(name: "ConvexMobile", package: "convex-swift"),
                 .product(name: "Tokenizers", package: "swift-transformers"),
                 .product(name: "Lottie", package: "lottie-ios"),
+                .product(name: "SwiftTerm", package: "SwiftTerm"),
                 .product(
                     name: "MLX",
                     package: "mlx-swift",
@@ -61,6 +65,7 @@ let package = Package(
                     package: "speech-swift",
                     condition: .when(traits: ["BundledSpeech"])
                 ),
+                .product(name: "Inject", package: "Inject"),
             ],
             path: "Sources/PalmierPro",
             exclude: [
@@ -80,6 +85,10 @@ let package = Package(
             swiftSettings: [
                 .define("BUNDLED_SPEECH", .when(traits: ["BundledSpeech"])),
                 .define("PRODUCTION_TELEMETRY", .when(traits: ["ProductionTelemetry"])),
+            ],
+            linkerSettings: [
+                // Interposing breaks the test bundle's Rust symbols, so keep it opt-in.
+                .unsafeFlags(["-Xlinker", "-interposable"], .when(configuration: .debug, traits: ["HotReload"])),
             ],
             plugins: ["MetalCIKernelPlugin"]
         ),

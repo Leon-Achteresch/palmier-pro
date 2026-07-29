@@ -147,8 +147,8 @@ struct GenerationView: View {
                 catalogLoadingView
             }
         }
-        .onChange(of: upscaleModels.isEmpty) { _, isEmpty in
-            if isEmpty && selectedType == .upscale { selectedType = .video }
+        .onChange(of: availableGenerationTypes) { _, types in
+            if !types.contains(selectedType), let fallback = types.first { selectedType = fallback }
         }
     }
 

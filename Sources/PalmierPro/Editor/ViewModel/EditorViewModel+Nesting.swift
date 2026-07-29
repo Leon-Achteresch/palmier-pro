@@ -52,13 +52,20 @@ extension EditorViewModel {
     }
 
     func nestSelectedClips() {
-        let ids = selectedClipIds
+        guard let childId = nestClips(ids: selectedClipIds) else { return }
+        openTimelineIds.append(childId)
+        timelineTabRenameRequest = childId
+    }
+
+    /// Moves `ids` into a new child timeline and leaves linked carrier clips in their place.
+    @discardableResult
+    func nestClips(ids: Set<String>) -> String? {
         var lanes: [(index: Int, type: ClipType, clips: [Clip])] = []
         for (i, track) in timeline.tracks.enumerated() {
             let picked = track.clips.filter { ids.contains($0.id) }
             if !picked.isEmpty { lanes.append((i, track.type, picked)) }
         }
-        guard !lanes.isEmpty else { return }
+        guard !lanes.isEmpty else { return nil }
 
         let all = lanes.flatMap(\.clips)
         let start = all.map(\.startFrame).min()!
@@ -104,9 +111,8 @@ extension EditorViewModel {
                 pruneEmptyTracks()
                 selectedClipIds = carriers
             }
-            openTimelineIds.append(child.id)
-            timelineTabRenameRequest = child.id
         }
+        return child.id
     }
 
     /// Replaces a nest clip (and its linked audio) with the child's clips remapped in place

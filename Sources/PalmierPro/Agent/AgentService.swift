@@ -11,7 +11,7 @@ final class AgentService {
     init() {
         reloadAPIKey()
         apiKeyObserver = NotificationCenter.default.addObserver(
-            forName: .anthropicAPIKeyChanged,
+            forName: .openRouterAPIKeyChanged,
             object: nil,
             queue: .main
         ) { [weak self] _ in
@@ -24,7 +24,7 @@ final class AgentService {
     private func reloadAPIKey() {
         Task { [weak self] in
             let key = await Task.detached(priority: .utility) {
-                AnthropicKeychain.load() ?? ""
+                OpenRouterKeychain.load() ?? ""
             }.value
             self?.apiKey = key
         }
@@ -38,35 +38,24 @@ final class AgentService {
 
     var hasApiKey: Bool { !apiKey.isEmpty }
 
-    var canStream: Bool {
-        if hasApiKey { return true }
-        let account = AccountService.shared
-        return account.isSignedIn && account.hasCredits
-    }
+    var canStream: Bool { hasApiKey }
 
-    var availableModels: [AnthropicModel] {
-        if hasApiKey { return AnthropicModel.allCases }
-        return [.sonnet5]
-    }
+    var availableModels: [AgentModel] { AgentModel.allCases }
 
     private func selectClient() -> (any AgentClient)? {
-        let chosen = effectiveModel
-        if hasApiKey { return AnthropicClient(apiKey: apiKey, model: chosen) }
-        if AccountService.shared.isSignedIn {
-            return PalmierClient(model: chosen)
-        }
-        return nil
+        guard hasApiKey else { return nil }
+        return OpenRouterClient(apiKey: apiKey, model: effectiveModel)
     }
 
-    var effectiveModel: AnthropicModel {
+    var effectiveModel: AgentModel {
         let available = availableModels
         if available.contains(model) { return model }
         return available.first ?? .sonnet5
     }
 
-    var model: AnthropicModel = {
+    var model: AgentModel = {
         if let raw = UserDefaults.standard.string(forKey: "agentModel"),
-           let m = AnthropicModel(rawValue: raw) {
+           let m = AgentModel(rawValue: raw) {
             return m
         }
         return .sonnet5
@@ -78,7 +67,7 @@ final class AgentService {
     var currentSessionId: UUID?
     var messages: [AgentMessage] = []
     var isStreaming: Bool = false
-    var streamError: PalmierClientError?
+    var streamError: AgentStreamError?
     var onSessionsChanged: (@MainActor () -> Void)?
 
     var draft: String = ""
@@ -298,7 +287,7 @@ final class AgentService {
 
     func send(text: String, mentions: [AgentMention]) {
         guard canStream else {
-            streamError = .upstream("Sign in to a paid plan or add an Anthropic API key to start.")
+            streamError = .missingKey
             return
         }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -354,7 +343,7 @@ final class AgentService {
 
     private func runLoop() async {
         guard let client = selectClient() else {
-            streamError = .upstream("No backend available.")
+            streamError = .missingKey
             return
         }
         await SkillStore.shared.reloadInBackground()
@@ -398,7 +387,7 @@ final class AgentService {
             } catch is CancellationError {
                 dropEmptyAssistantTurn(id: assistantID)
                 break loop
-            } catch let err as PalmierClientError {
+            } catch let err as AgentStreamError {
                 dropEmptyAssistantTurn(id: assistantID)
                 streamError = err
                 break loop

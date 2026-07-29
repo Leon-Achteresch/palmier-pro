@@ -54,3 +54,54 @@ struct EditorTimelineRangeTests {
         #expect(editor.validSelectedTimelineRange == nil)
     }
 }
+
+@Suite("EditorViewModel — delete timeline range")
+@MainActor
+struct DeleteTimelineRangeTests {
+
+    private func editor() -> EditorViewModel {
+        let e = EditorViewModel()
+        e.timeline = Fixtures.timeline(tracks: [
+            Fixtures.videoTrack(clips: [Fixtures.clip(id: "v1", start: 0, duration: 100)]),
+            Fixtures.audioTrack(clips: [Fixtures.clip(id: "a1", start: 0, duration: 100)])
+        ])
+        return e
+    }
+
+    private func spans(_ track: Track) -> [[Int]] {
+        track.clips.sorted { $0.startFrame < $1.startFrame }.map { [$0.startFrame, $0.endFrame] }
+    }
+
+    @Test func liftLeavesGapOnEveryTrack() {
+        let e = editor()
+        e.setTimelineRange(startFrame: 40, endFrame: 50)
+
+        e.deleteSelectedTimelineRange(ripple: false)
+
+        #expect(spans(e.timeline.tracks[0]) == [[0, 40], [50, 100]])
+        #expect(spans(e.timeline.tracks[1]) == [[0, 40], [50, 100]])
+        #expect(e.validSelectedTimelineRange != nil)
+    }
+
+    @Test func rippleClosesGapAndClearsRange() {
+        let e = editor()
+        e.setTimelineRange(startFrame: 40, endFrame: 50)
+
+        e.deleteSelectedTimelineRange(ripple: true)
+
+        #expect(spans(e.timeline.tracks[0]) == [[0, 40], [40, 90]])
+        #expect(spans(e.timeline.tracks[1]) == [[0, 40], [40, 90]])
+        #expect(e.selectedTimelineRange == nil)
+    }
+
+    @Test func rangeWithoutClipsIsNoOp() {
+        let e = editor()
+        let before = e.timeline
+        e.setTimelineRange(startFrame: 200, endFrame: 300)
+
+        e.deleteSelectedTimelineRange(ripple: true)
+
+        #expect(e.timeline == before)
+        #expect(e.selectedTimelineRange != nil)
+    }
+}
