@@ -3,6 +3,8 @@ import UniformTypeIdentifiers
 
 struct MediaTab: View {
     @Environment(EditorViewModel.self) var editor
+    @Bindable private var openRouter = OpenRouterService.shared
+    @Bindable private var elevenLabs = ElevenLabsService.shared
 
     // Toolbar state
     @State var sortMode: SortMode = .dateAdded
@@ -294,6 +296,8 @@ struct MediaTab: View {
 
     private var actionsRow: some View {
         let showGenerate = !AccountService.shared.isMisconfigured
+            || openRouter.hasKey
+            || elevenLabs.hasKey
         return HStack(spacing: AppTheme.Spacing.xs) {
             toolbarButton(title: "Import", systemImage: "plus", action: importMedia)
                 .tourAnchor(.importButton)
@@ -621,7 +625,8 @@ struct MediaTab: View {
     }
 
     private var overflowMenu: some View {
-        let canOrganize = !AccountService.shared.isMisconfigured && !editor.mediaAssets.isEmpty
+        let canOrganize = (openRouter.hasKey || !AccountService.shared.isMisconfigured)
+            && !editor.mediaAssets.isEmpty
         return toolbarMenuIcon(systemName: "ellipsis") {
             Button(action: createNewFolderInCurrent) {
                 Label("New Folder", systemImage: "folder.badge.plus")

@@ -45,7 +45,8 @@ enum OpenRouterCatalog {
                 "aspectRatios": model.aspectRatios,
                 "supportsFirstFrame": model.supportsFirstFrame,
                 "supportsLastFrame": model.supportsLastFrame,
-                "maxReferenceImages": 0,
+                // ponytail: /videos/models advertises no input_references capability, so allow a few and let OpenRouter reject unsupported models
+                "maxReferenceImages": 4,
                 "maxReferenceVideos": 0,
                 "maxReferenceAudios": 0,
                 "framesAndReferencesExclusive": false,

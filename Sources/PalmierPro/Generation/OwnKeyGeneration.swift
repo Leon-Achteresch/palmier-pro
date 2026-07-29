@@ -6,6 +6,12 @@ enum OwnKeyGeneration {
         ElevenLabsRunner.handles(modelId) || OpenRouterRunner.handles(modelId)
     }
 
+    /// OpenRouter and/or ElevenLabs key present — AI UI works without Palmier backend.
+    @MainActor
+    static var keyConfigured: Bool {
+        OpenRouterService.shared.hasKey || ElevenLabsService.shared.hasKey
+    }
+
     @MainActor
     static func run(
         modelId: String,

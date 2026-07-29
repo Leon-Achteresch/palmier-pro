@@ -107,12 +107,14 @@ final class ModelCatalog {
     /// Models the user runs on their own ElevenLabs key; they live alongside the backend catalog.
     func setElevenLabsEntries(_ entries: [CatalogEntry]) {
         elevenLabsEntries = entries
+        if !entries.isEmpty { isLoaded = true }
         rebuild()
     }
 
     /// Image and video models the user runs on their own OpenRouter key.
     func setOpenRouterEntries(_ entries: [CatalogEntry]) {
         openRouterEntries = entries
+        if !entries.isEmpty { isLoaded = true }
         rebuild()
     }
 

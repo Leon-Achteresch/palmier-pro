@@ -6,6 +6,8 @@ struct AIEditTab: View {
     let clipId: String?
     @Environment(EditorViewModel.self) private var editor
     @Bindable private var account = AccountService.shared
+    @Bindable private var openRouter = OpenRouterService.shared
+    @Bindable private var elevenLabs = ElevenLabsService.shared
     @State private var replaceClipSource: Bool = false
     @State private var useTrimmedClip: Bool = true
     @State private var placeAudioOnTimeline: Bool = true
@@ -426,7 +428,8 @@ struct AIEditTab: View {
     private var shouldReplace: Bool { replaceClipSource && clipId != nil }
 
     private var aiDisabledReason: String? {
-        if account.isMisconfigured { return "AI is unavailable" }
+        if account.aiAllowed || openRouter.hasKey || elevenLabs.hasKey { return nil }
+        if account.isMisconfigured { return "Add an OpenRouter API key in Settings › Agent" }
         if !account.isSignedIn { return "Sign in to use AI" }
         return nil
     }

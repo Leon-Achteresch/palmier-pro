@@ -4,6 +4,8 @@ import SwiftUI
 struct AIEditMenu: View {
     let asset: MediaAsset
     @Environment(EditorViewModel.self) private var editor
+    @Bindable private var openRouter = OpenRouterService.shared
+    @Bindable private var elevenLabs = ElevenLabsService.shared
 
     var body: some View {
         if availableActions.isEmpty && availableAudioTransforms.isEmpty {
@@ -62,8 +64,7 @@ struct AIEditMenu: View {
     }
 
     private var aiAllowed: Bool {
-        let account = AccountService.shared
-        return account.isSignedIn && !account.isMisconfigured
+        AccountService.shared.aiAllowed || openRouter.hasKey || elevenLabs.hasKey
     }
 
     private var availableActions: [EditAction] {
