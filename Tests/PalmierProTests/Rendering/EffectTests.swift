@@ -192,6 +192,7 @@ struct EffectRenderingTests {
             "stylize.invert": [:],
             "blur.noiseReduction": ["amount": 1],
             "blur.motion": ["radius": 20, "angle": 0],
+            "mockup.iphone17": ["orbitYaw": 30, "orbitPitch": 15],
         ]
 
         func frame(_ effects: [Effect]?) async throws -> [UInt8] {

@@ -71,6 +71,7 @@ final class EditorViewModel {
     var speakerRegistry: [SpeakerRegistryEntry] = []
     var multicamGroups: [MulticamSource] = []
     var linkedContextPath: String?
+    var enabledAddons: Set<String> = []
     var speakerAssignments: [String: [String: Int]] = [:]
     var speakerIdentifyPhase: String?
     var speakerIdentifyInFlight: Bool { speakerIdentifyPhase != nil }

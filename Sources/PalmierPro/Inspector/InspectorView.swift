@@ -155,12 +155,43 @@ struct InspectorView: View {
                     menuMetadataRow(label: "Aspect Ratio", value: CanvasAspectRatio.displayLabel(width: editor.timeline.width, height: editor.timeline.height)) { aspectMenuItems }
                 }
 
+                metadataSection(title: "Addons") {
+                    addonToggleRow(
+                        label: "Device Mockups",
+                        detail: "3D device scenes with an orbitable camera",
+                        addonId: ProjectAddon.deviceMockups
+                    )
+                }
+
                 metadataSection(title: "Context") {
                     linkedContextRow
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private func addonToggleRow(label: String, detail: String, addonId: String) -> some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.xxs) {
+                Text(label)
+                    .font(.system(size: AppTheme.FontSize.xs))
+                    .foregroundStyle(AppTheme.Text.secondaryColor)
+                Text(detail)
+                    .font(.system(size: AppTheme.FontSize.xxs))
+                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+            }
+            Spacer()
+            Toggle("", isOn: Binding(
+                get: { editor.enabledAddons.contains(addonId) },
+                set: { editor.setAddonEnabled(addonId, $0) }
+            ))
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .labelsHidden()
+            .accessibilityLabel("Enable \(label)")
+        }
+        .frame(minHeight: AppTheme.IconSize.md)
     }
 
     private var linkedContextRow: some View {

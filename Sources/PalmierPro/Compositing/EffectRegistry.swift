@@ -77,7 +77,7 @@ struct EffectDescriptor: Identifiable, Sendable {
 
 enum EffectRegistry {
 
-    static let all: [EffectDescriptor] = color + wheels + hueCurves + lut + curves + detail + blur + stylize + key
+    static let all: [EffectDescriptor] = color + wheels + hueCurves + lut + curves + detail + blur + stylize + key + mockup
 
     private static let color: [EffectDescriptor] = [
         EffectDescriptor(
@@ -369,6 +369,28 @@ enum EffectRegistry {
         ),
     ]
 
+    private static let mockup: [EffectDescriptor] = [
+        EffectDescriptor(
+            id: "mockup.iphone17", displayName: "iPhone 17 Mockup", category: "Mockup",
+            params: [
+                EffectParamSpec(key: "orbitYaw", label: "Orbit", range: -180...180, defaultValue: 0, unit: "°"),
+                EffectParamSpec(key: "orbitPitch", label: "Tilt", range: -89...89, defaultValue: 0, unit: "°"),
+                EffectParamSpec(key: "distance", label: "Distance", range: 0.5...3, defaultValue: 1.15, unit: ""),
+                EffectParamSpec(key: "panX", label: "Pan X", range: -1...1, defaultValue: 0, unit: ""),
+                EffectParamSpec(key: "panY", label: "Pan Y", range: -1...1, defaultValue: 0, unit: ""),
+                EffectParamSpec(key: "fov", label: "Focal Angle", range: 15...90, defaultValue: 40, unit: "°"),
+            ],
+            apply: { image, p, extent in
+                let pose = MockupRenderer.CameraPose(
+                    orbitYaw: p.value("orbitYaw"), orbitPitch: p.value("orbitPitch"),
+                    distance: p.value("distance"), panX: p.value("panX"),
+                    panY: p.value("panY"), fov: p.value("fov")
+                )
+                return MockupRenderer.shared.render(screen: image, pose: pose, extent: extent) ?? image
+            }
+        ),
+    ]
+
     static let byId: [String: EffectDescriptor] = Dictionary(
         uniqueKeysWithValues: all.map { ($0.id, $0) }
     )
@@ -381,7 +403,7 @@ enum EffectRegistry {
         "color.temperature", "color.vibrance", "color.saturation", "color.wheels", "color.curves",
         "color.hueCurves", "color.lut", "detail.clarity", "key.chroma", "key.subject", "blur.gaussian", "blur.sharpen",
         "blur.noiseReduction", "blur.motion", "stylize.invert", "stylize.grain", "stylize.vignette",
-        "stylize.glow",
+        "stylize.glow", "mockup.iphone17",
     ]
 
     static func insertIndex(_ effects: [Effect], for id: String) -> Int {

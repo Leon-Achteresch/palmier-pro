@@ -53,8 +53,60 @@ final class ScrubAudioEngine {
         qos: .userInitiated
     )
 
+    nonisolated private static let decodeQueue = DispatchQueue(
+        label: "io.palmier.pro.scrub-decode",
+        qos: .userInitiated
+    )
+
     private struct ReaderBox: @unchecked Sendable {
         let reader: AVAssetReader
+    }
+
+    private struct ReaderSetupBox: @unchecked Sendable {
+        let reader: AVAssetReader
+        let output: AVAssetReaderAudioMixOutput
+    }
+
+    private struct TracksBox: @unchecked Sendable {
+        let tracks: [AVAssetTrack]
+    }
+
+    private struct OutputBox: @unchecked Sendable {
+        let output: AVAssetReaderAudioMixOutput
+    }
+
+    private struct SampleBufferBox: @unchecked Sendable {
+        let buffer: CMSampleBuffer?
+    }
+
+    nonisolated private static func makeReaderOffPool(
+        source: Source,
+        tracks: [AVAssetTrack],
+        startSample: Int64,
+        frameCount: Int64
+    ) async -> (AVAssetReader, AVAssetReaderAudioMixOutput)? {
+        let tracksBox = TracksBox(tracks: tracks)
+        let setup: ReaderSetupBox? = await withCheckedContinuation { continuation in
+            decodeQueue.async {
+                let pair = makeReader(
+                    source: source, tracks: tracksBox.tracks,
+                    startSample: startSample, frameCount: frameCount
+                )
+                continuation.resume(returning: pair.map { ReaderSetupBox(reader: $0.0, output: $0.1) })
+            }
+        }
+        guard let setup else { return nil }
+        return (setup.reader, setup.output)
+    }
+
+    nonisolated private static func nextSampleBuffer(_ output: AVAssetReaderAudioMixOutput) async -> CMSampleBuffer? {
+        let box = OutputBox(output: output)
+        let sample: SampleBufferBox = await withCheckedContinuation { continuation in
+            decodeQueue.async {
+                continuation.resume(returning: SampleBufferBox(buffer: box.output.copyNextSampleBuffer()))
+            }
+        }
+        return sample.buffer
     }
 
     nonisolated private static func finishReading(_ reader: AVAssetReader) {
@@ -497,13 +549,13 @@ final class ScrubAudioEngine {
             return PCMWindow(startSample: startSample, left: leftSamples, right: rightSamples, hasAudioTracks: false)
         }
 
-        guard let (reader, output) = makeReader(
+        guard let (reader, output) = await makeReaderOffPool(
             source: source, tracks: tracks, startSample: startSample, frameCount: Int64(frameCount)
         ) else { return nil }
         defer { finishReading(reader) }
 
         var runningOffset = 0
-        while let sampleBuffer = output.copyNextSampleBuffer() {
+        while let sampleBuffer = await nextSampleBuffer(output) {
             if Task.isCancelled { return nil }
             guard let description = CMSampleBufferGetFormatDescription(sampleBuffer),
                   let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(description),
@@ -557,7 +609,7 @@ final class ScrubAudioEngine {
         emit: @MainActor (PCMWindow) async -> Bool
     ) async {
         guard let tracks = try? await source.asset.loadTracks(withMediaType: .audio), !tracks.isEmpty,
-              let (reader, output) = makeReader(
+              let (reader, output) = await makeReaderOffPool(
                 source: source, tracks: tracks, startSample: from, frameCount: to - from
               ) else { return }
         defer { finishReading(reader) }
@@ -585,7 +637,7 @@ final class ScrubAudioEngine {
             return true
         }
 
-        while let sampleBuffer = output.copyNextSampleBuffer() {
+        while let sampleBuffer = await nextSampleBuffer(output) {
             if Task.isCancelled { return }
             guard let description = CMSampleBufferGetFormatDescription(sampleBuffer),
                   let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(description),

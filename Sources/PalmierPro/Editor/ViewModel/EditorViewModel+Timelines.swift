@@ -24,6 +24,7 @@ extension EditorViewModel {
         speakerRegistry = file.speakers ?? []
         multicamGroups = file.multicamGroups ?? []
         linkedContextPath = file.linkedContextPath
+        enabledAddons = Set(file.enabledAddons ?? [])
         syncSpeakerColors()
         if !openTimelineIds.contains(activeTimelineId) {
             openTimelineIds.append(activeTimelineId)
@@ -42,8 +43,17 @@ extension EditorViewModel {
             viewStates: liveViewStates.filter { ids.contains($0.key) },
             speakers: speakerRegistry.isEmpty ? nil : speakerRegistry,
             multicamGroups: savedMulticamGroups(),
-            linkedContextPath: linkedContextPath
+            linkedContextPath: linkedContextPath,
+            enabledAddons: enabledAddons.isEmpty ? nil : enabledAddons.sorted()
         )
+    }
+
+    func setAddonEnabled(_ id: String, _ enabled: Bool) {
+        guard enabledAddons.contains(id) != enabled else { return }
+        if enabled { enabledAddons.insert(id) } else { enabledAddons.remove(id) }
+        undo.register(enabled ? "Enable Addon" : "Disable Addon", withTarget: self) { vm in
+            vm.setAddonEnabled(id, !enabled)
+        }
     }
 
     func setLinkedContextPath(_ path: String?) {

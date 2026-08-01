@@ -1,5 +1,9 @@
 import Foundation
 
+enum ProjectAddon {
+    static let deviceMockups = "deviceMockups"
+}
+
 /// Root of project.json. Legacy projects stored a bare Timeline; decode falls back and wraps.
 struct ProjectFile: Codable, Sendable {
     var timelines: [Timeline]
@@ -9,6 +13,7 @@ struct ProjectFile: Codable, Sendable {
     var speakers: [SpeakerRegistryEntry]?
     var multicamGroups: [MulticamSource]?
     var linkedContextPath: String?
+    var enabledAddons: [String]?
 
     static func decode(_ data: Data) throws -> ProjectFile {
         let decoder = JSONDecoder()

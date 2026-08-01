@@ -1257,7 +1257,8 @@ enum ToolDefinitions {
                 let params = d.params.map { p in
                     "\(p.key) (\(n(p.range.lowerBound))…\(n(p.range.upperBound))\(p.unit), default \(n(p.defaultValue)))"
                 }.joined(separator: ", ")
-                return "• \(d.id) — \(d.displayName): \(params.isEmpty ? "no params" : params)"
+                let addonNote = d.id.hasPrefix("mockup.") ? " [requires the Device Mockups project addon]" : ""
+                return "• \(d.id) — \(d.displayName): \(params.isEmpty ? "no params" : params)\(addonNote)"
             }
             .joined(separator: "\n")
     }

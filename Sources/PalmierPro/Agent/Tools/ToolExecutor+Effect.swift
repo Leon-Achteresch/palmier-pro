@@ -39,6 +39,9 @@ extension ToolExecutor {
             guard !e.type.hasPrefix("color.") else {
                 throw ToolError("'\(e.type)' is a color grade — use apply_color, not apply_effect.")
             }
+            guard !e.type.hasPrefix("mockup.") || editor.enabledAddons.contains(ProjectAddon.deviceMockups) else {
+                throw ToolError("'\(e.type)' requires the Device Mockups addon, which is disabled for this project. Ask the user to enable it in the project inspector under Addons.")
+            }
             let path = "apply_effect.effects[\(i)]"
             guard let rawParams = (rawEntries.count > i ? rawEntries[i] as? [String: Any] : nil)?["params"] else {
                 writes.append([:])

@@ -123,6 +123,17 @@ extension InspectorView {
         ]
     }
 
+    private var mockupControls: [EffectControl] {
+        [
+            EffectControl(effectId: "mockup.iphone17", paramKey: "orbitYaw", label: "Orbit"),
+            EffectControl(effectId: "mockup.iphone17", paramKey: "orbitPitch", label: "Tilt"),
+            EffectControl(effectId: "mockup.iphone17", paramKey: "distance", label: "Distance"),
+            EffectControl(effectId: "mockup.iphone17", paramKey: "panX", label: "Pan X"),
+            EffectControl(effectId: "mockup.iphone17", paramKey: "panY", label: "Pan Y"),
+            EffectControl(effectId: "mockup.iphone17", paramKey: "fov", label: "Focal Angle"),
+        ]
+    }
+
     private var basicEffectIds: Set<String> {
         Set((toneControls + whiteBalanceControls + presenceControls).map(\.effectId))
     }
@@ -168,6 +179,11 @@ extension InspectorView {
                         set: { setInvertApplied($0, clips: clips) }
                     )
                 )
+            }
+            if editor.enabledAddons.contains(ProjectAddon.deviceMockups) {
+                adjustSection(title: "Device Mockup", effectIds: ["mockup.iphone17"], clips: clips) {
+                    adjustSubgroup(title: "iPhone 17 Pro", controls: mockupControls, clips: clips)
+                }
             }
         }
     }
