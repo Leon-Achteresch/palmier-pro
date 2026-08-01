@@ -15,7 +15,7 @@ struct ProjectPackageSnapshot: Sendable {
     var manifest: Data?
     var generationLog: Data?
     var thumbnail: Data?
-    var chatSessionFiles: [(name: String, data: Data)]
+    var chatSessionFiles: [(name: String, data: Data)]?
 }
 
 private struct RestoredMediaCandidate: Sendable {
@@ -54,7 +54,7 @@ class VideoProject: NSDocument {
     private nonisolated(unsafe) var snapshotManifest: MediaManifest?
     private nonisolated(unsafe) var snapshotGenerationLog: GenerationLog?
     private nonisolated(unsafe) var snapshotThumbnail: Data?
-    private nonisolated(unsafe) var snapshotChatSessionFiles: [(name: String, data: Data)] = []
+    private nonisolated(unsafe) var snapshotChatSessionFiles: [(name: String, data: Data)]?
     private nonisolated(unsafe) var snapshotSourceProjectURL: URL?
     private nonisolated(unsafe) var snapshotPreparedForWrite = false
     // AppKit saves asynchronously, but write() consumes one shared snapshot at a time.
@@ -66,6 +66,8 @@ class VideoProject: NSDocument {
     // MARK: - Persistence
 
     override class var autosavesInPlace: Bool { true }
+
+    override class func canConcurrentlyReadDocuments(ofType typeName: String) -> Bool { true }
 
     // The save snapshot is captured on main before super.save; the encode + disk write run off-main.
     override func canAsynchronouslyWrite(to url: URL, ofType typeName: String, for saveOperation: NSDocument.SaveOperationType) -> Bool { true }
@@ -82,7 +84,7 @@ class VideoProject: NSDocument {
         return doc
     }
 
-    override func read(from url: URL, ofType typeName: String) throws {
+    override nonisolated func read(from url: URL, ofType typeName: String) throws {
         applyLoadedContents(try Self.readProjectPackage(at: url))
     }
 
@@ -284,11 +286,13 @@ class VideoProject: NSDocument {
         snapshotManifest = Self.manifestSnapshot(manifest: editorViewModel.mediaManifest, loadFailed: manifestLoadFailed)
         snapshotGenerationLog = editorViewModel.generationLog
         snapshotThumbnail = captureThumbnail()
-        snapshotChatSessionFiles = editorViewModel.agentService.sessions
-            .filter { !$0.messages.isEmpty }
-            .compactMap { session in
-                ChatSessionStore.encodeSession(session).map { (name: "\(session.id.uuidString).json", data: $0) }
-            }
+        snapshotChatSessionFiles = editorViewModel.agentService.sessionsLoaded
+            ? editorViewModel.agentService.sessions
+                .filter { !$0.messages.isEmpty }
+                .compactMap { session in
+                    ChatSessionStore.encodeSession(session).map { (name: "\(session.id.uuidString).json", data: $0) }
+                }
+            : nil
         snapshotPreparedForWrite = true
     }
 
@@ -330,7 +334,7 @@ class VideoProject: NSDocument {
         } else {
             try copyPreservedFile(Project.thumbnailFilename, from: sourceURL, to: packageURL, fm: fm)
         }
-        try writeChatDirectory(snapshot.chatSessionFiles, to: packageURL, fm: fm)
+        try writeChatDirectory(snapshot.chatSessionFiles, to: packageURL, sourceURL: sourceURL, fm: fm)
         try copyMediaDirectoryIfNeeded(from: sourceURL, to: packageURL, fm: fm)
         try fm.createDirectory(
             at: packageURL.appendingPathComponent(Project.mediaDirectoryName, isDirectory: true),
@@ -347,8 +351,19 @@ class VideoProject: NSDocument {
         try fm.createDirectory(at: url, withIntermediateDirectories: true)
     }
 
-    private nonisolated static func writeChatDirectory(_ files: [(name: String, data: Data)], to packageURL: URL, fm: FileManager) throws {
+    // nil files: sessions were still loading when the snapshot was captured; keep the existing chat directory.
+    private nonisolated static func writeChatDirectory(_ files: [(name: String, data: Data)]?, to packageURL: URL, sourceURL: URL?, fm: FileManager) throws {
         let chatURL = packageURL.appendingPathComponent(ChatSessionStore.dirName, isDirectory: true)
+        guard let files else {
+            guard let sourceURL, !sameFile(sourceURL, packageURL) else { return }
+            let source = sourceURL.appendingPathComponent(ChatSessionStore.dirName, isDirectory: true)
+            guard fm.fileExists(atPath: source.path) else { return }
+            if fm.fileExists(atPath: chatURL.path) {
+                try fm.removeItem(at: chatURL)
+            }
+            try fm.copyItem(at: source, to: chatURL)
+            return
+        }
         if fm.fileExists(atPath: chatURL.path) {
             try fm.removeItem(at: chatURL)
         }

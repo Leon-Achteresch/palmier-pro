@@ -180,7 +180,8 @@ final class ToolExecutor {
     private static func canReadInactiveProject(_ tool: ToolName) -> Bool {
         switch tool {
         case .getTimeline, .inspectTimeline, .getMedia, .inspectMedia, .searchMedia,
-             .getMulticam, .getTranscript, .detectBeats, .inspectColor, .listModels, .sendFeedback:
+             .getMulticam, .getTranscript, .detectBeats, .inspectColor, .listModels, .sendFeedback,
+             .readProjectContext:
             true
         default:
             false
@@ -222,6 +223,7 @@ final class ToolExecutor {
     private func run(_ tool: ToolName, _ editor: EditorViewModel, _ args: [String: Any]) async throws -> ToolResult {
         switch tool {
         case .getTimeline:   return try getTimeline(editor, args)
+        case .readProjectContext: return try await readProjectContext(editor, args)
         case .getMedia:      return try getMedia(editor, args)
         case .inspectMedia:  return try await inspectMedia(editor, args)
         case .captureFrame:  return try await captureFrame(editor, args)
@@ -264,6 +266,7 @@ final class ToolExecutor {
         case .exportProject: return try await exportProject(editor, args)
         case .manageExports: return try manageExports(editor, args)
         case .generateVideo: return try generate(editor, args, type: .video)
+        case .generateTransition: return try await generateTransition(editor, args)
         case .generateImage: return try generate(editor, args, type: .image)
         case .generateAudio: return try await generateAudio(editor, args)
         case .upscaleMedia:  return try upscaleMedia(editor, args)
@@ -282,7 +285,8 @@ final class ToolExecutor {
 
     func readSkill(_ args: [String: Any]) -> ToolResult {
         guard let id = args.string("id") else {
-            return .error("read_skill requires an 'id'.")
+            let index = SkillStore.shared.skillIndex
+            return .ok(index.isEmpty ? "No skills installed." : index)
         }
         guard let body = SkillStore.shared.body(for: id) else {
             return .error("Unknown skill: \(id)")

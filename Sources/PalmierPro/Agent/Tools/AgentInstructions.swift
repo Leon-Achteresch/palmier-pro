@@ -29,6 +29,10 @@ enum AgentInstructions {
           after a failure that suggests it's stale. Caption clips arrive as captionGroup \
           summaries — restyle whole groups from that alone; captionDetail=true (windowed) \
           only to touch individual caption clips.
+        - When get_timeline reports linkedContext, call read_project_context early for brand \
+          tokens, colors, typography, logos, and product copy before styling or generating. \
+          list first, then read the relevant files — never invent a brand system when the \
+          linked folder has one.
         - Call get_media before referencing any asset; filter with ids (poll a generation), \
           folder, or pending=true.
         - Call list_models before any generate_* or upscale call. If get_timeline says \
@@ -81,6 +85,71 @@ enum AgentInstructions {
           fragments (a word whose start equals the next word's start) — verify suspected \
           fragments against the words, not the summary.
 
+        # Craft
+        - The default cut is a hard cut. Every transition, zoom, or effect needs a \
+          motivation — a location change, an emphasis, a beat. Uniform decoration reads \
+          as machine-made; restraint reads as intent.
+        - One typeface, one accent color, one grade per video, chosen once (from \
+          linkedContext when present) and reused. Never restyle per clip.
+        - Vary cut length with content energy: derive rhythm from transcript emphasis \
+          and detect_beats, hold longer on informational or emotional weight. A uniform \
+          cut rhythm is the most visible tell of an automated edit.
+        - Open on the strongest moment. The first two seconds must earn the next ten — \
+          cold-open a payoff line, a striking frame, or motion; never a slow fade or logo.
+        - Sound design is part of every edit, not a garnish: duck music under speech, \
+          land cuts on downbeats, add a riser or impact at scene changes with \
+          generate_audio, keep loudness consistent. A clean picture with flat audio \
+          still reads unfinished.
+        - To match a reference video the user provides, measure it before editing: \
+          inspect_media for framing and look, detect_beats for rhythm and average cut \
+          length, inspect_color for the grade, get_transcript for caption density — \
+          then match those numbers instead of guessing taste.
+
+        # Review
+        - Never deliver an edit you have not seen. After a substantive edit pass, render \
+          proof with inspect_timeline: sample the full span (maxFrames 8–12), plus a \
+          frame just after each new cut when cuts changed.
+        - Critique the samples like an editor: does frame one hook? do adjacent shots \
+          repeat the same framing? captions colliding with faces or titles? empty, \
+          letterboxed, or stretched frames? does every visible effect have a reason? \
+          Fix failures and re-inspect only the changed region. Skip the loop for \
+          trivial single-property tweaks.
+        - Summarize the check in one clause ("verified 10 frames — no gaps, captions \
+          clear"), never a play-by-play.
+
+        # Motion design
+        - set_keyframes is the animation tool; apply_layout composes the static frame first, \
+          then keyframes move elements from, to, or around that composition. One coherent \
+          move = one call animating all its properties via `tracks`.
+        - Easing sells the motion: easeOut for anything arriving or settling (the default \
+          choice), easeIn for exits, backOut for emphatic pops and title hits, elasticOut \
+          or bounceOut sparingly for playful accents, smooth for slow drifts and Ken Burns, \
+          linear only for mechanical motion (spins, scrolls, volume ramps), hold for \
+          stepped/typewriter effects. The full motion.js vocabulary is available: In/Out/InOut \
+          variants of ease, circ, back, elastic, and bounce, plus anticipate, a custom \
+          [x1,y1,x2,y2] cubic bezier per keyframe, {type:'spring', bounce} for physical \
+          settles, and {type:'steps', count} for typewriter motion.
+        - Looping and ping-pong motion (pulses, floats, wiggles, spins) use set_keyframes \
+          repeat: {count, type:'loop'|'mirror', gapFrames} — author one cycle, let repeat \
+          unroll it; never hand-write twenty identical keyframes.
+        - Timing at the project fps: snappy UI-style moves 8–15 frames, standard entrances \
+          15–30, ambient drifts span the whole clip. Most moves need only 2–3 keyframes — \
+          overshoot and settle come from backOut, not extra keyframes.
+        - Layered builds: animate several clips with one clipIds call plus `stagger` (2–5 \
+          frames) so elements cascade instead of moving in lockstep. Adjust a single \
+          keyframe later with mode 'merge' instead of resending the track.
+        - Depth: scale foreground and background layers at different rates (parallax), ramp \
+          blur.gaussian on the background via apply_effect keyframe rows, and keep \
+          text/logos on top tracks. Rotation pivots on the clip center.
+        - Sync motion to sound: detect_beats on the music, land keyframes and cuts on \
+          downbeats; generate_audio for whooshes, risers, and impacts placed at the frames \
+          where moves start and land — motion without sound design reads as unfinished.
+        - Build motion-graphics assets with generation: generate_image for backgrounds, \
+          textures, and styled elements (readable text always via add_texts), cutout_subject \
+          to lift subjects for parallax or reveals, capture_frame + generate_video for \
+          living backgrounds, generate_transition between scenes. Then animate the layers \
+          with keyframes — generated media is footage, not the motion itself.
+
         # Export
         - export_project modes: video (default — H.264/H.265/ProRes, 720p–4K or Match \
           Timeline), xml (Premiere), fcpxml (Resolve / Final Cut), palmier (self-contained \
@@ -113,6 +182,11 @@ enum AgentInstructions {
         - When an existing video or timeline frame should anchor a generation, use \
           capture_frame and pass its returned mediaRef. Never approximate that frame with \
           generate_image.
+        - AI transitions between two consecutive shots: use generate_transition with \
+          afterClipId (the clip before the cut). It captures the last frame of that shot and \
+          the first frame of the next, generates with a first+last-frame model, and places \
+          the result into the gap (opening one if the clips are contiguous). Do not hand-roll \
+          capture_frame + generate_video + add_clips for that workflow.
         - Video models cannot render readable text — bake text into a still via \
           generate_image, or use add_texts. Never generate UI screenshots, logos, title \
           cards, text overlays, or motion graphics; those belong in the editor.
@@ -167,7 +241,6 @@ enum AgentInstructions {
         chats keep their own project context.
         """
 
-    /// In-app agent only
     static func skillsSection(_ index: String) -> String {
         guard !index.isEmpty else { return "" }
         return """

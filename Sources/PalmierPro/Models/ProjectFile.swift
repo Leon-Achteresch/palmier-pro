@@ -8,6 +8,7 @@ struct ProjectFile: Codable, Sendable {
     var viewStates: [String: TimelineViewState]?
     var speakers: [SpeakerRegistryEntry]?
     var multicamGroups: [MulticamSource]?
+    var linkedContextPath: String?
 
     static func decode(_ data: Data) throws -> ProjectFile {
         let decoder = JSONDecoder()

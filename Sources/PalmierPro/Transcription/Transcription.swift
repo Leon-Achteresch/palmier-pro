@@ -94,6 +94,8 @@ enum TranscriptionError: LocalizedError {
 
 enum Transcription {
     private static let audioExtractionGate = AsyncSemaphore(value: 2)
+    static let maxConcurrentTranscriptions = 2
+    private static let cachedSupportedLocales = Task { await SpeechTranscriber.supportedLocales }
 
     static func transcribeVideoAudio(videoURL: URL, censorProfanity: Bool = false, preferredLocale: Locale? = nil, sourceRange: ClosedRange<Double>? = nil) async throws -> TranscriptionResult {
         let tempAudioURL = try await extractAudioTrack(from: videoURL, range: sourceRange)
@@ -103,7 +105,7 @@ enum Transcription {
     }
 
     static func supportedLocales() async -> [Locale] {
-        await SpeechTranscriber.supportedLocales
+        await cachedSupportedLocales.value
     }
 
     static func bestSupportedLocale(from supported: [Locale]) -> Locale? {
@@ -135,7 +137,7 @@ enum Transcription {
             return result.offsetting(by: sourceRange.lowerBound)
         }
 
-        let supported = await SpeechTranscriber.supportedLocales
+        let supported = await cachedSupportedLocales.value
         let locale: Locale
         if let preferredLocale, let match = matchLocale(candidates: [preferredLocale], supported: supported) {
             locale = match

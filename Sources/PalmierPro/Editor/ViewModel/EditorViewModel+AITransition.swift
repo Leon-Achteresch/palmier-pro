@@ -1,7 +1,21 @@
 import Foundation
 
+struct TransitionSite: Equatable {
+    let trackIndex: Int
+    let afterClipId: String
+    let nextClipId: String?
+    let cutFrame: Int
+    let existingGapLengthFrames: Int?
+}
+
+enum TransitionOutcome<T> {
+    case success(T)
+    case failure(String)
+}
+
 extension EditorViewModel {
     static let maxTransitionSeconds: Double = 15
+    static let defaultTransitionDurationSeconds = 4
 
     static let defaultTransitionPrompt = """
         Create a seamless transition between the first frame and the last frame, one continuous \
@@ -18,6 +32,29 @@ extension EditorViewModel {
             ?? max(1, Int(seconds.rounded()))
     }
 
+    static func closestAspectRatio(width: Int, height: Int, in allowed: [String]) -> String {
+        guard !allowed.isEmpty else { return "16:9" }
+        guard width > 0, height > 0 else { return allowed[0] }
+        let target = Double(width) / Double(height)
+        return allowed.min { abs(Self.aspectRatioValue($0) - target) < abs(Self.aspectRatioValue($1) - target) }
+            ?? allowed[0]
+    }
+
+    private static func aspectRatioValue(_ ratio: String) -> Double {
+        let parts = ratio.split(separator: ":")
+        guard parts.count == 2,
+              let a = Double(parts[0]),
+              let b = Double(parts[1]),
+              b != 0 else { return 16.0 / 9.0 }
+        return a / b
+    }
+
+    func defaultTransitionModel() -> VideoModelConfig? {
+        VideoModelConfig.allModels.first {
+            !$0.requiresSourceVideo && $0.supportsFirstFrame && $0.supportsLastFrame
+        }
+    }
+
     func aiTransitionAvailability(for gap: GapSelection) -> (model: VideoModelConfig?, refusal: String?) {
         guard timeline.tracks.indices.contains(gap.trackIndex), gap.range.start > 0,
               gap.range.length > 0, timeline.tracks[gap.trackIndex].type == .video else { return (nil, nil) }
@@ -28,12 +65,122 @@ extension EditorViewModel {
         guard aiEditAllowed else {
             return (nil, "Sign in or add an OpenRouter API key in Settings › Agent.")
         }
-        let model = VideoModelConfig.allModels.first { !$0.requiresSourceVideo && $0.supportsFirstFrame && $0.supportsLastFrame }
+        let model = defaultTransitionModel()
         return (model, model == nil ? "No video model supports first and last frames." : nil)
+    }
+
+    func aiTransitionAvailability(afterClipId: String) -> (model: VideoModelConfig?, refusal: String?) {
+        switch transitionSite(afterClipId: afterClipId) {
+        case .failure(let reason):
+            return (nil, reason)
+        case .success(let site):
+            guard aiEditAllowed else {
+                return (nil, "Sign in or add an OpenRouter API key in Settings › Agent.")
+            }
+            let model = defaultTransitionModel()
+            guard let model else {
+                return (nil, "No video model supports first and last frames.")
+            }
+            if let gapFrames = site.existingGapLengthFrames {
+                let seconds = transitionGapSeconds(lengthFrames: gapFrames)
+                if seconds > Self.maxTransitionSeconds {
+                    return (nil, "Transitions are limited to \(Int(Self.maxTransitionSeconds)) seconds. This gap is \(String(format: "%.1f", seconds)) seconds.")
+                }
+            }
+            return (model, nil)
+        }
+    }
+
+    func transitionSite(afterClipId: String) -> TransitionOutcome<TransitionSite> {
+        guard let loc = findClip(id: afterClipId) else {
+            return .failure("Clip not found: \(afterClipId)")
+        }
+        let track = timeline.tracks[loc.trackIndex]
+        guard track.type == .video else {
+            return .failure("AI transitions only work on video tracks.")
+        }
+        let clip = track.clips[loc.clipIndex]
+        guard clip.mediaType.isVisual else {
+            return .failure("AI transitions need a video or image clip before the cut.")
+        }
+        let cutFrame = clip.endFrame
+        guard cutFrame > 0 else {
+            return .failure("The clip before the transition must end after frame 0.")
+        }
+        let following = track.clips
+            .filter { $0.startFrame >= cutFrame }
+            .sorted { $0.startFrame < $1.startFrame }
+        guard let next = following.first else {
+            return .failure("No clip follows this one — add the next shot before creating a transition.")
+        }
+        guard next.mediaType.isVisual else {
+            return .failure("The next clip after the cut must be video or image.")
+        }
+        let gapLength = next.startFrame - cutFrame
+        return .success(TransitionSite(
+            trackIndex: loc.trackIndex,
+            afterClipId: clip.id,
+            nextClipId: next.id,
+            cutFrame: cutFrame,
+            existingGapLengthFrames: gapLength > 0 ? gapLength : nil
+        ))
+    }
+
+    func ensureTransitionGap(
+        afterClipId: String,
+        durationSeconds: Double?,
+        model: VideoModelConfig
+    ) -> TransitionOutcome<GapSelection> {
+        switch transitionSite(afterClipId: afterClipId) {
+        case .failure(let reason):
+            return .failure(reason)
+        case .success(let site):
+            if let gapFrames = site.existingGapLengthFrames {
+                let seconds = transitionGapSeconds(lengthFrames: gapFrames)
+                guard seconds <= Self.maxTransitionSeconds else {
+                    return .failure("Transitions are limited to \(Int(Self.maxTransitionSeconds)) seconds. This gap is \(String(format: "%.1f", seconds)) seconds.")
+                }
+                return .success(GapSelection(
+                    trackIndex: site.trackIndex,
+                    range: FrameRange(start: site.cutFrame, end: site.cutFrame + gapFrames)
+                ))
+            }
+            let requested = durationSeconds ?? Double(Self.defaultTransitionDurationSeconds)
+            let snapped = Self.nearestSupportedDuration(seconds: requested, in: model.durations)
+            guard Double(snapped) <= Self.maxTransitionSeconds else {
+                return .failure("Transitions are limited to \(Int(Self.maxTransitionSeconds)) seconds.")
+            }
+            let lengthFrames = max(1, secondsToFrame(seconds: Double(snapped), fps: timeline.fps))
+            switch openGap(
+                trackIndex: site.trackIndex,
+                atFrame: site.cutFrame,
+                lengthFrames: lengthFrames,
+                actionName: "Open Transition Gap"
+            ) {
+            case .opened(let gap):
+                return .success(gap)
+            case .refused(let reason):
+                return .failure(reason)
+            }
+        }
     }
 
     func beginAITransition(gap: GapSelection) {
         guard let model = aiTransitionAvailability(for: gap).model else { return }
+        seedAITransition(gap: gap, model: model)
+    }
+
+    func beginAITransition(afterClipId: String, durationSeconds: Double? = nil) {
+        guard let model = aiTransitionAvailability(afterClipId: afterClipId).model else { return }
+        switch ensureTransitionGap(afterClipId: afterClipId, durationSeconds: durationSeconds, model: model) {
+        case .failure(let reason):
+            mediaPanelToast = MediaPanelToast(message: reason)
+        case .success(let gap):
+            seedAITransition(gap: gap, model: model)
+        }
+    }
+
+    private func seedAITransition(gap: GapSelection, model: VideoModelConfig) {
         let placement = PendingTransitionPlacement(
             timelineId: timeline.id,
             trackIndex: gap.trackIndex,
@@ -66,7 +213,10 @@ extension EditorViewModel {
                 var stored = GenerationInput(
                     prompt: Self.defaultTransitionPrompt, model: model.id,
                     duration: duration,
-                    aspectRatio: "", resolution: nil
+                    aspectRatio: Self.closestAspectRatio(
+                        width: timeline.width, height: timeline.height, in: model.aspectRatios
+                    ),
+                    resolution: model.resolutions?.first
                 )
                 stored.imageURLAssetIds = [first.asset.id, last.asset.id]
                 seedGenerationPanel(asset: first.asset, stored: stored, transitionPlacement: placement)

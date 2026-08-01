@@ -507,24 +507,24 @@ extension EditorViewModel {
     }
 
     /// Recompute `missingMediaRefs` off the main thread, then publish on the main actor.
+    /// Debounced so import bursts trigger one manifest sweep instead of one per file.
     func refreshMissingMediaCache() {
-        let entries = mediaManifest.entries
-        let projectPath = projectURL?.path
         missingMediaRefreshTask?.cancel()
         missingMediaRefreshTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard let self, !Task.isCancelled else { return }
+            let entries = self.mediaManifest.entries
+            let projectPath = self.projectURL?.path
             let missing = await Task.detached(priority: .utility) {
                 MediaResolver.missingAssetIds(entries: entries, projectPath: projectPath)
             }.value
             guard !Task.isCancelled else { return }
-            await MainActor.run {
-                guard let self else { return }
-                let recovering = Set(self.mediaAssets.lazy.filter { $0.isGenerating || $0.isRecoveringGeneration }.map(\.id))
-                let resolved = missing.subtracting(recovering)
-                if self.missingMediaRefs != resolved {
-                    self.missingMediaRefs = resolved
-                }
-                self.missingMediaRefreshTask = nil
+            let recovering = Set(self.mediaAssets.lazy.filter { $0.isGenerating || $0.isRecoveringGeneration }.map(\.id))
+            let resolved = missing.subtracting(recovering)
+            if self.missingMediaRefs != resolved {
+                self.missingMediaRefs = resolved
             }
+            self.missingMediaRefreshTask = nil
         }
     }
 
@@ -603,7 +603,11 @@ extension EditorViewModel {
         Log.project.debug("media finalize start asset=\(asset.id.prefix(8)) type=\(asset.type.rawValue)")
         let metadataLoaded = await asset.loadMetadata(includeThumbnail: !batchManifestUpdate)
         guard metadataLoaded else {
-            if FileManager.default.fileExists(atPath: asset.url.path) {
+            let path = asset.url.path
+            let exists = await Task.detached(priority: .utility) {
+                FileManager.default.fileExists(atPath: path)
+            }.value
+            if exists {
                 unprocessableMediaRefs.insert(asset.id)
             } else {
                 missingMediaRefs.insert(asset.id)
@@ -625,11 +629,10 @@ extension EditorViewModel {
             asset.generationStatus = .none
         }
         recordManifestMetadata(for: asset, batching: batchManifestUpdate)
-        if FileManager.default.fileExists(atPath: asset.url.path) {
-            missingMediaRefs.remove(asset.id)
-            offlineMediaRefs.remove(asset.id)
-            unprocessableMediaRefs.remove(asset.id)
-        }
+        // Metadata just loaded from the file, so it exists; no stat needed.
+        missingMediaRefs.remove(asset.id)
+        offlineMediaRefs.remove(asset.id)
+        unprocessableMediaRefs.remove(asset.id)
         refreshMissingMediaCache()
         searchIndex.schedule(asset)
         if !batchManifestUpdate {

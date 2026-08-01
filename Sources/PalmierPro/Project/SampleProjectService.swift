@@ -112,7 +112,16 @@ final class SampleProjectService {
             var completed = 0
             onProgress(0)
             try await withThrowingTaskGroup(of: Void.self) { group in
+                let maxConcurrentDownloads = 6
+                var inFlight = 0
                 for download in downloads {
+                    if inFlight >= maxConcurrentDownloads {
+                        try await group.next()
+                        inFlight -= 1
+                        completed += 1
+                        onProgress(Double(completed) / Double(total))
+                    }
+                    inFlight += 1
                     group.addTask {
                         try await Self.downloadFile(
                             from: download.url, to: dest.appendingPathComponent(download.relativePath)

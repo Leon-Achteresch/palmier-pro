@@ -298,7 +298,7 @@ struct PreviewContainerView: View {
 
     private var activeMediaAsset: MediaAsset? {
         guard case .mediaAsset(let id, _, _) = editor.activePreviewTab else { return nil }
-        return editor.mediaAssets.first { $0.id == id }
+        return editor.mediaAssetsById[id]
     }
 
     private var generatingAspect: CGFloat? {
@@ -354,7 +354,8 @@ struct PreviewContainerView: View {
     }
 
     private func generatingAsset(for clip: Clip) -> MediaAsset? {
-        editor.mediaAssets.first { $0.id == clip.mediaRef && $0.isGenerating }
+        guard let asset = editor.mediaAssetsById[clip.mediaRef], asset.isGenerating else { return nil }
+        return asset
     }
 
     private struct OfflineOverlay { let assetId: String?; let path: String?; let isUnprocessable: Bool }
@@ -411,18 +412,24 @@ struct PreviewContainerView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .allowsHitTesting(false)
+        .task(id: activeMediaAsset?.id) {
+            for ref in activeReferenceImageAssets where ref.thumbnail == nil {
+                await ref.loadLibraryThumbnail()
+            }
+        }
+    }
+
+    private var activeReferenceImageAssets: [MediaAsset] {
+        guard let input = activeMediaAsset?.generationInput else { return [] }
+        let refIds = (input.imageURLAssetIds ?? []) + (input.referenceImageAssetIds ?? [])
+        return refIds.compactMap { id in
+            guard let ref = editor.mediaAssetsById[id], ref.type == .image else { return nil }
+            return ref
+        }
     }
 
     private var activeGeneratingReferenceImage: NSImage? {
-        guard let input = activeMediaAsset?.generationInput else { return nil }
-        let refIds = (input.imageURLAssetIds ?? []) + (input.referenceImageAssetIds ?? [])
-        for id in refIds {
-            guard let ref = editor.mediaAssets.first(where: { $0.id == id }), ref.type == .image else { continue }
-            if let image = ref.thumbnail ?? NSImage(contentsOf: ref.url) {
-                return image
-            }
-        }
-        return nil
+        activeReferenceImageAssets.lazy.compactMap(\.thumbnail).first
     }
 
     private static func unprocessablePrefill(path: String?) -> String {

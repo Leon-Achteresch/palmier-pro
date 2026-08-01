@@ -21,6 +21,9 @@ extension ToolExecutor {
         }
         dict["currentFrame"] = editor.currentFrame
         dict["canGenerate"] = Self.canGenerate
+        if let linked = editor.linkedContextPath, !linked.isEmpty {
+            dict["linkedContext"] = ["path": linked]
+        }
         let liveGroupIds = editor.referencedMulticamGroupIds()
         let liveGroups = editor.multicamGroups.filter { liveGroupIds.contains($0.id) }
         if !liveGroups.isEmpty {
@@ -457,7 +460,16 @@ extension ToolExecutor {
             keyframes[propKey] = zip(kfs, values).map { kf, exposedValues -> [Any] in
                 var row: [Any] = [kf["frame"] ?? 0]
                 row.append(contentsOf: exposedValues)
-                if let interp = kf["interpolationOut"] as? String, interp != "smooth" {
+                let interp = kf["interpolationOut"] as? String ?? "smooth"
+                let params = (kf["easingParams"] as? [Any])?.compactMap { ($0 as? NSNumber)?.doubleValue }
+                if let params, !params.isEmpty {
+                    switch interp {
+                    case "cubicBezier": row.append(params)
+                    case "spring": row.append(["type": "spring", "bounce": params[0]])
+                    case "steps": row.append(["type": "steps", "count": Int(params[0])])
+                    default: row.append(interp)
+                    }
+                } else if interp != "smooth" {
                     row.append(interp)
                 }
                 return row

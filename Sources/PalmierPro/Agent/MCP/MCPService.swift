@@ -35,10 +35,12 @@ final class MCPService {
     func start() {
         let httpServer = MCPHTTPServer(port: Self.port) { [self] in
             let toolExecutor = await makeSessionToolExecutor()
+            let skillIndex = await MainActor.run { SkillStore.shared.skillIndex }
             let server = Server(
                 name: "palmier-pro",
                 version: "1.0.0",
-                instructions: AgentInstructions.serverInstructions + AgentInstructions.projectNavigation,
+                instructions: AgentInstructions.serverInstructions + AgentInstructions.projectNavigation
+                    + AgentInstructions.skillsSection(skillIndex),
                 capabilities: .init(
                     resources: .init(subscribe: false, listChanged: false),
                     tools: .init(listChanged: true)

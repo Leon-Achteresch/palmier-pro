@@ -5,9 +5,11 @@ struct ProjectEntry: Codable, Identifiable, Sendable {
     var url: URL
     var createdDate: Date
     var lastOpenedDate: Date
+    var isAccessible: Bool = true
+
+    private enum CodingKeys: String, CodingKey { case id, url, createdDate, lastOpenedDate }
 
     var name: String { url.deletingPathExtension().lastPathComponent }
-    var isAccessible: Bool { FileManager.default.fileExists(atPath: url.path) }
 }
 
 struct ProjectDeletionResult: Sendable {
@@ -100,8 +102,27 @@ final class ProjectRegistry {
         }
     }
 
+    private var saveTask: Task<Void, Never>?
+
     private func save() {
-        Self.saveEntries(entries, to: fileURL)
+        let snapshot = entries
+        let url = fileURL
+        let previous = saveTask
+        saveTask = Task { [disk] in
+            await previous?.value
+            await disk.save(snapshot, to: url)
+        }
+    }
+
+    func refreshAccessibility() {
+        let snapshot = entries
+        Task { [weak self, disk] in
+            let accessible = await disk.accessibleIDs(snapshot)
+            guard let self else { return }
+            for index in self.entries.indices where self.entries[index].isAccessible != accessible.contains(self.entries[index].id) {
+                self.entries[index].isAccessible.toggle()
+            }
+        }
     }
 
     private func mutate(_ apply: @escaping (inout [ProjectEntry]) -> Void) {
@@ -116,6 +137,7 @@ final class ProjectRegistry {
     private func finishLoading(_ loaded: [ProjectEntry]) {
         entries = loaded
         isLoading = false
+        refreshAccessibility()
         guard !pendingMutations.isEmpty else { return }
 
         let mutations = pendingMutations
@@ -148,6 +170,14 @@ private actor ProjectRegistryDisk {
     func load(from fileURL: URL) -> [ProjectEntry] {
         Project.ensureStorageDirectory()
         return ProjectRegistry.loadEntries(from: fileURL)
+    }
+
+    func save(_ entries: [ProjectEntry], to fileURL: URL) {
+        ProjectRegistry.saveEntries(entries, to: fileURL)
+    }
+
+    func accessibleIDs(_ entries: [ProjectEntry]) -> Set<UUID> {
+        Set(entries.lazy.filter { FileManager.default.fileExists(atPath: $0.url.path) }.map(\.id))
     }
 
     func trashIfPresent(_ url: URL) -> Bool {

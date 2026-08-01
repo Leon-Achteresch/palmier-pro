@@ -5,7 +5,8 @@ extension ToolExecutor {
     private nonisolated static let idPrefixFloor = 8
 
     private static let scalarIdKeys: Set<String> = [
-        "clipId", "sourceClipId", "referenceClipId", "targetClipId", "fromClipId", "decompose",
+        "clipId", "sourceClipId", "referenceClipId", "targetClipId", "fromClipId", "afterClipId",
+        "nextClipId", "decompose",
         "mediaRef", "startFrameMediaRef", "endFrameMediaRef",
         "sourceVideoMediaRef", "videoSourceMediaRef", "sourceMediaRef",
         "captionGroupId", "timelineId", "trackId", "item", "from", "reference",

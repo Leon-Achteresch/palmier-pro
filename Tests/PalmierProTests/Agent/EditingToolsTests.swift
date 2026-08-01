@@ -80,6 +80,85 @@ struct SetKeyframesMultiTrackTests {
         #expect(result.isError)
         #expect(h.editor.clipFor(id: clipId)?.opacityTrack == nil)
     }
+
+    @Test(arguments: ["easeIn", "easeOut", "backOut", "elasticOut", "bounceOut"])
+    func acceptsNamedEasings(_ name: String) async throws {
+        let (h, clipId) = harness()
+        let result = await h.runRaw("set_keyframes", args: [
+            "clipId": clipId,
+            "property": "opacity",
+            "keyframes": [[0, 0.0, name], [30, 1.0]],
+        ])
+        #expect(!result.isError, "\(ToolHarness.textOf(result))")
+        let clip = try #require(h.editor.clipFor(id: clipId))
+        #expect(clip.opacityTrack?.keyframes.first?.interpolationOut == Interpolation(rawValue: name))
+    }
+
+    @Test func staggerOffsetsKeyframesPerClipInOrder() async throws {
+        let a = Fixtures.clip(id: "clip-a", start: 0, duration: 30)
+        let b = Fixtures.clip(id: "clip-b", start: 30, duration: 30)
+        let c = Fixtures.clip(id: "clip-c", start: 60, duration: 30)
+        let h = ToolHarness(timeline: Fixtures.timeline(tracks: [Fixtures.videoTrack(clips: [a, b, c])]))
+
+        let result = await h.runRaw("set_keyframes", args: [
+            "clipIds": ["clip-a", "clip-b", "clip-c"],
+            "property": "opacity",
+            "keyframes": [[0, 0.0], [10, 1.0]],
+            "stagger": 4,
+        ])
+        #expect(!result.isError, "\(ToolHarness.textOf(result))")
+        #expect(h.editor.clipFor(id: "clip-a")?.opacityTrack?.keyframes.map(\.frame) == [0, 10])
+        #expect(h.editor.clipFor(id: "clip-b")?.opacityTrack?.keyframes.map(\.frame) == [4, 14])
+        #expect(h.editor.clipFor(id: "clip-c")?.opacityTrack?.keyframes.map(\.frame) == [8, 18])
+    }
+
+    @Test func staggerRequiresMultipleClips() async {
+        let (h, clipId) = harness()
+        let result = await h.runRaw("set_keyframes", args: [
+            "clipId": clipId,
+            "property": "opacity",
+            "keyframes": [[0, 0.0], [10, 1.0]],
+            "stagger": 4,
+        ])
+        #expect(result.isError)
+    }
+
+    @Test func mergeUpsertsIntoExistingTrack() async throws {
+        let (h, clipId) = harness()
+        _ = await h.runRaw("set_keyframes", args: [
+            "clipId": clipId,
+            "property": "opacity",
+            "keyframes": [[0, 0.0], [10, 1.0], [30, 1.0]],
+        ])
+        let result = await h.runRaw("set_keyframes", args: [
+            "clipId": clipId,
+            "property": "opacity",
+            "keyframes": [[10, 0.5, "easeOut"], [20, 0.8]],
+            "mode": "merge",
+        ])
+        #expect(!result.isError, "\(ToolHarness.textOf(result))")
+        let track = try #require(h.editor.clipFor(id: clipId)?.opacityTrack)
+        #expect(track.keyframes.map(\.frame) == [0, 10, 20, 30])
+        #expect(track.keyframes[1].value == 0.5)
+        #expect(track.keyframes[1].interpolationOut == .easeOut)
+    }
+
+    @Test func mergeRejectsEmptyRows() async throws {
+        let (h, clipId) = harness()
+        _ = await h.runRaw("set_keyframes", args: [
+            "clipId": clipId,
+            "property": "opacity",
+            "keyframes": [[0, 0.0], [10, 1.0]],
+        ])
+        let result = await h.runRaw("set_keyframes", args: [
+            "clipId": clipId,
+            "property": "opacity",
+            "keyframes": [],
+            "mode": "merge",
+        ])
+        #expect(result.isError)
+        #expect(h.editor.clipFor(id: clipId)?.opacityTrack?.keyframes.count == 2)
+    }
 }
 
 @Suite("apply_effect — animated params")

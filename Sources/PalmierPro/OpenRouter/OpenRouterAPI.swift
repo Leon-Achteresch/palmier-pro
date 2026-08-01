@@ -59,6 +59,15 @@ enum OpenRouterAPI {
         let supportsAudio: Bool
     }
 
+    struct ChatModel: Sendable {
+        let id: String
+        let name: String
+        let supportedEfforts: [String]?
+        let defaultEffort: String?
+        let reasoningMandatory: Bool
+        let supportsReasoning: Bool
+    }
+
     struct FrameImage: Sendable {
         let dataURL: String
         let position: String
@@ -70,6 +79,53 @@ enum OpenRouterAPI {
     private static let videoTimeout: Duration = .seconds(1800)
 
     // MARK: - Catalog
+
+    @concurrent
+    static func chatModels() async throws -> [ChatModel] {
+        let data = try await fetchData(
+            for: request(
+                path: "models",
+                apiKey: nil,
+                query: [
+                    URLQueryItem(name: "supported_parameters", value: "tools"),
+                    URLQueryItem(name: "output_modalities", value: "text"),
+                ]
+            )
+        )
+        return try parseChatModels(from: data)
+    }
+
+    static func parseChatModels(from data: Data) throws -> [ChatModel] {
+        struct Response: Decodable {
+            struct Reasoning: Decodable {
+                let supported_efforts: [String]?
+                let default_effort: String?
+                let mandatory: Bool?
+            }
+
+            struct Entry: Decodable {
+                let id: String
+                let name: String
+                let reasoning: Reasoning?
+            }
+
+            let data: [Entry]
+        }
+        do {
+            return try JSONDecoder().decode(Response.self, from: data).data.map { entry in
+                ChatModel(
+                    id: entry.id,
+                    name: entry.name,
+                    supportedEfforts: entry.reasoning?.supported_efforts,
+                    defaultEffort: entry.reasoning?.default_effort,
+                    reasoningMandatory: entry.reasoning?.mandatory ?? false,
+                    supportsReasoning: entry.reasoning != nil
+                )
+            }
+        } catch {
+            throw APIError(message: "OpenRouter returned an unexpected response.")
+        }
+    }
 
     @concurrent
     static func imageModels() async throws -> [ImageModel] {
@@ -277,9 +333,12 @@ enum OpenRouterAPI {
         path: String,
         method: String = "GET",
         body: [String: Any]? = nil,
-        apiKey: String?
+        apiKey: String?,
+        query: [URLQueryItem] = []
     ) throws -> URLRequest {
-        var request = URLRequest(url: baseURL.appending(path: path), timeoutInterval: requestTimeout)
+        var components = URLComponents(url: baseURL.appending(path: path), resolvingAgainstBaseURL: false)!
+        if !query.isEmpty { components.queryItems = query }
+        var request = URLRequest(url: components.url!, timeoutInterval: requestTimeout)
         request.httpMethod = method
         if let apiKey { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
         request.setValue("Palmier Pro", forHTTPHeaderField: "X-Title")
@@ -290,7 +349,7 @@ enum OpenRouterAPI {
         return request
     }
 
-    private static func decode<T: Decodable>(_ type: T.Type, from request: URLRequest) async throws -> T {
+    private static func fetchData(for request: URLRequest) async throws -> Data {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw APIError(message: "OpenRouter did not respond.")
@@ -298,8 +357,14 @@ enum OpenRouterAPI {
         guard (200..<300).contains(http.statusCode) else {
             throw APIError(message: errorMessage(data, status: http.statusCode))
         }
+        return data
+    }
+
+    private static func decode<T: Decodable>(_ type: T.Type, from request: URLRequest) async throws -> T {
         do {
-            return try JSONDecoder().decode(type, from: data)
+            return try JSONDecoder().decode(type, from: try await fetchData(for: request))
+        } catch let error as APIError {
+            throw error
         } catch {
             throw APIError(message: "OpenRouter returned an unexpected response.")
         }

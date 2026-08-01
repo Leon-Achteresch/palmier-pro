@@ -79,6 +79,7 @@ final class TimelineView: NSView {
     var externalDragFrame: Int = 0
 
     private var externalSnapState = SnapEngine.SnapState()
+    private var externalSnapTargetsCache: (revision: Int, targets: [SnapEngine.SnapTarget])?
 
     private var externalDragIsRippleInsert: Bool = false
 
@@ -290,6 +291,9 @@ final class TimelineView: NSView {
         context ctx: CGContext,
         rippleInsertPreview: EditorViewModel.RippleInsertPreviewPlan? = nil
     ) {
+        ClipRenderer.markDeadAir = editor.markDeadAir
+        ClipRenderer.markBeats = editor.markBeats
+
         let moveDrag: DragState.MoveClipDrag? = {
             if case .moveClip(let drag) = inputController.dragState { return drag }
             return nil
@@ -700,6 +704,9 @@ final class TimelineView: NSView {
     // MARK: - Generating clip overlays
 
     private func syncGeneratingClipOverlays(geometry geo: TimelineGeometry) {
+        guard !editor.pendingReplacements.isEmpty
+            || !generatingClipOverlays.isEmpty
+            || editor.mediaAssets.contains(where: \.isGenerating) else { return }
         var active: [String: NSRect] = [:]
         for (ti, track) in editor.timeline.tracks.enumerated() {
             for clip in track.clips
@@ -1003,9 +1010,9 @@ final class TimelineView: NSView {
                 item.representedObject = ["clipId": clip.id, "frame": kfFrame, "interp": interp.rawValue] as [String: Any]
                 return item
             }
-            menu.addItem(mk("Linear", .linear))
-            menu.addItem(mk("Smooth", .smooth))
-            menu.addItem(mk("Hold", .hold))
+            for interp in Interpolation.allCases {
+                menu.addItem(mk(interp.displayName, interp))
+            }
             menu.addItem(.separator())
             let del = NSMenuItem(title: "Delete Keyframe", action: #selector(performDeleteVolumeKf(_:)), keyEquivalent: "")
             del.target = self
@@ -1085,6 +1092,9 @@ final class TimelineView: NSView {
             let aiEditItem = NSMenuItem(title: "AI Edit", action: nil, keyEquivalent: "")
             aiEditItem.submenu = aiEditSubmenu
             aiItems.append(aiEditItem)
+        }
+        if let transitionItem = aiTransitionMenuItem(afterClipId: clip.id) {
+            aiItems.append(transitionItem)
         }
 
         // Nest
@@ -1559,10 +1569,16 @@ final class TimelineView: NSView {
             return candidate
         }
         let totalDur = assets.reduce(0) { $0 + editor.clipDurationFrames(for: $1, segment: externalDragSegments[$1.id]) }
-        let targets = SnapEngine.collectTargets(
-            tracks: editor.timeline.tracks,
-            beatFrames: editor.beatSnapFrames(for:)
-        )
+        let targets: [SnapEngine.SnapTarget]
+        if let cache = externalSnapTargetsCache, cache.revision == editor.timelineRenderRevision {
+            targets = cache.targets
+        } else {
+            targets = SnapEngine.collectTargets(
+                tracks: editor.timeline.tracks,
+                beatFrames: editor.beatSnapFrames(for:)
+            )
+            externalSnapTargetsCache = (editor.timelineRenderRevision, targets)
+        }
         if let snap = SnapEngine.findSnap(
             position: candidate,
             probeOffsets: [0, totalDur],

@@ -365,7 +365,14 @@ extension ToolExecutor {
     ) async -> (results: [URL: TranscriptionResult], skipped: [[String: Any]]) {
         let rangesByURL = sourceRangesByURL(fragments, fps: fps)
         let outcomes = await withTaskGroup(of: (URL, Result<TranscriptionResult, Error>).self) { group in
+            var collected: [(URL, Result<TranscriptionResult, Error>)] = []
+            var inFlight = 0
             for url in Set(fragments.map(\.url)) {
+                if inFlight >= Transcription.maxConcurrentTranscriptions, let outcome = await group.next() {
+                    collected.append(outcome)
+                    inFlight -= 1
+                }
+                inFlight += 1
                 group.addTask {
                     do {
                         switch context.provider {
@@ -389,7 +396,6 @@ extension ToolExecutor {
                     }
                 }
             }
-            var collected: [(URL, Result<TranscriptionResult, Error>)] = []
             for await outcome in group { collected.append(outcome) }
             return collected
         }

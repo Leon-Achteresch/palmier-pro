@@ -4,6 +4,7 @@ import Foundation
 struct OpenRouterClient: AgentClient {
     let apiKey: String
     let model: AgentModel
+    var reasoningEffort: AgentReasoningEffort?
     var maxTokens: Int = 8192
 
     private static let endpoint = OpenRouterAPI.baseURL.appending(path: "chat/completions")
@@ -35,11 +36,17 @@ struct OpenRouterClient: AgentClient {
         guard !apiKey.isEmpty else { throw AgentStreamError.missingKey }
 
         var body: [String: Any] = [
-            "model": model.rawValue,
+            "model": model.id,
             "max_tokens": maxTokens,
             "stream": true,
             "messages": [systemMessage(system)] + OpenRouterMessageConverter.convert(messages),
         ]
+        if let reasoningEffort {
+            body["reasoning"] = [
+                "effort": reasoningEffort.rawValue,
+                "exclude": true,
+            ]
+        }
         if !tools.isEmpty {
             body["tools"] = tools.map { tool in
                 [
@@ -74,7 +81,7 @@ struct OpenRouterClient: AgentClient {
 
     /// Anthropic models bill cached prefixes only with an explicit breakpoint; other providers cache on their own.
     private func systemMessage(_ system: String) -> [String: Any] {
-        guard model.rawValue.hasPrefix("anthropic/") else {
+        guard model.id.hasPrefix("anthropic/") else {
             return ["role": "system", "content": system]
         }
         return [

@@ -113,7 +113,7 @@ extension ToolExecutor {
     fileprivate static func clamped(_ track: KeyframeTrack<Double>, to range: ClosedRange<Double>) -> KeyframeTrack<Double> {
         KeyframeTrack(keyframes: track.keyframes.map {
             let v = min(range.upperBound, max(range.lowerBound, $0.value))
-            return Keyframe(frame: $0.frame, value: (v * 1000).rounded() / 1000, interpolationOut: $0.interpolationOut)
+            return Keyframe(frame: $0.frame, value: (v * 1000).rounded() / 1000, interpolationOut: $0.interpolationOut, easingParams: $0.easingParams)
         })
     }
 }

@@ -864,9 +864,9 @@ enum CompositionBuilder {
         for i in kfs.indices.dropLast() {
             let a = kfs[i], b = kfs[i + 1]
             switch a.interpolationOut {
-            case .smooth: offsetSet.formUnion(smoothSubdivisions(from: a.frame, to: b.frame))
-            case .hold:   if b.frame - a.frame > 1 { offsetSet.insert(b.frame - 1) }
             case .linear: break
+            case .hold:   if b.frame - a.frame > 1 { offsetSet.insert(b.frame - 1) }
+            default:      offsetSet.formUnion(smoothSubdivisions(from: a.frame, to: b.frame))
             }
         }
         if clip.fadeInFrames > 0 {

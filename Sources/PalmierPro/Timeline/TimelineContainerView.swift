@@ -55,6 +55,8 @@ struct TimelineContainerView: NSViewRepresentable {
             object: scrollView.contentView
         )
 
+        context.coordinator.startFollowingPlayhead()
+
         return container
     }
 
@@ -81,22 +83,6 @@ struct TimelineContainerView: NSViewRepresentable {
             DispatchQueue.main.async { editor.timelineScrollRestoreX = nil }
         }
 
-        if editor.isPlaying,
-           let timelineView = context.coordinator.timelineView,
-           let scrollView = context.coordinator.scrollView {
-            let geo = timelineView.geometry
-            let playheadX = geo.xForFrame(editor.activeFrame)
-            let visibleRect = scrollView.contentView.bounds
-            let margin: CGFloat = 60
-
-            if playheadX < visibleRect.origin.x + margin ||
-               playheadX > visibleRect.origin.x + visibleRect.width - margin {
-                let newOriginX = max(0, playheadX - visibleRect.width * 0.25)
-                scrollView.contentView.setBoundsOrigin(
-                    NSPoint(x: newOriginX, y: visibleRect.origin.y)
-                )
-            }
-        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -110,7 +96,7 @@ struct TimelineContainerView: NSViewRepresentable {
         let generatingAssetIds: Set<String>
     }
 
-    final class Coordinator: NSObject {
+    @MainActor final class Coordinator: NSObject {
         var headerView: TimelineHeaderView?
         var timelineView: TimelineView?
         var scrollView: NSScrollView?
@@ -137,6 +123,33 @@ struct TimelineContainerView: NSViewRepresentable {
         @MainActor @objc func clipViewFrameChanged(_ notification: Notification) {
             timelineView?.updateContentSize()
             timelineView?.updatePlayheadLayer()
+        }
+
+        // Follows the playhead outside SwiftUI so playback ticks don't re-run updateNSView.
+        @MainActor func startFollowingPlayhead() {
+            withObservationTracking { [weak self] in
+                guard let editor = self?.editor else { return }
+                _ = editor.isPlaying
+                _ = editor.activeFrame
+            } onChange: { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.followPlayheadIfNeeded()
+                    self.startFollowingPlayhead()
+                }
+            }
+        }
+
+        @MainActor private func followPlayheadIfNeeded() {
+            guard let editor, editor.isPlaying, let scrollView else { return }
+            let playheadX = Double(editor.activeFrame) * editor.zoomScale
+            let visibleRect = scrollView.contentView.bounds
+            let margin: CGFloat = 60
+            if playheadX < visibleRect.origin.x + margin ||
+               playheadX > visibleRect.origin.x + visibleRect.width - margin {
+                let newOriginX = max(0, playheadX - visibleRect.width * 0.25)
+                scrollView.contentView.setBoundsOrigin(NSPoint(x: newOriginX, y: visibleRect.origin.y))
+            }
         }
 
         deinit {

@@ -157,9 +157,6 @@ struct AgentPanelView: View {
             Image(systemName: "plus")
                 .font(.system(size: AppTheme.FontSize.sm, weight: .medium))
                 .foregroundStyle(AppTheme.Text.tertiaryColor)
-        } primaryAction: {
-            activeTerminal = nil
-            service.newChat()
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -169,6 +166,7 @@ struct AgentPanelView: View {
     }
 
     @State private var showHistory = false
+    @State private var showModelPicker = false
     @State private var isScrolledFromBottom = false
 
     private var historyButton: some View {
@@ -194,14 +192,59 @@ struct AgentPanelView: View {
         }
     }
 
+    private var modelControls: some View {
+        HStack(spacing: AppTheme.Spacing.sm) {
+            modelPicker
+            if !service.availableEfforts.isEmpty {
+                effortPicker
+            }
+        }
+    }
+
     private var modelPicker: some View {
+        Button { showModelPicker.toggle() } label: {
+            HStack(spacing: AppTheme.Spacing.xs) {
+                Text(service.effectiveModel.displayName)
+                    .font(.system(size: AppTheme.FontSize.xs, weight: .medium))
+                    .foregroundStyle(AppTheme.Text.secondaryColor)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: AppTheme.FontSize.micro, weight: .semibold))
+                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+            }
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .help("OpenRouter chat model")
+        .popover(isPresented: $showModelPicker, arrowEdge: .top) {
+            AgentModelPicker(
+                models: service.availableModels,
+                selectedId: service.effectiveModel.id,
+                isLoading: service.isLoadingModels,
+                onSelect: { model in
+                    service.selectModel(model)
+                    showModelPicker = false
+                }
+            )
+        }
+    }
+
+    private var effortPicker: some View {
         Menu {
-            ForEach(service.availableModels, id: \.self) { m in
-                Button(m.displayName) { service.model = m }
+            ForEach(service.availableEfforts, id: \.self) { effort in
+                Button {
+                    service.selectReasoningEffort(effort)
+                } label: {
+                    if service.effectiveReasoningEffort == effort {
+                        Label(effort.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(effort.displayName)
+                    }
+                }
             }
         } label: {
             HStack(spacing: AppTheme.Spacing.xs) {
-                Text(service.effectiveModel.displayName)
+                Text(service.effectiveReasoningEffort?.displayName ?? "Effort")
                     .font(.system(size: AppTheme.FontSize.xs, weight: .medium))
                     .foregroundStyle(AppTheme.Text.secondaryColor)
                 Image(systemName: "chevron.down")
@@ -212,7 +255,7 @@ struct AgentPanelView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Model routed through OpenRouter")
+        .help("Reasoning effort")
     }
 
     private var toolResults: [String: ToolRunResult] {
@@ -398,7 +441,7 @@ struct AgentPanelView: View {
                 onSend: submit,
                 onCancel: { service.cancel() }
             ) {
-                modelPicker
+                modelControls
             }
         }
         .padding(.horizontal, AppTheme.Spacing.mdLg)

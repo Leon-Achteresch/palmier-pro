@@ -4,10 +4,21 @@ import Foundation
 final class MediaResolver: @unchecked Sendable {
     private let manifest: () -> MediaManifest
     private let projectURL: () -> URL?
+    private let entryIndex: [String: MediaManifestEntry]?
 
     init(manifest: @escaping () -> MediaManifest, projectURL: @escaping () -> URL?) {
         self.manifest = manifest
         self.projectURL = projectURL
+        self.entryIndex = nil
+    }
+
+    private init(frozen manifest: MediaManifest, projectURL: URL?) {
+        self.manifest = { manifest }
+        self.projectURL = { projectURL }
+        var index: [String: MediaManifestEntry] = [:]
+        index.reserveCapacity(manifest.entries.count)
+        for entry in manifest.entries where index[entry.id] == nil { index[entry.id] = entry }
+        self.entryIndex = index
     }
 
     func resolveURL(for assetId: String) -> URL? {
@@ -25,9 +36,7 @@ final class MediaResolver: @unchecked Sendable {
     }
 
     func snapshot() -> MediaResolver {
-        let manifest = manifest()
-        let projectURL = projectURL()
-        return MediaResolver(manifest: { manifest }, projectURL: { projectURL })
+        MediaResolver(frozen: manifest(), projectURL: projectURL())
     }
 
     static func expectedURLMap(entries: [MediaManifestEntry], projectURL: URL?) -> [String: URL] {
@@ -80,6 +89,7 @@ final class MediaResolver: @unchecked Sendable {
     }
 
     func entry(for assetId: String) -> MediaManifestEntry? {
-        manifest().entries.first(where: { $0.id == assetId })
+        if let entryIndex { return entryIndex[assetId] }
+        return manifest().entries.first(where: { $0.id == assetId })
     }
 }

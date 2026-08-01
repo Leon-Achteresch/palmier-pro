@@ -35,6 +35,38 @@ final class TimelineInputController {
         self.view = view
     }
 
+    private var snapTargetCache: (key: String, targets: [SnapEngine.SnapTarget])?
+    private var clipsByIdCache: (revision: Int, clips: [String: Clip])?
+
+    private func snapTargets(
+        excludeClipIds: Set<String> = [],
+        includePlayhead: Bool = false,
+        includeExcludedClipBeats: Bool = false
+    ) -> [SnapEngine.SnapTarget] {
+        let key = "\(editor.timelineRenderRevision)|\(editor.currentFrame)|\(includePlayhead)|\(includeExcludedClipBeats)|\(excludeClipIds.sorted().joined(separator: ","))"
+        if let cache = snapTargetCache, cache.key == key { return cache.targets }
+        let targets = SnapEngine.collectTargets(
+            tracks: editor.timeline.tracks,
+            playheadFrame: editor.currentFrame,
+            excludeClipIds: excludeClipIds,
+            includePlayhead: includePlayhead,
+            beatFrames: editor.beatSnapFrames(for:),
+            includeExcludedClipBeats: includeExcludedClipBeats
+        )
+        snapTargetCache = (key, targets)
+        return targets
+    }
+
+    private var clipsById: [String: Clip] {
+        if let cache = clipsByIdCache, cache.revision == editor.timelineRenderRevision { return cache.clips }
+        let clips = Dictionary(
+            editor.timeline.tracks.flatMap(\.clips).map { ($0.id, $0) },
+            uniquingKeysWith: { a, _ in a }
+        )
+        clipsByIdCache = (editor.timelineRenderRevision, clips)
+        return clips
+    }
+
     // MARK: - Mouse down
 
 
@@ -316,12 +348,7 @@ final class TimelineInputController {
             return
 
         case .timelineRange(let drag):
-            let targets = SnapEngine.collectTargets(
-                tracks: editor.timeline.tracks,
-                playheadFrame: editor.currentFrame,
-                includePlayhead: true,
-                beatFrames: editor.beatSnapFrames(for:)
-            )
+            let targets = snapTargets(includePlayhead: true)
             let rangeEndFrame: Int
             if let snap = SnapEngine.findSnap(
                 position: frame,
@@ -341,17 +368,10 @@ final class TimelineInputController {
         case .moveClip(var drag):
             let candidateFrame = frame - drag.grabOffsetFrames
             let allDraggedIds = Set(drag.all.map(\.clipId))
-            let targets = SnapEngine.collectTargets(
-                tracks: editor.timeline.tracks,
-                playheadFrame: editor.currentFrame,
-                excludeClipIds: allDraggedIds,
-                includePlayhead: true,
-                beatFrames: editor.beatSnapFrames(for:)
-            )
+            let targets = snapTargets(excludeClipIds: allDraggedIds, includePlayhead: true)
 
             // Let any selected edge drive snapping, not just the lead start.
-            let clipsById = Dictionary(uniqueKeysWithValues:
-                editor.timeline.tracks.flatMap(\.clips).map { ($0.id, $0) })
+            let clipsById = self.clipsById
             var probeOffsets: [Int] = []
             for p in drag.all {
                 guard let c = clipsById[p.clipId] else { continue }
@@ -388,14 +408,7 @@ final class TimelineInputController {
 
         case .trimLeft(var drag):
             let candidateStart = frame
-            let targets = SnapEngine.collectTargets(
-                tracks: editor.timeline.tracks,
-                playheadFrame: editor.currentFrame,
-                excludeClipIds: [drag.clipId],
-                includePlayhead: true,
-                beatFrames: editor.beatSnapFrames(for:),
-                includeExcludedClipBeats: true
-            )
+            let targets = snapTargets(excludeClipIds: [drag.clipId], includePlayhead: true, includeExcludedClipBeats: true)
             let snappedStart: Int
             if let snap = SnapEngine.findSnap(
                 position: candidateStart,
@@ -419,14 +432,7 @@ final class TimelineInputController {
         case .trimRight(var drag):
             let originalEndFrame = drag.originalStartFrame + drag.originalDuration
             let candidateEnd = max(drag.originalStartFrame + 1, frame)
-            let targets = SnapEngine.collectTargets(
-                tracks: editor.timeline.tracks,
-                playheadFrame: editor.currentFrame,
-                excludeClipIds: [drag.clipId],
-                includePlayhead: true,
-                beatFrames: editor.beatSnapFrames(for:),
-                includeExcludedClipBeats: true
-            )
+            let targets = snapTargets(excludeClipIds: [drag.clipId], includePlayhead: true, includeExcludedClipBeats: true)
             let snappedEnd: Int
             if let snap = SnapEngine.findSnap(
                 position: candidateEnd,
@@ -712,12 +718,7 @@ final class TimelineInputController {
         if editor.toolMode == .razor && point.y >= scrollOffsetY + geometry.rulerHeight {
             view.setHoveredClipId(nil)
             let candidate = geometry.frameAt(x: point.x)
-            let targets = SnapEngine.collectTargets(
-                tracks: editor.timeline.tracks,
-                playheadFrame: editor.currentFrame,
-                includePlayhead: true,
-                beatFrames: editor.beatSnapFrames(for:)
-            )
+            let targets = snapTargets(includePlayhead: true)
             if let snap = SnapEngine.findSnap(
                 position: candidate,
                 targets: targets,
@@ -1236,7 +1237,7 @@ final class TimelineInputController {
     /// Clamps track movement to valid, type-compatible tracks.
     func clampedTrackDelta(for drag: DragState.MoveClipDrag, proposed: Int) -> Int {
         let tracks = editor.timeline.tracks
-        let clipsById = Dictionary(uniqueKeysWithValues: tracks.flatMap(\.clips).map { ($0.id, $0) })
+        let clipsById = self.clipsById
         let pinned = pinnedCompanionIds(for: drag)
         let movers = drag.all.filter { !pinned.contains($0.clipId) }
         let step = proposed >= 0 ? -1 : 1

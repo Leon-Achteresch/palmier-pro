@@ -70,6 +70,7 @@ final class EditorViewModel {
     var speechAnalyzingCount: Int = 0
     var speakerRegistry: [SpeakerRegistryEntry] = []
     var multicamGroups: [MulticamSource] = []
+    var linkedContextPath: String?
     var speakerAssignments: [String: [String: Int]] = [:]
     var speakerIdentifyPhase: String?
     var speakerIdentifyInFlight: Bool { speakerIdentifyPhase != nil }

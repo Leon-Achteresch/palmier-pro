@@ -106,7 +106,15 @@ fileprivate struct SetKeyframesInput: DecodableToolArgs {
     let clipId: String?
     let clipIds: [String]?
     let property: String?
-    static let allowedKeys: Set<String> = ["clipId", "clipIds", "property", "keyframes", "tracks"]
+    let mode: String?
+    let stagger: Int?
+    static let allowedKeys: Set<String> = ["clipId", "clipIds", "property", "keyframes", "tracks", "mode", "stagger", "repeat"]
+}
+
+struct KeyframeRepeatSpec {
+    let count: Int
+    let pingPong: Bool
+    let gapFrames: Int
 }
 
 fileprivate struct LinkClipsInput: DecodableToolArgs {
@@ -782,8 +790,20 @@ extension ToolExecutor {
         let clipIds = input.clipIds ?? input.clipId.map { [$0] } ?? []
         guard !clipIds.isEmpty else { throw ToolError("Provide 'clipId' or a non-empty 'clipIds'.") }
         guard Set(clipIds).count == clipIds.count else { throw ToolError("clipIds contains duplicates.") }
-        for id in clipIds where editor.findClip(id: id) == nil {
-            throw ToolError("Clip not found: \(id)")
+        var resolvedIds: [String: String] = [:]
+        for id in clipIds {
+            guard let clip = editor.clipFor(id: id) else { throw ToolError("Clip not found: \(id)") }
+            resolvedIds[clip.id] = id
+        }
+
+        let mode = input.mode ?? "replace"
+        guard mode == "replace" || mode == "merge" else {
+            throw ToolError("mode must be 'replace' or 'merge' (got '\(mode)')")
+        }
+        let merge = mode == "merge"
+        let stagger = input.stagger ?? 0
+        if stagger != 0, clipIds.count < 2 {
+            throw ToolError("stagger needs 'clipIds' with at least 2 clips.")
         }
 
         var requested: [(property: String, path: String, rows: [Any])] = []
@@ -810,21 +830,136 @@ extension ToolExecutor {
             requested.append((property, "keyframes", rows))
         }
 
-        let writers = try requested.map { try Self.keyframeWriter(property: $0.property, path: $0.path, rows: $0.rows) }
+        if merge, let empty = requested.first(where: { $0.rows.isEmpty }) {
+            throw ToolError("\(empty.path): empty rows with mode 'merge' change nothing — use mode 'replace' to clear a track.")
+        }
+
+        let repeatSpec = try Self.parseRepeatSpec(args["repeat"])
+        if repeatSpec != nil {
+            guard !merge else { throw ToolError("repeat requires mode 'replace' — it bakes a full track.") }
+            if let empty = requested.first(where: { $0.rows.isEmpty }) {
+                throw ToolError("\(empty.path): repeat needs keyframe rows to unroll.")
+            }
+        }
+
+        let writers = try requested.map {
+            try Self.keyframeWriter(property: $0.property, path: $0.path, rows: $0.rows, merge: merge, repeatSpec: repeatSpec)
+        }
+        let offsets = Dictionary(uniqueKeysWithValues: clipIds.enumerated().map { ($1, stagger * $0) })
 
         let snapshot = timelineSnapshot(editor)
         editor.undo.perform("Set Keyframes (Agent)") {
             editor.commitClipProperties(clipIds: clipIds, actionName: "Set Keyframes (Agent)") { clip in
-                for write in writers { write(&clip) }
+                let offset = resolvedIds[clip.id].flatMap { offsets[$0] } ?? 0
+                for write in writers { write(&clip, offset) }
             }
         }
 
+        var notes: [String] = []
         let cleared = requested.filter { $0.rows.isEmpty }.map(\.property)
-        let notes = cleared.isEmpty ? [] : ["Cleared \(cleared.joined(separator: ", ")) keyframes."]
+        if !cleared.isEmpty { notes.append("Cleared \(cleared.joined(separator: ", ")) keyframes.") }
+        if stagger != 0 { notes.append("Staggered by \(stagger) frames per clip in clipIds order.") }
+        if let repeatSpec {
+            notes.append("Unrolled \(repeatSpec.count) \(repeatSpec.pingPong ? "ping-pong" : "loop") cycles into explicit keyframes.")
+        }
         return mutationResult(editor, since: snapshot, touched: clipIds, notes: notes)
     }
 
-    private static func keyframeWriter(property: String, path: String, rows: [Any]) throws -> (inout Clip) -> Void {
+    private static func parseRepeatSpec(_ raw: Any?) throws -> KeyframeRepeatSpec? {
+        guard let raw else { return nil }
+        guard let obj = raw as? [String: Any] else {
+            throw ToolError("repeat: expected {count, type, gapFrames?}")
+        }
+        try validateKeys(obj, allowed: ["count", "type", "gapFrames"], at: "repeat")
+        guard let rawCount = obj["count"] else { throw ToolError("repeat.count is required") }
+        let count = try kfInt(rawCount, at: "repeat.count")
+        guard (2...50).contains(count) else {
+            throw ToolError("repeat.count: must be between 2 and 50 (got \(count))")
+        }
+        guard let type = obj["type"] as? String else {
+            throw ToolError("repeat.type: expected 'loop', 'reverse', or 'mirror'")
+        }
+        guard ["loop", "reverse", "mirror"].contains(type) else {
+            throw ToolError("repeat.type: expected 'loop', 'reverse', or 'mirror' (got '\(type)')")
+        }
+        let gap = try obj["gapFrames"].map { try kfInt($0, at: "repeat.gapFrames") } ?? 0
+        guard gap >= 0, gap <= 10_000 else {
+            throw ToolError("repeat.gapFrames: must be between 0 and 10000 (got \(gap))")
+        }
+        return KeyframeRepeatSpec(count: count, pingPong: type != "loop", gapFrames: gap)
+    }
+
+    static func unrollRepeat<V>(_ track: KeyframeTrack<V>, _ spec: KeyframeRepeatSpec, path: String) throws -> KeyframeTrack<V> {
+        let kfs = track.keyframes
+        guard kfs.count >= 2, let first = kfs.first?.frame, let last = kfs.last?.frame, last > first else {
+            throw ToolError("\(path): repeat needs at least 2 keyframes spanning more than 0 frames.")
+        }
+        guard kfs.count * spec.count <= 600 else {
+            throw ToolError("\(path): repeat would produce more than 600 keyframes (\(kfs.count) × \(spec.count)).")
+        }
+        let span = last - first
+        var out = kfs
+        for i in 1..<spec.count {
+            let iteration: [Keyframe<V>]
+            if spec.pingPong {
+                let base = first + i * (span + spec.gapFrames)
+                if i.isMultiple(of: 2) {
+                    iteration = kfs.map {
+                        Keyframe(frame: base + ($0.frame - first), value: $0.value, interpolationOut: $0.interpolationOut, easingParams: $0.easingParams)
+                    }
+                } else {
+                    iteration = (0..<kfs.count).reversed().map { j in
+                        let src = kfs[j]
+                        // The outgoing easing of a reversed keyframe is the time-mirrored easing of the segment it now starts.
+                        let segment = j > 0 ? kfs[j - 1] : nil
+                        return Keyframe(
+                            frame: base + (span - (src.frame - first)),
+                            value: src.value,
+                            interpolationOut: segment.map { $0.interpolationOut.mirrored } ?? .smooth,
+                            easingParams: segment.flatMap { Self.mirroredEasingParams($0) }
+                        )
+                    }
+                }
+            } else {
+                let base = i * (span + max(spec.gapFrames, 1))
+                iteration = kfs.map {
+                    Keyframe(frame: $0.frame + base, value: $0.value, interpolationOut: $0.interpolationOut, easingParams: $0.easingParams)
+                }
+            }
+            for kf in iteration {
+                if kf.frame == out.last?.frame { out[out.count - 1] = kf } else { out.append(kf) }
+            }
+        }
+        return KeyframeTrack(keyframes: out)
+    }
+
+    private static func mirroredEasingParams<V>(_ kf: Keyframe<V>) -> [Double]? {
+        guard let p = kf.easingParams else { return nil }
+        if kf.interpolationOut == .cubicBezier, p.count == 4 {
+            return [1 - p[2], 1 - p[3], 1 - p[0], 1 - p[1]]
+        }
+        return p
+    }
+
+    private static func keyframeWriter(property: String, path: String, rows: [Any], merge: Bool, repeatSpec: KeyframeRepeatSpec?) throws -> (inout Clip, Int) -> Void {
+        func writer<V>(
+            _ parsed: KeyframeTrack<V>,
+            _ keyPath: WritableKeyPath<Clip, KeyframeTrack<V>?>
+        ) throws -> (inout Clip, Int) -> Void {
+            let kfs = try repeatSpec.map { try Self.unrollRepeat(parsed, $0, path: path) } ?? parsed
+            return { clip, offset in
+                let shifted = offset == 0 ? kfs.keyframes : kfs.keyframes.map {
+                    Keyframe(frame: $0.frame + offset, value: $0.value, interpolationOut: $0.interpolationOut, easingParams: $0.easingParams)
+                }
+                if merge {
+                    var track = clip[keyPath: keyPath] ?? KeyframeTrack<V>()
+                    for kf in shifted { track.upsert(kf) }
+                    clip[keyPath: keyPath] = track.keyframes.isEmpty ? nil : track
+                } else {
+                    clip[keyPath: keyPath] = shifted.isEmpty ? nil : KeyframeTrack(keyframes: shifted)
+                }
+            }
+        }
         switch property {
         case "volumeDb":
             let kfs = try parseScalarKeyframes(
@@ -833,22 +968,17 @@ extension ToolExecutor {
                 valueName: "decibels",
                 range: VolumeScale.floorDb...VolumeScale.ceilingDb
             )
-            return { $0.volumeTrack = kfs.keyframes.isEmpty ? nil : kfs }
+            return try writer(kfs, \.volumeTrack)
         case "opacity":
-            let kfs = try parseScalarKeyframes(rows, path: path, range: 0...1)
-            return { $0.opacityTrack = kfs.keyframes.isEmpty ? nil : kfs }
+            return try writer(try parseScalarKeyframes(rows, path: path, range: 0...1), \.opacityTrack)
         case "rotation":
-            let kfs = try parseScalarKeyframes(rows, path: path)
-            return { $0.rotationTrack = kfs.keyframes.isEmpty ? nil : kfs }
+            return try writer(try parseScalarKeyframes(rows, path: path), \.rotationTrack)
         case "position":
-            let kfs = try parsePairKeyframes(rows, path: path)
-            return { $0.positionTrack = kfs.keyframes.isEmpty ? nil : kfs }
+            return try writer(try parsePairKeyframes(rows, path: path), \.positionTrack)
         case "scale":
-            let kfs = try parsePairKeyframes(rows, path: path)
-            return { $0.scaleTrack = kfs.keyframes.isEmpty ? nil : kfs }
+            return try writer(try parsePairKeyframes(rows, path: path), \.scaleTrack)
         case "crop":
-            let kfs = try parseCropKeyframes(rows, path: path)
-            return { $0.cropTrack = kfs.keyframes.isEmpty ? nil : kfs }
+            return try writer(try parseCropKeyframes(rows, path: path), \.cropTrack)
         default:
             throw ToolError("Unknown property '\(property)'. Expected one of: \(keyframePropertyNames.sorted().joined(separator: ", "))")
         }
@@ -1055,8 +1185,8 @@ extension ToolExecutor {
                 try kfDouble(row[k + 1], at: "\(path)[\(i)][\(k + 1)] (\(fieldNames[k]))")
             }
             try validateValues(i, values)
-            let interp = try kfInterp(row.count > minLen ? row[minLen] : nil, at: "\(path)[\(i)][\(minLen)] (interp)")
-            out.append(Keyframe(frame: frame, value: build(values), interpolationOut: interp))
+            let (interp, params) = try kfInterp(row.count > minLen ? row[minLen] : nil, at: "\(path)[\(i)][\(minLen)] (interp)")
+            out.append(Keyframe(frame: frame, value: build(values), interpolationOut: interp, easingParams: params))
         }
         return KeyframeTrack(keyframes: sortAndDedupe(out))
     }
@@ -1123,12 +1253,80 @@ extension ToolExecutor {
         return v
     }
 
-    private static func kfInterp(_ raw: Any?, at path: String) throws -> Interpolation {
-        guard let raw else { return .smooth }
-        guard let s = raw as? String, let i = Interpolation(rawValue: s) else {
-            throw ToolError("\(path): expected one of 'linear', 'hold', 'smooth' (got \(raw))")
+    private static func kfInterp(_ raw: Any?, at path: String) throws -> (Interpolation, [Double]?) {
+        guard let raw else { return (.smooth, nil) }
+        if let s = raw as? String {
+            guard let i = Interpolation(rawValue: s) else {
+                let names = Interpolation.allCases.map { "'\($0.rawValue)'" }.joined(separator: ", ")
+                throw ToolError("\(path): expected one of \(names), a [x1,y1,x2,y2] bezier array, or {type: 'spring'|'steps'|'cubicBezier', …} (got '\(s)')")
+            }
+            return (i, nil)
         }
-        return i
+        if let arr = raw as? [Any] {
+            return (.cubicBezier, try bezierPoints(arr, at: path))
+        }
+        if let obj = raw as? [String: Any] {
+            guard let type = obj["type"] as? String else {
+                throw ToolError("\(path): easing object needs a 'type' of 'spring', 'steps', or 'cubicBezier'")
+            }
+            switch type {
+            case "spring":
+                try validateKeys(obj, allowed: ["type", "bounce", "stiffness", "damping", "mass"], at: path)
+                let bounce: Double
+                if let raw = obj["bounce"] {
+                    bounce = try kfDouble(raw, at: "\(path).bounce")
+                    guard (0...1).contains(bounce) else {
+                        throw ToolError("\(path).bounce: must be between 0 and 1 (got \(bounce))")
+                    }
+                } else if obj["stiffness"] != nil || obj["damping"] != nil || obj["mass"] != nil {
+                    let stiffness = try obj["stiffness"].map { try kfDouble($0, at: "\(path).stiffness") } ?? 100
+                    let damping = try obj["damping"].map { try kfDouble($0, at: "\(path).damping") } ?? 10
+                    let mass = try obj["mass"].map { try kfDouble($0, at: "\(path).mass") } ?? 1
+                    guard stiffness > 0, damping >= 0, mass > 0 else {
+                        throw ToolError("\(path): spring needs stiffness > 0, damping >= 0, mass > 0")
+                    }
+                    let zeta = damping / (2 * (stiffness * mass).squareRoot())
+                    bounce = min(1, max(0, 1 - zeta))
+                } else {
+                    bounce = 0.25
+                }
+                return (.spring, [bounce])
+            case "steps":
+                try validateKeys(obj, allowed: ["type", "count"], at: path)
+                let count = try obj["count"].map { try kfInt($0, at: "\(path).count") } ?? 4
+                guard (1...100).contains(count) else {
+                    throw ToolError("\(path).count: must be between 1 and 100 (got \(count))")
+                }
+                return (.steps, [Double(count)])
+            case "cubicBezier":
+                try validateKeys(obj, allowed: ["type", "points"], at: path)
+                guard let pts = obj["points"] as? [Any] else {
+                    throw ToolError("\(path).points: expected [x1, y1, x2, y2]")
+                }
+                return (.cubicBezier, try bezierPoints(pts, at: "\(path).points"))
+            default:
+                throw ToolError("\(path): unknown easing type '\(type)'. Expected 'spring', 'steps', or 'cubicBezier'.")
+            }
+        }
+        throw ToolError("\(path): expected an easing name, a [x1,y1,x2,y2] bezier array, or an easing object")
+    }
+
+    private static func bezierPoints(_ arr: [Any], at path: String) throws -> [Double] {
+        guard arr.count == 4 else {
+            throw ToolError("\(path): a cubic-bezier easing needs exactly 4 numbers [x1, y1, x2, y2] (got \(arr.count))")
+        }
+        let p = try arr.enumerated().map { try kfDouble($0.element, at: "\(path)[\($0.offset)]") }
+        guard (0...1).contains(p[0]), (0...1).contains(p[2]) else {
+            throw ToolError("\(path): bezier x1 and x2 must be within 0–1 (got \(p[0]), \(p[2]))")
+        }
+        return p
+    }
+
+    private static func validateKeys(_ obj: [String: Any], allowed: Set<String>, at path: String) throws {
+        let unknown = Set(obj.keys).subtracting(allowed)
+        guard unknown.isEmpty else {
+            throw ToolError("\(path): unknown key\(unknown.count == 1 ? "" : "s") \(unknown.sorted().joined(separator: ", "))")
+        }
     }
 
     // MARK: manage_tracks

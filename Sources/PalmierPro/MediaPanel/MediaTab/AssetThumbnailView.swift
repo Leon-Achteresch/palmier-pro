@@ -70,6 +70,12 @@ struct AssetThumbnailView: View {
         .opacity(isSwapDimmed ? AppTheme.Opacity.muted : 1)
         .allowsHitTesting(!isSwapDimmed)
         .task(id: "\(asset.id)|\(asset.url.path)|\(asset.generationStatus.serialized)|\(isMissing)") {
+            if asset.isGenerating {
+                for ref in referenceImageAssets where ref.thumbnail == nil {
+                    await ref.loadLibraryThumbnail()
+                }
+                return
+            }
             guard case .none = asset.generationStatus, !isMissing else { return }
             await asset.loadLibraryThumbnail()
         }
@@ -167,16 +173,17 @@ struct AssetThumbnailView: View {
         }
     }
 
-    private var generatingReferenceImage: NSImage? {
-        guard let input = asset.generationInput else { return nil }
+    private var referenceImageAssets: [MediaAsset] {
+        guard let input = asset.generationInput else { return [] }
         let refIds = (input.imageURLAssetIds ?? []) + (input.referenceImageAssetIds ?? [])
-        for id in refIds {
-            guard let ref = editor.mediaAssets.first(where: { $0.id == id }), ref.type == .image else { continue }
-            if let image = ref.thumbnail ?? NSImage(contentsOf: ref.url) {
-                return image
-            }
+        return refIds.compactMap { id in
+            guard let ref = editor.mediaAssetsById[id], ref.type == .image else { return nil }
+            return ref
         }
-        return nil
+    }
+
+    private var generatingReferenceImage: NSImage? {
+        referenceImageAssets.lazy.compactMap(\.thumbnail).first
     }
 
     @ViewBuilder

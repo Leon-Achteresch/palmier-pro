@@ -61,6 +61,7 @@ struct InspectorView: View {
     @State private var transformExpanded = true
     @State private var imageAdjustmentExpanded = true
     @State var audioLevelsExpanded = true
+    @State private var fileSizeText: String?
     @State var collapsedAdjustSections: Set<String> = ["Curves", "Color Wheels", "Hue Curves", "LUTs", "Effects"]
     @State var collapsedAdjustSubgroups: Set<String> = [
         "Detail", "Blur", "Motion Blur", "Vignette", "Film Grain", "Glow", "Chroma Key",
@@ -153,8 +154,59 @@ struct InspectorView: View {
                     menuMetadataRow(label: "Frame Rate", value: "\(editor.timeline.fps) fps") { fpsMenuItems }
                     menuMetadataRow(label: "Aspect Ratio", value: CanvasAspectRatio.displayLabel(width: editor.timeline.width, height: editor.timeline.height)) { aspectMenuItems }
                 }
+
+                metadataSection(title: "Context") {
+                    linkedContextRow
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var linkedContextRow: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
+            HStack(spacing: AppTheme.Spacing.sm) {
+                Text("Source")
+                    .font(.system(size: AppTheme.FontSize.xs))
+                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+                    .fixedSize()
+                Spacer()
+                Button("Choose…") { chooseLinkedContextFolder() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: AppTheme.FontSize.xs, weight: AppTheme.FontWeight.medium))
+                    .foregroundStyle(AppTheme.Text.secondaryColor)
+                if editor.linkedContextPath != nil {
+                    Button("Clear") { editor.setLinkedContextPath(nil) }
+                        .buttonStyle(.plain)
+                        .font(.system(size: AppTheme.FontSize.xs, weight: AppTheme.FontWeight.medium))
+                        .foregroundStyle(AppTheme.Text.secondaryColor)
+                }
+            }
+            .frame(minHeight: AppTheme.IconSize.md)
+
+            Text(editor.linkedContextPath ?? "None — link a code or brand folder for the AI")
+                .font(.system(size: AppTheme.FontSize.xs))
+                .foregroundStyle(AppTheme.Text.secondaryColor)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+                .help(editor.linkedContextPath ?? "Choose a folder with product code, design tokens, or brand assets.")
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func chooseLinkedContextFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a source or brand folder for this project"
+        if let path = editor.linkedContextPath {
+            panel.directoryURL = URL(fileURLWithPath: path, isDirectory: true)
+        }
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            editor.setLinkedContextPath(url.path)
         }
     }
 
@@ -1083,14 +1135,18 @@ struct InspectorView: View {
             if asset.duration > 0 && asset.type != .image {
                 plainMetadataRow(label: "Duration", value: formatDuration(asset.duration))
             }
-            if let fileSize = fileSize(for: asset.url) {
-                plainMetadataRow(label: "Size", value: fileSize)
+            if let fileSizeText {
+                plainMetadataRow(label: "Size", value: fileSizeText)
             }
             plainMetadataRow(
                 label: "Path",
                 value: asset.url.path,
                 truncate: .middle
             )
+        }
+        .task(id: asset.url) {
+            let url = asset.url
+            fileSizeText = await Task.detached(priority: .utility) { Self.fileSize(for: url) }.value
         }
     }
 
@@ -1143,11 +1199,11 @@ struct InspectorView: View {
     private var selectedMediaAsset: MediaAsset? {
         guard editor.selectedMediaAssetIds.count == 1,
               let id = editor.selectedMediaAssetIds.first else { return nil }
-        return editor.mediaAssets.first { $0.id == id }
+        return editor.mediaAssetsById[id]
     }
 
 
-    private func fileSize(for url: URL) -> String? {
+    private nonisolated static func fileSize(for url: URL) -> String? {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
               let bytes = attrs[.size] as? Int64 else { return nil }
         let formatter = ByteCountFormatter()

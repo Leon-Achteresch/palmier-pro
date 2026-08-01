@@ -33,22 +33,24 @@ final class ChangelogStore {
 
     /// Show the overlay only on a genuine version change, never on a fresh install
     func checkForWhatsNew() {
-        guard let feed = loadFeed() else { return }
-        changelogURL = feed.changelogURL.flatMap { URL(string: $0) }
+        Task {
+            guard let feed = await Task.detached(priority: .utility, operation: Self.loadFeed).value else { return }
+            changelogURL = feed.changelogURL.flatMap { URL(string: $0) }
 
-        let current = currentVersion
-        let lastSeen = UserDefaults.standard.string(forKey: lastSeenKey)
-        UserDefaults.standard.set(current, forKey: lastSeenKey)
+            let current = currentVersion
+            let lastSeen = UserDefaults.standard.string(forKey: lastSeenKey)
+            UserDefaults.standard.set(current, forKey: lastSeenKey)
 
-        guard let lastSeen, !lastSeen.isEmpty, lastSeen != current else { return }
-        pending = feed.entries.first { $0.version == current }
+            guard let lastSeen, !lastSeen.isEmpty, lastSeen != current else { return }
+            pending = feed.entries.first { $0.version == current }
+        }
     }
 
     func dismiss() {
         pending = nil
     }
 
-    private func loadFeed() -> ChangelogFeed? {
+    private nonisolated static func loadFeed() -> ChangelogFeed? {
         guard let root = Bundle.main.resourceURL else { return nil }
         let candidates = [
             root.appendingPathComponent("Changelog/changelog.json"),

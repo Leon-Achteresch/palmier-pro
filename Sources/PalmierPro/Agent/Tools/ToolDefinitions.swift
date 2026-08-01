@@ -69,6 +69,7 @@ enum ToolName: String, CaseIterable, Sendable {
     // Generation
     case listModels = "list_models"
     case generateVideo = "generate_video"
+    case generateTransition = "generate_transition"
     case generateImage = "generate_image"
     case generateAudio = "generate_audio"
     case upscaleMedia = "upscale_media"
@@ -76,6 +77,7 @@ enum ToolName: String, CaseIterable, Sendable {
     // Meta
     case sendFeedback = "send_feedback"
     case readSkill = "read_skill"
+    case readProjectContext = "read_project_context"
 }
 
 struct AgentTool: @unchecked Sendable {
@@ -88,13 +90,25 @@ enum ToolDefinitions {
     static let all: [AgentTool] = [
         AgentTool(
             name: .getTimeline,
-            description: "Always call at the start of a session. Returns project settings (fps, resolution, totalFrames, durationSeconds), tracks with a stable trackId, their current index (what every trackIndex parameter takes), type, and clips, plus canGenerate (if false, generation/upscale tools will fail — tell the user to sign in to Palmier and subscribe, or to add their own OpenRouter/ElevenLabs API key in Settings, before attempting them). Clip ids are accepted by clip mutation tools; trackId is accepted by manage_tracks.\n\nEvery clip occupies frames: [start, end) — timeline frames, end exclusive, duration = end − start. gaps on a track lists its empty [start, end) spans; no gaps key means contiguous. A video clip's linked audio partner is folded into it as audio: {id, track, …} carrying only what deviates (volumeDb, effects, differing trims); the partner is not repeated on its own track, which instead reports linkedClips (its folded count). Address the audio side by its nested id.\n\nFields equal to their defaults are omitted: mediaType 'video', sourceClipType = mediaType, speed 1, volumeDb 0, opacity 1, edgeRounding 0, edgeSoftness 0, trims/fades 0, identity transform/crop, default textStyle, track muted/hidden false. Text clips never report trims. Keyframe tracks that animate nothing are shown as what they are: identity tracks are dropped, constant ones appear as the static field (e.g. crop: {left: 0.31}). A graded clip carries `color` — its grade in apply_color's own vocabulary, pasteable to other clips via apply_color's color parameter. Other effects appear as effects: [{type, params}], the exact shape apply_effect accepts.\n\nCaption clips (sharing a captionGroupId) come back per track as captionGroups summaries: clipCount, frameRange, shared style, and a textPreview — individual caption clips and their ids are NOT listed. That summary is all you need to restyle (update_text with captionGroupId) or judge coverage; the spoken words live in get_transcript. Only when you must touch individual caption clips (retime one, delete one, fix one word's style), re-read with captionDetail:true — ideally windowed — to get [clipId, startFrame, endFrame, text] rows, capped at 200 per group. Caption clips whose properties deviate from the group always appear individually in clips.",
+            description: "Always call at the start of a session. Returns project settings (fps, resolution, totalFrames, durationSeconds), tracks with a stable trackId, their current index (what every trackIndex parameter takes), type, and clips, plus canGenerate (if false, generation/upscale tools will fail — tell the user to sign in to Palmier and subscribe, or to add their own OpenRouter/ElevenLabs API key in Settings, before attempting them). When the project has a linked source/brand folder, linkedContext reports its path — explore it with read_project_context. Clip ids are accepted by clip mutation tools; trackId is accepted by manage_tracks.\n\nEvery clip occupies frames: [start, end) — timeline frames, end exclusive, duration = end − start. gaps on a track lists its empty [start, end) spans; no gaps key means contiguous. A video clip's linked audio partner is folded into it as audio: {id, track, …} carrying only what deviates (volumeDb, effects, differing trims); the partner is not repeated on its own track, which instead reports linkedClips (its folded count). Address the audio side by its nested id.\n\nFields equal to their defaults are omitted: mediaType 'video', sourceClipType = mediaType, speed 1, volumeDb 0, opacity 1, edgeRounding 0, edgeSoftness 0, trims/fades 0, identity transform/crop, default textStyle, track muted/hidden false. Text clips never report trims. Keyframe tracks that animate nothing are shown as what they are: identity tracks are dropped, constant ones appear as the static field (e.g. crop: {left: 0.31}). A graded clip carries `color` — its grade in apply_color's own vocabulary, pasteable to other clips via apply_color's color parameter. Other effects appear as effects: [{type, params}], the exact shape apply_effect accepts.\n\nCaption clips (sharing a captionGroupId) come back per track as captionGroups summaries: clipCount, frameRange, shared style, and a textPreview — individual caption clips and their ids are NOT listed. That summary is all you need to restyle (update_text with captionGroupId) or judge coverage; the spoken words live in get_transcript. Only when you must touch individual caption clips (retime one, delete one, fix one word's style), re-read with captionDetail:true — ideally windowed — to get [clipId, startFrame, endFrame, text] rows, capped at 200 per group. Caption clips whose properties deviate from the group always appear individually in clips.",
             inputSchema: objectSchema(
                 properties: [
                     "startFrame": ["type": "integer", "description": "Optional. Window start (inclusive); only clips intersecting [startFrame, endFrame) are returned. Tracks report totalClips when the window hides some."],
                     "endFrame": ["type": "integer", "description": "Optional. Window end (exclusive)."],
                     "captionDetail": ["type": "boolean", "description": "Optional. true expands captionGroups into per-clip [clipId, startFrame, endFrame, text] rows. Combine with a window; only needed to edit individual caption clips."],
                 ]
+            )
+        ),
+        AgentTool(
+            name: .readProjectContext,
+            description: "Read the project's linked source/brand folder (set in the Inspector under Context). Use this when get_timeline reports linkedContext — to pull product copy, design tokens, colors, typography, component structure, logos, and other corporate-design cues before generating or styling. action='list' walks a relative path (default '.') up to maxDepth; skips junk like node_modules/.git. action='read' returns text for source/token files or the image bytes for common image formats. Paths are relative to the linked root and cannot escape it.",
+            inputSchema: objectSchema(
+                properties: [
+                    "action": ["type": "string", "enum": ["list", "read"], "description": "list directories/files, or read one file."],
+                    "path": ["type": "string", "description": "Relative path under the linked folder. Optional for list (default '.'). Required for read."],
+                    "maxDepth": ["type": "integer", "description": "list only. Directory depth to walk (default 2, max 6)."],
+                ],
+                required: ["action"]
             )
         ),
         AgentTool(
@@ -525,14 +539,33 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .setKeyframes,
-            description: "Set animated keyframes on clips — the tool for animation: moves, pushes-in, spins, fades, reveals, ducking. Replaces the existing keyframe track for each property you pass (empty array clears it); properties you don't pass are untouched.\n\nAnimate several properties at once with `tracks` ({property: rows}) — one atomic, single-undo action, so a push-in that ramps scale, position, and opacity together is ONE call, not three. `property`+`keyframes` still sets a single track. Target one clip with `clipId` or give the identical animation to several with `clipIds`.\n\nFrames are CLIP-RELATIVE offsets (0 = first frame of the clip), so keyframes follow the clip when it moves. Rows are sorted by frame internally and the LAST row for any duplicate frame wins. Values must be finite numbers. Each row is `[frame, ...values, interp?]` where interp ∈ {linear, hold, smooth} (default smooth) and describes the ease OUT of that keyframe — so per-segment easing is set on the keyframe that starts the segment: 'hold' freezes until the next one (step animation), 'linear' is constant speed (mechanical moves, volume ramps), 'smooth' eases in and out (natural motion). Curved motion, held beats, and non-linear timing come from placing more keyframes, not from a curve parameter — e.g. an overshoot is three keyframes (start → past target → settle back).\n\nProperties and their value layouts:\n  • volumeDb `[frame, decibels]` — −60 through +15 dB; 0 dB keeps source level and −60 dB is mute\n  • opacity `[frame, value]` — value 0.0–1.0\n  • rotation `[frame, degrees]` — clockwise degrees\n  • position `[frame, topLeftX, topLeftY]` — TOP-LEFT corner in 0–1 normalized canvas coords. NOT the center. (Default static transform centers a full-canvas clip, so top-left of the static is (0, 0); a centered half-size clip has top-left (0.25, 0.25).)\n  • scale `[frame, width, height]` — clip's normalized width and height in 0–1 canvas coords (1.0 = fills the canvas axis). NOT a scale factor.\n  • crop `[frame, top, right, bottom, left]` — side insets in 0–1 of the source media.\n\nMotion keyframes (position/scale/rotation) override the static `transform` value when active.",
+            description: "Set animated keyframes on clips — the tool for animation: moves, pushes-in, spins, fades, reveals, ducking. By default replaces the existing keyframe track for each property you pass (empty array clears it); properties you don't pass are untouched. mode 'merge' instead upserts the given rows into the existing track — use it to adjust or add single keyframes without resending the whole animation.\n\nAnimate several properties at once with `tracks` ({property: rows}) — one atomic, single-undo action, so a push-in that ramps scale, position, and opacity together is ONE call, not three. `property`+`keyframes` still sets a single track. Target one clip with `clipId` or give the same animation to several with `clipIds`; add `stagger` (frames) to offset each subsequent clip's keyframes for cascading, wave-like motion across layers.\n\nFrames are CLIP-RELATIVE offsets (0 = first frame of the clip), so keyframes follow the clip when it moves. Rows are sorted by frame internally and the LAST row for any duplicate frame wins. Values must be finite numbers. Each row is `[frame, ...values, ease?]` where ease describes the curve OUT of that keyframe (the segment it starts). It accepts a named easing, a cubic-bezier array, or an easing object — the same vocabulary as motion.js:\n  • named — smooth (default; symmetric in-out, natural drifts and Ken Burns), easeOut (decelerating arrival; THE default for elements entering or moving to a target), easeIn (accelerating exit), easeInOut, linear (mechanical moves, volume ramps, continuous spins), hold (freeze until the next keyframe), circIn/circOut/circInOut, backIn/backOut (overshoot and settle; snappy pops)/backInOut, elasticIn/elasticOut (springy oscillation)/elasticInOut, bounceIn/bounceOut/bounceInOut, anticipate (pulls back, then shoots forward), spring (bounce 0.25), steps (4 steps)\n  • [x1, y1, x2, y2] — custom cubic bezier with CSS semantics (x1/x2 within 0–1), e.g. [0.32, 0, 0.67, 0]\n  • {type: 'spring', bounce: 0–1} — physical spring resolved over the segment's duration; bounce 0 glides in critically damped, 1 is maximally bouncy. Motion.js physics form {type: 'spring', stiffness, damping, mass} is accepted and mapped onto the segment duration.\n  • {type: 'steps', count: 1–100} — stepped/typewriter motion\n  • {type: 'cubicBezier', points: [x1, y1, x2, y2]} — object form of the bezier array\n\nrepeat unrolls the given rows into baked cycles before writing: {count: 2–50, type: 'loop' | 'reverse' | 'mirror', gapFrames?}. 'loop' restarts each cycle from the first value (with a 1-frame jump when gapFrames is 0); 'reverse' and 'mirror' ping-pong back and forth with time-mirrored easing (identical once baked). gapFrames adds rest between cycles. The result is ordinary keyframes, individually editable afterwards. Requires mode 'replace' and applies to every passed track.\n\nProperties and their value layouts:\n  • volumeDb `[frame, decibels]` — −60 through +15 dB; 0 dB keeps source level and −60 dB is mute\n  • opacity `[frame, value]` — value 0.0–1.0\n  • rotation `[frame, degrees]` — clockwise degrees\n  • position `[frame, topLeftX, topLeftY]` — TOP-LEFT corner in 0–1 normalized canvas coords. NOT the center. (Default static transform centers a full-canvas clip, so top-left of the static is (0, 0); a centered half-size clip has top-left (0.25, 0.25).)\n  • scale `[frame, width, height]` — clip's normalized width and height in 0–1 canvas coords (1.0 = fills the canvas axis). NOT a scale factor.\n  • crop `[frame, top, right, bottom, left]` — side insets in 0–1 of the source media.\n\nMotion keyframes (position/scale/rotation) override the static `transform` value when active.",
             inputSchema: objectSchema(
                 properties: [
                     "clipId": ["type": "string", "description": "The clip to animate. Use clipIds instead to give several clips the same animation."],
                     "clipIds": [
                         "type": "array",
                         "items": ["type": "string"],
-                        "description": "Several clips receiving the identical animation in one undoable action.",
+                        "description": "Several clips receiving the same animation in one undoable action; combine with stagger for cascaded timing.",
+                    ],
+                    "mode": [
+                        "type": "string",
+                        "enum": ["replace", "merge"],
+                        "description": "replace (default) swaps each passed property's whole track; merge upserts the given rows into the existing track (adjust single keyframes without resending the rest). Empty rows are only valid with replace.",
+                    ],
+                    "stagger": [
+                        "type": "integer",
+                        "description": "Frame offset added per clip in clipIds order (clip N shifts by N×stagger). Cascades one animation across layers — titles flying in one after another, grid tiles popping in a wave. Needs at least 2 clipIds.",
+                    ],
+                    "repeat": [
+                        "type": "object",
+                        "description": "Unroll the given rows into repeated cycles: {count: 2–50, type: 'loop'|'reverse'|'mirror', gapFrames?}. loop restarts from the first value each cycle; reverse/mirror ping-pong with time-mirrored easing. Requires mode 'replace'.",
+                        "properties": [
+                            "count": ["type": "integer", "description": "Total cycles including the first (2–50)."],
+                            "type": ["type": "string", "enum": ["loop", "reverse", "mirror"]],
+                            "gapFrames": ["type": "integer", "description": "Rest frames between cycles (default 0)."],
+                        ],
+                        "required": ["count", "type"],
                     ],
                     "tracks": [
                         "type": "object",
@@ -1041,7 +1074,8 @@ enum ToolDefinitions {
 
             ANIMATED PARAMS: a param takes either a number (static) or keyframe rows \
             [[frame, value, interp?], ...] — clip-relative frames and the same interp vocabulary as \
-            set_keyframes (linear, hold, smooth; default smooth). That's how you ramp a blur on a reveal, \
+            set_keyframes (linear, hold, smooth, easeIn, easeOut, backOut, elasticOut, bounceOut; \
+            default smooth). That's how you ramp a blur on a reveal, \
             pulse a glow to the beat, or ease a vignette in. An empty array clears the animation and keeps \
             the last static value. Values are clamped to the param's range.
 
@@ -1094,7 +1128,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .listModels,
-            description: "Lists AI models with their capabilities (durations, aspect ratios, resolutions, first/last frame support, reference support, voices/category for audio, and configurable settings for upscalers). Models with usesOwnApiKey:true run directly on the user's own provider key (OpenRouter for image/video, ElevenLabs for audio) and are billed there instead of in Palmier credits. Always call before generate_video, generate_image, generate_audio, or upscale_media so the model you pick actually supports the constraints you need. Returns { models, loaded } — if loaded=false the catalog hasn't synced yet (e.g. user not signed in); the models array may be empty even when models exist, so do not conclude no models are available. Retry after the user signs in.",
+            description: "Lists AI models with their capabilities (durations, aspect ratios, resolutions, first/last frame support, reference support, voices/category for audio, and configurable settings for upscalers). Models with usesOwnApiKey:true run directly on the user's own provider key (OpenRouter for image/video, ElevenLabs for audio) and are billed there instead of in Palmier credits. Always call before generate_video, generate_transition, generate_image, generate_audio, or upscale_media so the model you pick actually supports the constraints you need. For transitions, pick a video model with supportsFirstFrame and supportsLastFrame. Returns { models, loaded } — if loaded=false the catalog hasn't synced yet (e.g. user not signed in); the models array may be empty even when models exist, so do not conclude no models are available. Retry after the user signs in.",
             inputSchema: objectSchema(
                 properties: [
                     "type": ["type": "string", "enum": ["video", "image", "audio", "upscale"], "description": "Filter by type. Omit to list all models."],
@@ -1121,6 +1155,23 @@ enum ToolDefinitions {
                     "referenceAudioMediaRefs": ["type": "array", "items": ["type": "string"], "description": "Media asset IDs of audio references. Lip-sync models use this as the replacement audio track; prompt-driven models refer to them as @Audio1, @Audio2. See maxReferenceAudios, requiresReferenceAudio, and maxCombinedAudioRefSeconds."],
                     "folder": ["type": "string", "description": "Optional destination folder path, e.g. 'Hero shots/Takes'. Created if missing. Omit for the project root."],
                 ]
+            )
+        ),
+        AgentTool(
+            name: .generateTransition,
+            description: "Creates an AI video transition between two consecutive shots on a video track in one call. Pass afterClipId (the clip that ends where the transition should begin). Captures the last composited timeline frame of that shot as the first frame and the first frame of the following shot as the last frame, generates with a first+last-frame video model, places the placeholder into the gap, and retimes it to fill the gap when ready. If the clips are already contiguous, opens a gap first (duration defaults to 4s, snapped to the model). If a gap already exists after afterClipId, uses that gap as-is (max 15s). Prefer this over manually chaining capture_frame + generate_video + add_clips. Costs real money; generation itself is not undoable, but the gap open and timeline placement are.",
+            inputSchema: objectSchema(
+                properties: [
+                    "afterClipId": ["type": "string", "description": "Clip id from get_timeline for the shot before the transition. The next visual clip on the same track becomes the destination."],
+                    "prompt": ["type": "string", "description": "Optional motion prompt. Defaults to a seamless continuous-take transition. Describe only the morph/camera/SFX — first and last frames already anchor both ends."],
+                    "name": ["type": "string", "description": "Optional media-library name for the generated transition."],
+                    "model": ["type": "string", "description": "Video model id that supports first and last frames. Use list_models. Defaults to the first eligible model."],
+                    "duration": ["type": "integer", "description": "Seconds when opening a new gap between contiguous clips. Ignored when a gap already exists (the existing gap length wins). Snapped to the model's supported durations. Max 15s."],
+                    "aspectRatio": ["type": "string", "description": "Optional. Defaults to the timeline's aspect ratio matched to the model."],
+                    "resolution": ["type": "string", "description": "Optional resolution from list_models."],
+                    "folder": ["type": "string", "description": "Optional destination folder path for the generated asset."],
+                ],
+                required: ["afterClipId"]
             )
         ),
         AgentTool(
@@ -1211,15 +1262,13 @@ enum ToolDefinitions {
             .joined(separator: "\n")
     }
 
-    /// In-app assistant only
     static let readSkill = AgentTool(
         name: .readSkill,
-        description: "Load the full instructions for one of the skills listed under # Skills in your system prompt. Call this before starting a task that matches a skill's description, then follow the returned procedure. Pass the id exactly as listed.",
+        description: "Load the full instructions for one of the user's installed skills — playbooks for specific editing tasks (motion design, brand packages, recurring formats). Call without arguments to list available skills as `- id: description` lines; call with `id` to load one skill's full procedure, then follow it. Before starting a task that matches a listed skill's description, load and follow that skill.",
         inputSchema: objectSchema(
             properties: [
-                "id": ["type": "string", "description": "The skill id, exactly as listed under # Skills."],
-            ],
-            required: ["id"]
+                "id": ["type": "string", "description": "The skill id exactly as listed. Omit to list all installed skills."],
+            ]
         )
     )
 
@@ -1248,7 +1297,7 @@ enum ToolDefinitions {
         )
     )
 
-    static var mcpServer: [AgentTool] { all + [manageProject] }
+    static var mcpServer: [AgentTool] { all + [manageProject, readSkill] }
     static var inAppAgent: [AgentTool] { all + [readSkill] }
 
     private static func textBoxTransformProperties() -> [String: [String: Any]] {

@@ -50,6 +50,43 @@ import Testing
     #expect(parts.last?["text"] as? String == "what is this")
 }
 
+@Test func openRouterParsesToolCapableChatModels() throws {
+    let json = """
+    {
+      "data": [
+        {
+          "id": "anthropic/claude-sonnet-5",
+          "name": "Anthropic: Claude Sonnet 5",
+          "reasoning": {
+            "supported_efforts": ["max", "xhigh", "high", "medium", "low"],
+            "default_effort": "high",
+            "mandatory": false
+          }
+        },
+        {
+          "id": "openai/gpt-5.5",
+          "name": "OpenAI: GPT-5.5",
+          "reasoning": {
+            "supported_efforts": null,
+            "default_effort": "medium",
+            "mandatory": false
+          }
+        },
+        {"id": "acme/basic-chat", "name": "Basic Chat"}
+      ]
+    }
+    """.data(using: .utf8)!
+
+    let models = try OpenRouterAPI.parseChatModels(from: json)
+    #expect(models.map(\.id) == ["anthropic/claude-sonnet-5", "openai/gpt-5.5", "acme/basic-chat"])
+    #expect(models[0].supportsReasoning)
+    #expect(models[0].supportedEfforts == ["max", "xhigh", "high", "medium", "low"])
+    #expect(models[0].defaultEffort == "high")
+    #expect(models[1].supportsReasoning)
+    #expect(models[1].supportedEfforts == nil)
+    #expect(models[2].supportsReasoning == false)
+}
+
 @Test func openRouterCatalogPrefixesIdsAndMapsCapabilities() throws {
     let entries = OpenRouterCatalog.entries(
         imageModels: [.init(

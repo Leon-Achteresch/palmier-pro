@@ -74,7 +74,7 @@ final class AgentTerminalStore {
     }
 }
 
-private extension String {
+extension String {
     var singleQuotedForShell: String { "'\(replacingOccurrences(of: "'", with: "'\\''"))'" }
 }
 

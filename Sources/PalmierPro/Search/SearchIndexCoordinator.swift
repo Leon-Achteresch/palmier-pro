@@ -88,6 +88,8 @@ final class SearchIndexCoordinator {
             data: ["enabled": VisualModelLoader.shared.enabled]
         )
         Task {
+            // Let project-open work (restore, thumbnails, first playback) settle before loading the model.
+            try? await Task.sleep(for: .seconds(5))
             await VisualModelLoader.shared.prepare()
             sweep()
         }

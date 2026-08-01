@@ -22,6 +22,11 @@ extension ToolExecutor {
         }
 
         let enabled = input.enabled ?? true
+        #if !BUNDLED_SPEECH
+        if enabled, ElevenLabsService.shared.currentKey() == nil {
+            throw ToolError("Denoising needs an ElevenLabs API key. Ask the user to add one in Settings › Models.")
+        }
+        #endif
         let snapshot = timelineSnapshot(editor)
         let actionName = enabled ? "Denoise Audio (Agent)" : "Disable Denoise (Agent)"
         editor.undo.perform(actionName) {

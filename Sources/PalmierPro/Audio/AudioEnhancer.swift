@@ -5,23 +5,28 @@ import SpeechEnhancement
 
 enum AudioEnhancer {
     static let cache = DiskCache(named: "EnhancedAudio")
+    private static let denoiseGate = AsyncSemaphore(value: 2)
 
     enum EnhanceError: LocalizedError {
         case noAudioTrack
         case writeFailed
+        case noEnhancerAvailable
 
         var errorDescription: String? {
             switch self {
             case .noAudioTrack: "Source has no audio track"
             case .writeFailed: "Could not write enhanced audio"
+            case .noEnhancerAvailable: "Add your ElevenLabs API key in Settings › Models to denoise audio."
             }
         }
     }
 
     static func denoisedAudio(for sourceURL: URL, mediaRef: String) async throws -> URL {
-        let outputURL = denoisedURL(for: sourceURL, mediaRef: mediaRef)
-        if FileManager.default.fileExists(atPath: outputURL.path) { return outputURL }
+        if let cached = cachedDenoisedURL(for: sourceURL, mediaRef: mediaRef) { return cached }
+        try await denoiseGate.wait()
+        defer { Task { await denoiseGate.signal() } }
         #if BUNDLED_SPEECH
+        let outputURL = denoisedURL(for: sourceURL, mediaRef: mediaRef)
         let start = ContinuousClock.now
         var dry = try await readChannels(from: sourceURL)
         guard dry.contains(where: { !$0.isEmpty }) else { throw EnhanceError.noAudioTrack }
@@ -36,17 +41,55 @@ enum AudioEnhancer {
         Log.preview.notice("denoise ok mediaRef=\(mediaRef) seconds=\(String(format: "%.0f", elapsed))")
         return outputURL
         #else
-        throw MLXRuntime.Unavailable()
+        return try await remoteDenoisedAudio(for: sourceURL, mediaRef: mediaRef)
         #endif
     }
 
+    private static func remoteDenoisedAudio(for sourceURL: URL, mediaRef: String) async throws -> URL {
+        guard let apiKey = ElevenLabsKeychain.load() else { throw EnhanceError.noEnhancerAvailable }
+        let outputURL = remoteDenoisedURL(for: sourceURL, mediaRef: mediaRef)
+        let start = ContinuousClock.now
+        var prepared = sourceURL
+        var extracted: URL?
+        defer {
+            if let extracted { try? FileManager.default.removeItem(at: extracted) }
+        }
+        if ClipType(fileExtension: sourceURL.pathExtension.lowercased()) == .video {
+            let audioOnly = try await AudioTrackExtractor.extract(sourceURL: sourceURL)
+            extracted = audioOnly
+            prepared = audioOnly
+        }
+        let isolated = try await ElevenLabsAPI.run(.isolateVoice(source: prepared), apiKey: apiKey)
+        try FileManager.default.createDirectory(at: cache.directory, withIntermediateDirectories: true)
+        removeStaleCaches(for: mediaRef, keeping: outputURL)
+        try FileIO.moveReplacingDestination(from: isolated, to: outputURL)
+        let elapsed = Double(start.duration(to: .now).components.seconds)
+        Log.preview.notice("denoise ok via elevenlabs mediaRef=\(mediaRef) seconds=\(String(format: "%.0f", elapsed))")
+        return outputURL
+    }
+
     static func cachedDenoisedURL(for sourceURL: URL, mediaRef: String) -> URL? {
-        let url = denoisedURL(for: sourceURL, mediaRef: mediaRef)
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        let candidates = [
+            denoisedURL(for: sourceURL, mediaRef: mediaRef),
+            remoteDenoisedURL(for: sourceURL, mediaRef: mediaRef),
+        ]
+        return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     private static func denoisedURL(for sourceURL: URL, mediaRef: String) -> URL {
         cache.directory.appendingPathComponent("\(mediaRef)_\(DiskCache.sizeMtimeTag(for: sourceURL))_wet.caf")
+    }
+
+    private static func remoteDenoisedURL(for sourceURL: URL, mediaRef: String) -> URL {
+        cache.directory.appendingPathComponent("\(mediaRef)_\(DiskCache.sizeMtimeTag(for: sourceURL))_wet.mp3")
+    }
+
+    private static func removeStaleCaches(for mediaRef: String, keeping keep: URL) {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(at: cache.directory, includingPropertiesForKeys: nil) else { return }
+        for entry in entries where entry.lastPathComponent.hasPrefix("\(mediaRef)_") && entry.lastPathComponent != keep.lastPathComponent {
+            try? fm.removeItem(at: entry)
+        }
     }
 
     #if BUNDLED_SPEECH
@@ -64,14 +107,6 @@ enum AudioEnhancer {
     }
 
     private static var sampleRate: Double { Double(SpeechEnhancer.sampleRate) }
-
-    private static func removeStaleCaches(for mediaRef: String, keeping keep: URL) {
-        let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(at: cache.directory, includingPropertiesForKeys: nil) else { return }
-        for entry in entries where entry.lastPathComponent.hasPrefix("\(mediaRef)_") && entry.lastPathComponent != keep.lastPathComponent {
-            try? fm.removeItem(at: entry)
-        }
-    }
 
     // MARK: - Reading
 

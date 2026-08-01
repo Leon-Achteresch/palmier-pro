@@ -9,7 +9,8 @@ actor TranscriptCache {
         .appendingPathComponent("\(Log.subsystem)/Transcripts", isDirectory: true)
 
     private var memory: [String: TranscriptionResult] = [:]
-    private static let memoryMax = 4
+    private static let memoryMax = 16
+    private var inFlight: [String: Task<TranscriptionResult, Error>] = [:]
 
     func transcript(for url: URL, isVideo: Bool, range: ClosedRange<Double>?, preferredLocale: Locale? = nil) async throws -> TranscriptionResult {
         // When a locale is forced, bypass the cache — locale variants must not overwrite the auto-detected entry.
@@ -23,11 +24,24 @@ actor TranscriptCache {
         let full: TranscriptionResult
         if let key, let cached = cached(key) {
             full = cached
+        } else if let key {
+            if let running = inFlight[key] {
+                full = try await running.value
+            } else {
+                let task = Task {
+                    isVideo
+                        ? try await Transcription.transcribeVideoAudio(videoURL: url)
+                        : try await Transcription.transcribe(fileURL: url)
+                }
+                inFlight[key] = task
+                defer { inFlight[key] = nil }
+                full = try await task.value
+                store(full, key: key)
+            }
         } else {
             full = isVideo
                 ? try await Transcription.transcribeVideoAudio(videoURL: url)
                 : try await Transcription.transcribe(fileURL: url)
-            if let key { store(full, key: key) }
         }
         return range.map { Self.filter(full, to: $0) } ?? full
     }

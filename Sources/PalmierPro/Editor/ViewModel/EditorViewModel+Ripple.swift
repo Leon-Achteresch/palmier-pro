@@ -460,6 +460,35 @@ extension EditorViewModel {
         let trimEndFrame: Int?
     }
 
+    enum OpenGapOutcome: Equatable {
+        case opened(GapSelection)
+        case refused(String)
+    }
+
+    func openGap(trackIndex: Int, atFrame: Int, lengthFrames: Int, actionName: String = "Open Gap") -> OpenGapOutcome {
+        guard timeline.tracks.indices.contains(trackIndex), lengthFrames > 0, atFrame >= 0 else {
+            return .refused("Invalid gap request.")
+        }
+        let track = timeline.tracks[trackIndex]
+        if track.clips.contains(where: { $0.startFrame < atFrame && $0.endFrame > atFrame }) {
+            return .refused("Can't open a gap inside a clip — use a cut point.")
+        }
+        let shiftingIds = rippleInsertShiftingTrackIds(trackIndex: trackIndex)
+        if let reason = multicamManualRippleViolation(shiftingTrackIds: shiftingIds, atFrame: atFrame) {
+            return .refused(reason)
+        }
+        withTimelineSwap(actionName: actionName) {
+            for ti in timeline.tracks.indices where ti == trackIndex || timeline.tracks[ti].syncLocked {
+                applyShifts(RippleEngine.computeRipplePush(
+                    clips: timeline.tracks[ti].clips,
+                    insertFrame: atFrame,
+                    pushAmount: lengthFrames
+                ))
+            }
+        }
+        return .opened(GapSelection(trackIndex: trackIndex, range: FrameRange(start: atFrame, end: atFrame + lengthFrames)))
+    }
+
     /// Ripple insert with explicit per-clip duration and trim. Opens a gap at `atFrame`
     /// on the target track, every sync-locked track, and the audio track any linked
     /// audio lands on, then places the clips sequentially into the gap.

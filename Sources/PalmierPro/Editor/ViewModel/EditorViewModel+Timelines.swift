@@ -23,6 +23,7 @@ extension EditorViewModel {
         openTimelineIds = (file.openTimelineIds ?? []).filter { ids.contains($0) }
         speakerRegistry = file.speakers ?? []
         multicamGroups = file.multicamGroups ?? []
+        linkedContextPath = file.linkedContextPath
         syncSpeakerColors()
         if !openTimelineIds.contains(activeTimelineId) {
             openTimelineIds.append(activeTimelineId)
@@ -40,8 +41,19 @@ extension EditorViewModel {
             openTimelineIds: openTimelineIds,
             viewStates: liveViewStates.filter { ids.contains($0.key) },
             speakers: speakerRegistry.isEmpty ? nil : speakerRegistry,
-            multicamGroups: savedMulticamGroups()
+            multicamGroups: savedMulticamGroups(),
+            linkedContextPath: linkedContextPath
         )
+    }
+
+    func setLinkedContextPath(_ path: String?) {
+        let normalized = path.map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+        let before = linkedContextPath
+        guard before != normalized else { return }
+        linkedContextPath = normalized
+        undo.register("Set Linked Context", withTarget: self) { vm in
+            vm.setLinkedContextPath(before)
+        }
     }
 
     func stashActiveViewState() {

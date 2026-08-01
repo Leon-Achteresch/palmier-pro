@@ -134,17 +134,26 @@ final class TimelineHeaderView: NSView {
         return rect.insetBy(dx: -4, dy: -4)
     }
 
+    private static var tintedSymbols: [String: NSImage] = [:]
+
     private func drawSymbol(_ name: String, in rect: NSRect, tint: NSColor, config: NSImage.SymbolConfiguration, context: CGContext) {
-        guard let img = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
-            .withSymbolConfiguration(config) else { return }
-        let symbolSize = img.size
-        let drawRect = NSRect(x: rect.midX - symbolSize.width / 2, y: rect.midY - symbolSize.height / 2, width: symbolSize.width, height: symbolSize.height)
-        let tinted = NSImage(size: drawRect.size, flipped: true) { drawRect in
-            tint.set()
-            img.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: 1.0)
-            drawRect.fill(using: .sourceAtop)
-            return true
+        let key = "\(name)|\(tint.description)"
+        var tinted = Self.tintedSymbols[key]
+        if tinted == nil {
+            guard let img = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+                .withSymbolConfiguration(config) else { return }
+            let rendered = NSImage(size: img.size, flipped: true) { drawRect in
+                tint.set()
+                img.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: 1.0)
+                drawRect.fill(using: .sourceAtop)
+                return true
+            }
+            Self.tintedSymbols[key] = rendered
+            tinted = rendered
         }
+        guard let tinted else { return }
+        let symbolSize = tinted.size
+        let drawRect = NSRect(x: rect.midX - symbolSize.width / 2, y: rect.midY - symbolSize.height / 2, width: symbolSize.width, height: symbolSize.height)
         tinted.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: 1.0)
     }
 

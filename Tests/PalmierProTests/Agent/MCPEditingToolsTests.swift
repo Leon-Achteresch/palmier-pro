@@ -31,7 +31,7 @@ struct MCPEditingToolsTests {
             _ = try await client.connect(transport: transports.client)
             let (tools, _) = try await client.listTools()
             let names = Set(tools.map(\.name))
-            for expected in ["trim_clips", "duplicate_clips", "copy_attributes", "link_clips", "manage_nest", "swap_clip_media", "relink_media"] {
+            for expected in ["trim_clips", "duplicate_clips", "copy_attributes", "link_clips", "manage_nest", "swap_clip_media", "relink_media", "read_skill"] {
                 #expect(names.contains(expected), "missing tool \(expected)")
             }
 
@@ -39,6 +39,12 @@ struct MCPEditingToolsTests {
             let keyframeProperties = try #require(keyframeTool.inputSchema.objectValue?["properties"]?.objectValue)
             #expect(keyframeProperties["tracks"] != nil)
             #expect(keyframeProperties["clipIds"] != nil)
+            #expect(keyframeProperties["mode"] != nil)
+            #expect(keyframeProperties["stagger"] != nil)
+
+            let skillList = try await client.callTool(name: "read_skill", arguments: [:])
+            let skillListText = try text(skillList.content)
+            #expect(skillList.isError != true, "\(skillListText)")
 
             // One animation, several properties, one call.
             let animate = try await client.callTool(name: "set_keyframes", arguments: [
@@ -50,6 +56,19 @@ struct MCPEditingToolsTests {
             ])
             let animateText = try text(animate.content)
             #expect(animate.isError != true, "\(animateText)")
+
+            // Merge an eased keyframe into the existing opacity track.
+            let merge = try await client.callTool(name: "set_keyframes", arguments: [
+                "clipId": .string(clipId),
+                "property": .string("opacity"),
+                "keyframes": .array([.array([.int(10), .double(0.5), .string("backOut")])]),
+                "mode": .string("merge"),
+            ])
+            let mergeText = try text(merge.content)
+            #expect(merge.isError != true, "\(mergeText)")
+            let opacityTrack = try #require(harness.editor.clipFor(id: clipId)?.opacityTrack)
+            #expect(opacityTrack.keyframes.map(\.frame) == [0, 10, 20])
+            #expect(opacityTrack.keyframes[1].interpolationOut == .backOut)
 
             // Animated effect param on the same clip.
             let effect = try await client.callTool(name: "apply_effect", arguments: [

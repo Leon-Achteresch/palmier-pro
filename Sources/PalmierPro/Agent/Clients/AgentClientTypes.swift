@@ -2,23 +2,107 @@ import Foundation
 
 // MARK: - Shared value types
 
-/// Chat models offered through OpenRouter.
-enum AgentModel: String, CaseIterable, Sendable {
-    case sonnet5 = "anthropic/claude-sonnet-5"
-    case opus5 = "anthropic/claude-opus-5"
-    case gpt55 = "openai/gpt-5.5"
-    case gemini36Flash = "google/gemini-3.6-flash"
-    case grok45 = "x-ai/grok-4.5"
+enum AgentReasoningEffort: String, CaseIterable, Sendable {
+    case max
+    case xhigh
+    case high
+    case medium
+    case low
+    case minimal
+    case none
 
     var displayName: String {
         switch self {
-        case .sonnet5: "Claude Sonnet 5"
-        case .opus5: "Claude Opus 5"
-        case .gpt55: "GPT-5.5"
-        case .gemini36Flash: "Gemini 3.6 Flash"
-        case .grok45: "Grok 4.5"
+        case .max: "Max"
+        case .xhigh: "Extra high"
+        case .high: "High"
+        case .medium: "Medium"
+        case .low: "Low"
+        case .minimal: "Minimal"
+        case .none: "Off"
         }
     }
+}
+
+struct AgentModel: Hashable, Identifiable, Sendable {
+    let id: String
+    let name: String
+    let supportedEfforts: [AgentReasoningEffort]
+    let defaultEffort: AgentReasoningEffort?
+    let reasoningMandatory: Bool
+
+    var displayName: String { name }
+    var supportsReasoningEffort: Bool { !supportedEfforts.isEmpty }
+
+    init(
+        id: String,
+        name: String,
+        supportedEfforts: [AgentReasoningEffort] = [],
+        defaultEffort: AgentReasoningEffort? = nil,
+        reasoningMandatory: Bool = false
+    ) {
+        self.id = id
+        self.name = name
+        self.supportedEfforts = supportedEfforts
+        self.defaultEffort = defaultEffort
+        self.reasoningMandatory = reasoningMandatory
+    }
+
+    static let claudeCode = AgentModel(
+        id: "claude-code",
+        name: "Claude Code",
+        supportedEfforts: [.xhigh, .high, .medium, .low],
+        defaultEffort: .high
+    )
+
+    static let claudeCodeCatalog: [AgentModel] = [
+        claudeCode,
+        claudeCodeVariant("claude-fable-5", "Claude Code · Fable 5"),
+        claudeCodeVariant("claude-opus-5", "Claude Code · Opus 5"),
+        claudeCodeVariant("claude-sonnet-5", "Claude Code · Sonnet 5"),
+        claudeCodeVariant("claude-haiku-4-5-20251001", "Claude Code · Haiku 4.5"),
+    ]
+
+    private static func claudeCodeVariant(_ model: String, _ name: String) -> AgentModel {
+        AgentModel(
+            id: "claude-code/\(model)",
+            name: name,
+            supportedEfforts: claudeCode.supportedEfforts,
+            defaultEffort: claudeCode.defaultEffort
+        )
+    }
+
+    var isClaudeCode: Bool { id == AgentModel.claudeCode.id || id.hasPrefix("claude-code/") }
+
+    var claudeCodeModelId: String? {
+        guard id.hasPrefix("claude-code/") else { return nil }
+        return String(id.dropFirst("claude-code/".count))
+    }
+
+    static let fallback = AgentModel(
+        id: "anthropic/claude-sonnet-5",
+        name: "Claude Sonnet 5",
+        supportedEfforts: [.max, .xhigh, .high, .medium, .low],
+        defaultEffort: .high
+    )
+
+    static let fallbackCatalog: [AgentModel] = [
+        fallback,
+        AgentModel(
+            id: "anthropic/claude-opus-5",
+            name: "Claude Opus 5",
+            supportedEfforts: [.max, .xhigh, .high, .medium, .low],
+            defaultEffort: .high
+        ),
+        AgentModel(
+            id: "openai/gpt-5.5",
+            name: "GPT-5.5",
+            supportedEfforts: [.xhigh, .high, .medium, .low, .none],
+            defaultEffort: .medium
+        ),
+        AgentModel(id: "google/gemini-3.6-flash", name: "Gemini 3.6 Flash"),
+        AgentModel(id: "x-ai/grok-4.5", name: "Grok 4.5"),
+    ]
 }
 
 enum AnthropicStopReason: String, Sendable {

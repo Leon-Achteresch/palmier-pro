@@ -142,12 +142,32 @@ extension TimelineView {
         )
     }
 
+    func aiTransitionMenuItem(afterClipId: String) -> NSMenuItem? {
+        guard case .success = editor.transitionSite(afterClipId: afterClipId) else { return nil }
+        let availability = editor.aiTransitionAvailability(afterClipId: afterClipId)
+        let item = NSMenuItem(
+            title: "Create AI Transition After",
+            action: #selector(performCreateAITransitionAfter(_:)),
+            keyEquivalent: ""
+        )
+        item.target = self
+        item.representedObject = afterClipId
+        item.isEnabled = availability.model != nil
+        item.toolTip = availability.refusal
+        return item
+    }
+
     @objc func performCreateAITransition(_ sender: Any?) {
         guard let info = (sender as? NSMenuItem)?.representedObject as? [String: Any],
               let trackIndex = info["trackIndex"] as? Int,
               let start = info["start"] as? Int,
               let end = info["end"] as? Int else { return }
         editor.beginAITransition(gap: GapSelection(trackIndex: trackIndex, range: FrameRange(start: start, end: end)))
+    }
+
+    @objc private func performCreateAITransitionAfter(_ sender: Any?) {
+        guard let clipId = (sender as? NSMenuItem)?.representedObject as? String else { return }
+        editor.beginAITransition(afterClipId: clipId)
     }
 
     @objc private func performAIEditCreateVideo(_ sender: Any?) {

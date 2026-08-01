@@ -299,3 +299,32 @@ struct KeyframeAdversarialTests {
         #expect(track.keyframes.map(\.frame) == [-10, -5, 10])
     }
 }
+
+@Suite("Interpolation easing")
+struct InterpolationEasingTests {
+
+    @Test(arguments: Interpolation.allCases)
+    func easeHitsEndpoints(_ interp: Interpolation) {
+        #expect(abs(interp.ease(0)) < 1e-9)
+        #expect(abs(interp.ease(1) - 1) < 1e-9)
+    }
+
+    @Test func backOutOvershootsTarget() {
+        var track = KeyframeTrack<Double>()
+        track.upsert(Keyframe(frame: 0, value: 0, interpolationOut: .backOut))
+        track.upsert(Keyframe(frame: 10, value: 1))
+        let mid = (1...9).map { track.sample(at: $0, fallback: 0) }
+        #expect(mid.contains { $0 > 1 })
+        #expect(track.sample(at: 10, fallback: 0) == 1)
+    }
+
+    @Test func easeOutDeceleratesTowardTarget() {
+        let interp = Interpolation.easeOut
+        #expect(interp.ease(0.5) > 0.5)
+        #expect(interp.ease(0.25) - interp.ease(0) > interp.ease(1) - interp.ease(0.75))
+    }
+
+    @Test func easeInAcceleratesFromStart() {
+        #expect(Interpolation.easeIn.ease(0.5) < 0.5)
+    }
+}

@@ -45,11 +45,10 @@ final class PlayheadOverlay {
     /// Idempotent — safe to call alongside the async observation fire.
     func update() {
         guard let view, let editor else { return }
-        let geo = view.geometry
         let viewport = view.visibleRect
         guard !viewport.isEmpty else { return }
-        let x = Double(editor.playheadState.timelineFrame) * geo.pixelsPerFrame - viewport.minX
-        let top = Double(geo.rulerHeight)
+        let x = Double(editor.playheadState.timelineFrame) * editor.zoomScale - viewport.minX
+        let top = Double(Layout.rulerHeight)
         let bottom = Double(viewport.height)
 
         let path = CGMutablePath()

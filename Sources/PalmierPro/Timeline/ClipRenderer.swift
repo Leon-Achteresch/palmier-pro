@@ -302,8 +302,8 @@ enum ClipRenderer {
 
     private static let washColor = AppTheme.Status.error.withAlphaComponent(AppTheme.Opacity.medium).cgColor
     nonisolated(unsafe) static var speakerColors: [Int: CGColor] = [:]
-    private static var markDeadAir: Bool { UserDefaults.standard.object(forKey: "markDeadAir") as? Bool ?? true }
-    private static var markBeats: Bool { UserDefaults.standard.object(forKey: "markBeats") as? Bool ?? true }
+    nonisolated(unsafe) static var markDeadAir = true
+    nonisolated(unsafe) static var markBeats = true
 
     private static func drawWaveform(
         samples: [Float],
@@ -458,12 +458,12 @@ enum ClipRenderer {
                     case .hold:
                         context.addLine(to: CGPoint(x: bX, y: aY))
                         context.addLine(to: CGPoint(x: bX, y: bY))
-                    case .smooth:
-                        let steps = 12
+                    default:
+                        let steps = 24
                         for s in 1...steps {
                             let t = Double(s) / Double(steps)
                             let x = aX + (bX - aX) * CGFloat(t)
-                            let dB = a.value + (b.value - a.value) * smoothstep(t)
+                            let dB = a.value + (b.value - a.value) * a.interpolationOut.ease(t, params: a.easingParams)
                             context.addLine(to: CGPoint(x: x, y: y(forDb: dB, in: body)))
                         }
                     }
@@ -683,14 +683,14 @@ enum ClipRenderer {
         switch interpolation {
         case .linear, .hold:
             return [end]
-        case .smooth:
+        default:
             let steps = 12
             var out: [CGPoint] = []
             out.reserveCapacity(steps)
             for s in 1...steps {
                 let t = Double(s) / Double(steps)
                 let x = start.x + (end.x - start.x) * CGFloat(t)
-                let y = start.y + (end.y - start.y) * CGFloat(smoothstep(t))
+                let y = start.y + (end.y - start.y) * CGFloat(interpolation.ease(t))
                 out.append(CGPoint(x: x, y: y))
             }
             return out
@@ -822,6 +822,11 @@ enum ClipRenderer {
         return rect
     }
 
+    nonisolated(unsafe) private static let labelBaseAttrs: [NSAttributedString.Key: Any] = [
+        .font: NSFont.systemFont(ofSize: AppTheme.FontSize.xs, weight: .medium),
+        .foregroundColor: AppTheme.Text.primary,
+    ]
+
     private static func drawLabelBar(clip: Clip, type: ClipType, in labelRect: NSRect, clipRect: NSRect, context: CGContext, displayName: String? = nil, badge: String? = nil, fps: Int) {
         var labelRect = labelRect
         if let badge,
@@ -838,11 +843,7 @@ enum ClipRenderer {
         let name = rawName.firstNonEmptyLine()
         let text = "\(name)  \(timecode)"
 
-        let baseAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: AppTheme.FontSize.xs, weight: .medium),
-            .foregroundColor: AppTheme.Text.primary,
-        ]
-        let attributed = NSMutableAttributedString(string: text, attributes: baseAttrs)
+        let attributed = NSMutableAttributedString(string: text, attributes: labelBaseAttrs)
         if clip.linkGroupId != nil {
             attributed.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: NSRange(location: 0, length: (name as NSString).length))
         }

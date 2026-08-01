@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AudioMeterView: View {
     @Environment(EditorViewModel.self) private var editor
+    @State private var meterIdle = false
 
     private static let barsWidth = AppTheme.AudioMeter.barWidth * 2
     private static let contentWidth = barsWidth + AppTheme.Spacing.xxs + AppTheme.Spacing.xs
@@ -17,12 +18,21 @@ struct AudioMeterView: View {
                 drawBackground(size: size, context: &context)
             }
 
-            SwiftUI.TimelineView(.animation(minimumInterval: AppTheme.AudioMeter.refreshInterval)) { _ in
+            SwiftUI.TimelineView(.animation(minimumInterval: AppTheme.AudioMeter.refreshInterval, paused: meterIdle)) { _ in
                 let display = editor.audioMeter.display()
                 Canvas { context, size in
                     drawLevels(display, size: size, context: &context)
                 }
                 .accessibilityHidden(true)
+            }
+            .task(id: editor.isPlaying || editor.isScrubbing) {
+                if editor.isPlaying || editor.isScrubbing {
+                    meterIdle = false
+                } else {
+                    // Keep ticking through the meter's decay before pausing the display link.
+                    try? await Task.sleep(for: .seconds(3))
+                    meterIdle = true
+                }
             }
 
             Rectangle()

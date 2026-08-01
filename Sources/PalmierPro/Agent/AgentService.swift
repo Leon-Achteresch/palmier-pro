@@ -7,6 +7,9 @@ final class AgentService {
 
     private var apiKey: String = ""
     private var apiKeyObserver: NSObjectProtocol?
+    private var catalogModels: [AgentModel] = []
+    private var catalogTask: Task<Void, Never>?
+    private(set) var isLoadingModels = false
 
     init() {
         reloadAPIKey()
@@ -26,11 +29,41 @@ final class AgentService {
             let key = await Task.detached(priority: .utility) {
                 OpenRouterKeychain.load() ?? ""
             }.value
-            self?.apiKey = key
+            guard let self else { return }
+            self.apiKey = key
+            if key.isEmpty {
+                self.catalogTask?.cancel()
+                self.catalogModels = []
+                self.isLoadingModels = false
+            } else {
+                self.refreshChatModels()
+            }
+        }
+    }
+
+    private func refreshChatModels() {
+        catalogTask?.cancel()
+        isLoadingModels = true
+        let key = apiKey
+        catalogTask = Task { [weak self] in
+            do {
+                let remote = try await OpenRouterAPI.chatModels()
+                guard !Task.isCancelled, let self, self.apiKey == key else { return }
+                self.catalogModels = remote
+                    .map(Self.agentModel(from:))
+                    .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                self.clampReasoningEffort()
+                self.isLoadingModels = false
+            } catch {
+                guard !Task.isCancelled, let self, self.apiKey == key else { return }
+                self.isLoadingModels = false
+                Log.agent.warning("OpenRouter chat model list failed: \(error.localizedDescription)")
+            }
         }
     }
 
     isolated deinit {
+        catalogTask?.cancel()
         if let token = apiKeyObserver {
             NotificationCenter.default.removeObserver(token)
         }
@@ -38,32 +71,115 @@ final class AgentService {
 
     var hasApiKey: Bool { !apiKey.isEmpty }
 
-    var canStream: Bool { hasApiKey }
+    var usesClaudeCode: Bool { effectiveModel.isClaudeCode }
 
-    var availableModels: [AgentModel] { AgentModel.allCases }
+    var canStream: Bool { usesClaudeCode || hasApiKey }
+
+    var availableModels: [AgentModel] {
+        AgentModel.claudeCodeCatalog + (catalogModels.isEmpty ? AgentModel.fallbackCatalog : catalogModels)
+    }
 
     private func selectClient() -> (any AgentClient)? {
         guard hasApiKey else { return nil }
-        return OpenRouterClient(apiKey: apiKey, model: effectiveModel)
+        return OpenRouterClient(
+            apiKey: apiKey,
+            model: effectiveModel,
+            reasoningEffort: effectiveReasoningEffort
+        )
     }
 
     var effectiveModel: AgentModel {
-        let available = availableModels
-        if available.contains(model) { return model }
-        return available.first ?? .sonnet5
+        if let match = availableModels.first(where: { $0.id == modelId }) {
+            return match
+        }
+        return AgentModel(id: modelId, name: Self.displayName(for: modelId))
     }
 
-    var model: AgentModel = {
-        if let raw = UserDefaults.standard.string(forKey: "agentModel"),
-           let m = AgentModel(rawValue: raw) {
-            return m
-        }
-        return .sonnet5
+    var modelId: String = {
+        let raw = UserDefaults.standard.string(forKey: "agentModel")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return raw.isEmpty ? AgentModel.fallback.id : raw
     }() {
-        didSet { UserDefaults.standard.set(model.rawValue, forKey: "agentModel") }
+        didSet { UserDefaults.standard.set(modelId, forKey: "agentModel") }
+    }
+
+    var reasoningEffort: AgentReasoningEffort = {
+        if let raw = UserDefaults.standard.string(forKey: "agentReasoningEffort"),
+           let effort = AgentReasoningEffort(rawValue: raw) {
+            return effort
+        }
+        return .high
+    }() {
+        didSet { UserDefaults.standard.set(reasoningEffort.rawValue, forKey: "agentReasoningEffort") }
+    }
+
+    var availableEfforts: [AgentReasoningEffort] {
+        var efforts = effectiveModel.supportedEfforts
+        if effectiveModel.reasoningMandatory {
+            efforts.removeAll { $0 == .none }
+        }
+        return efforts
+    }
+
+    var effectiveReasoningEffort: AgentReasoningEffort? {
+        let available = availableEfforts
+        guard !available.isEmpty else { return nil }
+        if available.contains(reasoningEffort) { return reasoningEffort }
+        if let fallback = effectiveModel.defaultEffort, available.contains(fallback) { return fallback }
+        return available.first
+    }
+
+    func selectModel(_ model: AgentModel) {
+        modelId = model.id
+        clampReasoningEffort(to: model)
+    }
+
+    func selectReasoningEffort(_ effort: AgentReasoningEffort) {
+        reasoningEffort = effort
+    }
+
+    private func clampReasoningEffort(to model: AgentModel? = nil) {
+        let target = model ?? effectiveModel
+        var efforts = target.supportedEfforts
+        if target.reasoningMandatory {
+            efforts.removeAll { $0 == .none }
+        }
+        guard !efforts.isEmpty, !efforts.contains(reasoningEffort) else { return }
+        if let preferred = target.defaultEffort, efforts.contains(preferred) {
+            reasoningEffort = preferred
+        } else if let first = efforts.first {
+            reasoningEffort = first
+        }
+    }
+
+    private static func agentModel(from remote: OpenRouterAPI.ChatModel) -> AgentModel {
+        guard remote.supportsReasoning else {
+            return AgentModel(id: remote.id, name: remote.name)
+        }
+        let efforts: [AgentReasoningEffort]
+        if let listed = remote.supportedEfforts {
+            efforts = listed.compactMap(AgentReasoningEffort.init(rawValue:))
+        } else {
+            efforts = Array(AgentReasoningEffort.allCases)
+        }
+        return AgentModel(
+            id: remote.id,
+            name: remote.name,
+            supportedEfforts: efforts,
+            defaultEffort: remote.defaultEffort.flatMap(AgentReasoningEffort.init(rawValue:)),
+            reasoningMandatory: remote.reasoningMandatory
+        )
+    }
+
+    private static func displayName(for id: String) -> String {
+        if let fallback = AgentModel.fallbackCatalog.first(where: { $0.id == id }) {
+            return fallback.name
+        }
+        return id.split(separator: "/").last.map(String.init) ?? id
     }
 
     var sessions: [ChatSession] = []
+    private(set) var sessionsLoaded = true
     var currentSessionId: UUID?
     var messages: [AgentMessage] = []
     var isStreaming: Bool = false
@@ -206,24 +322,40 @@ final class AgentService {
     private var toolExecutor: ToolExecutor?
     private var currentTask: Task<Void, Never>?
 
-    func loadSessions(from projectURL: URL?) {
-        sessions = ChatSessionStore.load(from: projectURL)
-            .filter { !$0.messages.isEmpty }
-            .map {
-                var session = $0
-                session.isOpen = false
-                return session
-            }
-            .sorted { $0.updatedAt > $1.updatedAt }
+    private var sessionLoadGeneration = 0
 
+    func loadSessions(from projectURL: URL?) {
         let session = ChatSession()
-        sessions.insert(session, at: 0)
+        sessions = [session]
         currentSessionId = session.id
         messages = []
         draft = ""
         mentions.removeAll()
         streamError = nil
         toolExecutor?.resetFeedbackState()
+
+        sessionLoadGeneration &+= 1
+        guard let projectURL else {
+            sessionsLoaded = true
+            return
+        }
+        sessionsLoaded = false
+        let generation = sessionLoadGeneration
+        Task { [weak self] in
+            let loaded = await Task.detached(priority: .userInitiated) {
+                ChatSessionStore.load(from: projectURL)
+                    .filter { !$0.messages.isEmpty }
+                    .map {
+                        var session = $0
+                        session.isOpen = false
+                        return session
+                    }
+                    .sorted { $0.updatedAt > $1.updatedAt }
+            }.value
+            guard let self, self.sessionLoadGeneration == generation else { return }
+            self.sessions.append(contentsOf: loaded)
+            self.sessionsLoaded = true
+        }
     }
 
     func newChat() {
@@ -301,7 +433,7 @@ final class AgentService {
         )
         let analyticsPayload: [String: Any] = [
             "project_id": editor?.projectId ?? "unknown",
-            "model": effectiveModel.rawValue,
+            "model": effectiveModel.id,
         ]
         if sessionActivation.activate() {
             Analytics.capture(.agentSessionStarted, properties: analyticsPayload)
@@ -342,6 +474,10 @@ final class AgentService {
     }
 
     private func runLoop() async {
+        if usesClaudeCode {
+            await runClaudeCodeTurn()
+            return
+        }
         guard let client = selectClient() else {
             streamError = .missingKey
             return
@@ -395,6 +531,78 @@ final class AgentService {
                 dropEmptyAssistantTurn(id: assistantID)
                 streamError = .upstream(error.localizedDescription)
                 break loop
+            }
+        }
+    }
+
+    private func runClaudeCodeTurn() async {
+        guard let lastUser = messages.last(where: { $0.role == .user }) else { return }
+        var prompt = lastUser.blocks
+            .compactMap { if case let .text(s) = $0 { return s } else { return nil } }
+            .joined(separator: "\n")
+        if let hint = lastUser.contextHint { prompt = hint + "\n\n" + prompt }
+        guard !prompt.isEmpty else { return }
+
+        let resumeId = currentSessionId
+            .flatMap { id in sessions.first { $0.id == id } }?
+            .claudeSessionId
+        let client = ClaudeCodeClient(
+            workingDirectory: editor?.projectURL?.deletingLastPathComponent(),
+            mcpPort: MCPService.port,
+            resumeSessionId: resumeId,
+            model: effectiveModel.claudeCodeModelId,
+            effort: effectiveReasoningEffort
+        )
+
+        var assistantID: UUID?
+        do {
+            for try await event in client.stream(prompt: prompt) {
+                try Task.checkCancellation()
+                switch event {
+                case .sessionId(let id):
+                    if let current = currentSessionId,
+                       let idx = sessions.firstIndex(where: { $0.id == current }) {
+                        sessions[idx].claudeSessionId = id
+                    }
+                case .textDelta(let text):
+                    appendTextDelta(text, toAssistant: currentAssistant(&assistantID))
+                case .assistantBlocks(let blocks):
+                    appendAssistantBlocks(blocks, toAssistant: currentAssistant(&assistantID))
+                case .toolResults(let blocks):
+                    messages.append(AgentMessage(role: .user, blocks: blocks))
+                    assistantID = nil
+                case .failed(let message):
+                    streamError = .upstream(message)
+                }
+            }
+        } catch is CancellationError {
+            if let assistantID { dropEmptyAssistantTurn(id: assistantID) }
+        } catch let err as AgentStreamError {
+            if let assistantID { dropEmptyAssistantTurn(id: assistantID) }
+            streamError = err
+        } catch {
+            if let assistantID { dropEmptyAssistantTurn(id: assistantID) }
+            streamError = .upstream(error.localizedDescription)
+        }
+    }
+
+    private func currentAssistant(_ assistantID: inout UUID?) -> UUID {
+        if let existing = assistantID { return existing }
+        let message = AgentMessage(role: .assistant, blocks: [])
+        messages.append(message)
+        assistantID = message.id
+        return message.id
+    }
+
+    private func appendAssistantBlocks(_ blocks: [AgentContentBlock], toAssistant id: UUID) {
+        for block in blocks {
+            switch block {
+            case .text(let text):
+                appendTextDelta(text, toAssistant: id)
+            case .toolUse(let toolId, let name, let inputJSON):
+                appendToolUse(id: toolId, name: name, inputJSON: inputJSON, toAssistant: id)
+            case .toolResult:
+                break
             }
         }
     }

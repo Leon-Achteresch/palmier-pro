@@ -92,6 +92,7 @@ struct MyProjectsSection: View {
             selectedProjectIDs.formIntersection(ids)
             if ids.isEmpty { endSelection() }
         }
+        .onAppear { ProjectRegistry.shared.refreshAccessibility() }
     }
 
     private var searchField: some View {

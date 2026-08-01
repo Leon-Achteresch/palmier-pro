@@ -63,12 +63,12 @@ extension EditorViewModel {
 
     func captionCanTranscribe(_ clip: Clip) -> Bool {
         guard clip.mediaType == .video || clip.mediaType == .audio else { return false }
-        guard let asset = mediaAssets.first(where: { $0.id == clip.mediaRef }) else { return true }
+        guard let asset = mediaAssetsById[clip.mediaRef] else { return true }
         return asset.type == .audio || (asset.type == .video && asset.hasAudio)
     }
 
     func captionUsesVideoAudioExtraction(for clip: Clip) -> Bool {
-        let assetType = mediaAssets.first(where: { $0.id == clip.mediaRef })?.type
+        let assetType = mediaAssetsById[clip.mediaRef]?.type
         return assetType == .video || (assetType == nil && clip.mediaType == .video)
     }
 
@@ -86,12 +86,31 @@ extension EditorViewModel {
 
     func captionTargets(trackIds: Set<String>) -> [Clip] {
         guard !trackIds.isEmpty else { return [] }
-        let audioGroups = Set(timeline.tracks.flatMap(\.clips).filter { $0.mediaType == .audio }.compactMap(\.linkGroupId))
+        let audioGroups = timelineAudioLinkGroups()
         let pool = timeline.tracks
             .filter { trackIds.contains($0.id) }
             .flatMap(\.clips)
             .filter { !($0.mediaType == .video && $0.linkGroupId.map(audioGroups.contains) == true) }
         return captionTargets(in: pool)
+    }
+
+    func captionEligibleTrackIndices() -> [Int] {
+        let audioGroups = timelineAudioLinkGroups()
+        return timeline.tracks.indices.filter { index in
+            let pool = timeline.tracks[index].clips
+                .filter { !($0.mediaType == .video && $0.linkGroupId.map(audioGroups.contains) == true) }
+            return !captionTargets(in: pool).isEmpty
+        }
+    }
+
+    private func timelineAudioLinkGroups() -> Set<String> {
+        var groups: Set<String> = []
+        for track in timeline.tracks {
+            for clip in track.clips where clip.mediaType == .audio {
+                if let groupId = clip.linkGroupId { groups.insert(groupId) }
+            }
+        }
+        return groups
     }
 
     private func captionTargets(in pool: [Clip]) -> [Clip] {
@@ -228,7 +247,14 @@ extension EditorViewModel {
         let projectId = projectId
 
         let outcomes = await withTaskGroup(of: (String, Result<TranscriptionResult, Error>).self) { group in
+            var collected: [(String, Result<TranscriptionResult, Error>)] = []
+            var inFlight = 0
             for job in jobs {
+                if inFlight >= Transcription.maxConcurrentTranscriptions, let outcome = await group.next() {
+                    collected.append(outcome)
+                    inFlight -= 1
+                }
+                inFlight += 1
                 group.addTask {
                     do {
                         let result: TranscriptionResult
@@ -256,7 +282,6 @@ extension EditorViewModel {
                     }
                 }
             }
-            var collected: [(String, Result<TranscriptionResult, Error>)] = []
             for await outcome in group { collected.append(outcome) }
             return collected
         }

@@ -52,7 +52,7 @@ struct CaptionTab: View {
         isAutoSource ? editor.captionTargets(ids: []).count : sourceClipIds.count
     }
     private var captionTrackIndices: [Int] {
-        editor.timeline.tracks.indices.filter { !editor.captionTargets(trackIds: [editor.timeline.tracks[$0].id]).isEmpty }
+        editor.captionEligibleTrackIndices()
     }
     private var remainingCloudCredits: Int? {
         account.budgetCredits == nil ? nil : account.remainingCredits
