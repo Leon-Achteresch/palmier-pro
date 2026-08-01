@@ -77,7 +77,7 @@ struct EffectDescriptor: Identifiable, Sendable {
 
 enum EffectRegistry {
 
-    static let all: [EffectDescriptor] = color + wheels + hueCurves + lut + curves + detail + blur + stylize + key + mockup
+    static let all: [EffectDescriptor] = color + wheels + hueCurves + lut + curves + detail + blur + stylize + distort + key + mockup
 
     private static let color: [EffectDescriptor] = [
         EffectDescriptor(
@@ -324,6 +324,27 @@ enum EffectRegistry {
         ),
     ]
 
+    private static let distort: [EffectDescriptor] = [
+        EffectDescriptor(
+            id: "distort.warp", displayName: "Warp", category: "Distort",
+            params: [
+                EffectParamSpec(key: "bend", label: "Bend", range: -100...100, defaultValue: 0, unit: "%"),
+                EffectParamSpec(key: "waveAmplitude", label: "Wave", range: 0...200, defaultValue: 0, unit: "px"),
+                EffectParamSpec(key: "waveLength", label: "Wavelength", range: 20...2000, defaultValue: 300, unit: "px"),
+                EffectParamSpec(key: "wavePhase", label: "Phase", range: -3600...3600, defaultValue: 0, unit: "°"),
+            ],
+            apply: { image, p, extent in
+                WarpKernel.apply(
+                    image, extent: extent,
+                    bend: p.value("bend") / 100,
+                    waveAmplitude: p.value("waveAmplitude"),
+                    waveLength: p.value("waveLength"),
+                    wavePhase: p.value("wavePhase")
+                )
+            }
+        ),
+    ]
+
     private static let detail: [EffectDescriptor] = [
         EffectDescriptor(
             id: "detail.clarity", displayName: "Clarity & Haze", category: "Detail",
@@ -403,7 +424,7 @@ enum EffectRegistry {
         "color.temperature", "color.vibrance", "color.saturation", "color.wheels", "color.curves",
         "color.hueCurves", "color.lut", "detail.clarity", "key.chroma", "key.subject", "blur.gaussian", "blur.sharpen",
         "blur.noiseReduction", "blur.motion", "stylize.invert", "stylize.grain", "stylize.vignette",
-        "stylize.glow", "mockup.iphone17",
+        "stylize.glow", "distort.warp", "mockup.iphone17",
     ]
 
     static func insertIndex(_ effects: [Effect], for id: String) -> Int {

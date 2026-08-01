@@ -91,6 +91,15 @@ extension InspectorView {
         ]
     }
 
+    private var warpControls: [EffectControl] {
+        [
+            EffectControl(effectId: "distort.warp", paramKey: "bend", label: "Bend"),
+            EffectControl(effectId: "distort.warp", paramKey: "waveAmplitude", label: "Wave"),
+            EffectControl(effectId: "distort.warp", paramKey: "waveLength", label: "Wavelength"),
+            EffectControl(effectId: "distort.warp", paramKey: "wavePhase", label: "Phase"),
+        ]
+    }
+
     private var chromaKeyControls: [EffectControl] {
         [
             EffectControl(effectId: "key.chroma", paramKey: "tolerance", label: "Range"),
@@ -139,7 +148,7 @@ extension InspectorView {
     }
 
     private var effectsEffectIds: Set<String> {
-        Set((detailControls + blurControls + motionBlurControls + vignetteControls + grainControls + glowControls + chromaKeyControls + subjectKeyControls).map(\.effectId))
+        Set((detailControls + blurControls + motionBlurControls + vignetteControls + grainControls + glowControls + warpControls + chromaKeyControls + subjectKeyControls).map(\.effectId))
             .union(["stylize.invert"])
     }
 
@@ -170,6 +179,7 @@ extension InspectorView {
                 adjustSubgroup(title: "Vignette", controls: vignetteControls, clips: clips)
                 adjustSubgroup(title: "Film Grain", controls: grainControls, clips: clips)
                 adjustSubgroup(title: "Glow", controls: glowControls, clips: clips)
+                adjustSubgroup(title: "Warp", controls: warpControls, clips: clips)
                 adjustSubgroup(title: "Chroma Key", controls: chromaKeyControls, clips: clips)
                 adjustSubgroup(title: "Subject Key", controls: subjectKeyControls, clips: clips)
                 adjustToggleRow(

@@ -64,7 +64,7 @@ struct InspectorView: View {
     @State private var fileSizeText: String?
     @State var collapsedAdjustSections: Set<String> = ["Curves", "Color Wheels", "Hue Curves", "LUTs", "Effects"]
     @State var collapsedAdjustSubgroups: Set<String> = [
-        "Detail", "Blur", "Motion Blur", "Vignette", "Film Grain", "Glow", "Chroma Key",
+        "Detail", "Blur", "Motion Blur", "Vignette", "Film Grain", "Glow", "Warp", "Chroma Key",
     ]
     @State private var customAspectRatioContext: CustomAspectRatioContext?
 
@@ -371,7 +371,7 @@ struct InspectorView: View {
         let isTextOnly = !texts.isEmpty && nonText.isEmpty && audios.isEmpty
 
         var tabs: [ClipTab] = []
-        if isTextOnly { tabs.append(.text); tabs.append(.textAnimate) }
+        if isTextOnly { tabs.append(.text); tabs.append(.textAnimate); tabs.append(.effects) }
         if !nonText.isEmpty {
             tabs.append(.video)
             tabs.append(.effects)
@@ -437,7 +437,7 @@ struct InspectorView: View {
                 if selectedTab == .ai, let asset = clipAsset {
                     AIEditTab(asset: asset, clipId: selection.firstVisualClip?.id ?? selection.firstAudioClip?.id)
                 } else if selectedTab == .effects {
-                    ScrollView { effectsTabContent(clips: selection.nonTextVisualClips) }
+                    ScrollView { effectsTabContent(clips: selection.nonTextVisualClips + selection.textClips) }
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: AppTheme.Spacing.zero) {

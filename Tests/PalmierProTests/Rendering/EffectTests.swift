@@ -102,6 +102,29 @@ struct EffectModelTests {
         }
     }
 
+    @Test func warpBendShiftsCenterColumnUpAndKeepsEdges() throws {
+        let descriptor = try #require(EffectRegistry.descriptor(id: "distort.warp"))
+        let canvas = CGRect(x: 0, y: 0, width: 200, height: 100)
+        let stripe = CIImage(color: CIColor(red: 1, green: 1, blue: 1))
+            .cropped(to: CGRect(x: 0, y: 0, width: 200, height: 40))
+            .composited(over: CIImage(color: .clear).cropped(to: canvas))
+        var effect = descriptor.makeEffect()
+        effect.params["bend"] = EffectParam(value: 100)
+        let output = descriptor.render(stripe, effect: effect, atOffset: 0)
+
+        let ctx = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
+        func alpha(x: Int, y: Int) -> Double {
+            var px = [Float](repeating: 0, count: 4)
+            ctx.render(output, toBitmap: &px, rowBytes: 16,
+                       bounds: CGRect(x: x, y: y, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+            return Double(px[3])
+        }
+
+        #expect(alpha(x: 100, y: 60) > 0.9, "center shifts up by bend·width/4 = 50px")
+        #expect(alpha(x: 1, y: 60) < 0.1, "edges stay unshifted")
+        #expect(alpha(x: 100, y: 20) < 0.1, "below the shifted stripe is empty")
+    }
+
     @Test func invertEffectReturnsComplementaryChannels() throws {
         let descriptor = try #require(EffectRegistry.descriptor(id: "stylize.invert"))
         let input = CIImage(color: CIColor(red: 0.2, green: 0.4, blue: 0.75))
@@ -192,6 +215,7 @@ struct EffectRenderingTests {
             "stylize.invert": [:],
             "blur.noiseReduction": ["amount": 1],
             "blur.motion": ["radius": 20, "angle": 0],
+            "distort.warp": ["bend": 60, "waveAmplitude": 30, "waveLength": 120],
             "mockup.iphone17": ["orbitYaw": 30, "orbitPitch": 15],
         ]
 

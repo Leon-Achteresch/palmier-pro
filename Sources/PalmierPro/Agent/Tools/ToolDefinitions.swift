@@ -1063,7 +1063,7 @@ enum ToolDefinitions {
         AgentTool(
             name: .applyEffect,
             description: """
-            Apply non-color effects (blur, sharpen, stylize, detail, key) to video/image clips as a live, \
+            Apply non-color effects (blur, sharpen, stylize, distort, detail, key) to video/image/text clips as a live, \
             editable effect stack — the looks/FX path, distinct from apply_color (grading). MERGES: each effect \
             you pass is added or updated by type; effects you don't mention are left in place. Pass enabled:false \
             to bypass one without removing it, or list its type in `remove` to delete it. Out-of-range params are \
@@ -1078,6 +1078,11 @@ enum ToolDefinitions {
             default smooth). That's how you ramp a blur on a reveal, \
             pulse a glow to the beat, or ease a vignette in. An empty array clears the animation and keeps \
             the last static value. Values are clamped to the param's range.
+
+            TEXT: effects apply to text clips too. distort.warp bends text (bend arches it, \
+            waveAmplitude/waveLength/wavePhase run a wave through it — keyframe wavePhase linearly for a \
+            continuous flag wave). Combine animated blur/glow/warp with set_keyframes and the text \
+            animation presets for After-Effects-style title reveals.
 
             Available effects — type: param (range, default):
             \(Self.effectCatalog())
