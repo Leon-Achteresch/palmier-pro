@@ -77,34 +77,8 @@ struct AgentPanelView: View {
         editor.projectURL?.deletingLastPathComponent()
     }
 
-    private var terminalButton: some View {
-        Menu {
-            ForEach(AgentTerminalCLI.allCases) { cli in
-                Button {
-                    terminals.view(for: cli, workingDirectory: terminalDirectory)
-                    activeTerminal = cli
-                } label: {
-                    Label(cli.title, systemImage: cli.systemImage)
-                }
-            }
-            if let activeTerminal, terminalView != nil {
-                Divider()
-                Button("Hide Terminal") { self.activeTerminal = nil }
-                Button("Quit \(activeTerminal.title)") {
-                    terminals.terminate(activeTerminal)
-                    self.activeTerminal = nil
-                }
-            }
-        } label: {
-            Image(systemName: "terminal")
-                .font(.system(size: AppTheme.FontSize.sm, weight: .medium))
-                .foregroundStyle(terminalView == nil ? AppTheme.Text.tertiaryColor : AppTheme.Text.primaryColor)
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .focusable(false)
-        .help("Terminal")
+    private var runningTerminals: [AgentTerminalCLI] {
+        AgentTerminalCLI.allCases.filter { terminals.existingView(for: $0) != nil }
     }
 
     private var floatingTabBar: some View {
@@ -114,13 +88,30 @@ struct AgentPanelView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: AppTheme.Spacing.xxs) {
                             ForEach(service.openSessions) { session in
-                                ChatTabView(
-                                    session: session,
-                                    isActive: session.id == service.currentSessionId,
-                                    onSelect: { service.selectSession(session.id) },
+                                PanelTab(
+                                    title: session.title,
+                                    systemImage: "bubble.left",
+                                    isActive: terminalView == nil && session.id == service.currentSessionId,
+                                    onSelect: {
+                                        activeTerminal = nil
+                                        service.selectSession(session.id)
+                                    },
                                     onClose: { service.closeTab(session.id) }
                                 )
                                 .id(session.id)
+                            }
+                            ForEach(runningTerminals) { cli in
+                                PanelTab(
+                                    title: cli.title,
+                                    systemImage: cli.systemImage,
+                                    isActive: activeTerminal == cli,
+                                    onSelect: { activeTerminal = cli },
+                                    onClose: {
+                                        terminals.terminate(cli)
+                                        if activeTerminal == cli { activeTerminal = nil }
+                                    }
+                                )
+                                .id(cli.id)
                             }
                         }
                     }
@@ -131,7 +122,6 @@ struct AgentPanelView: View {
                 }
                 newTabButton
                 historyButton
-                terminalButton
                 ViewSkillsButton()
             }
             .padding(.horizontal, AppTheme.Spacing.sm)
@@ -147,15 +137,35 @@ struct AgentPanelView: View {
     }
 
     private var newTabButton: some View {
-        Button { service.newChat() } label: {
+        Menu {
+            Button {
+                activeTerminal = nil
+                service.newChat()
+            } label: {
+                Label("New Chat", systemImage: "bubble.left")
+            }
+            Divider()
+            ForEach(AgentTerminalCLI.allCases) { cli in
+                Button {
+                    terminals.view(for: cli, workingDirectory: terminalDirectory)
+                    activeTerminal = cli
+                } label: {
+                    Label(cli.title, systemImage: cli.systemImage)
+                }
+            }
+        } label: {
             Image(systemName: "plus")
                 .font(.system(size: AppTheme.FontSize.sm, weight: .medium))
                 .foregroundStyle(AppTheme.Text.tertiaryColor)
-                .frame(width: AppTheme.IconSize.smMd, height: AppTheme.IconSize.smMd)
+        } primaryAction: {
+            activeTerminal = nil
+            service.newChat()
         }
-        .buttonStyle(.plain)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
         .focusable(false)
-        .help("New chat")
+        .help("New chat or terminal")
     }
 
     @State private var showHistory = false
@@ -454,8 +464,9 @@ private struct AgentStarterPromptButton: View {
     }
 }
 
-private struct ChatTabView: View {
-    let session: ChatSession
+private struct PanelTab: View {
+    let title: String
+    let systemImage: String
     let isActive: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
@@ -463,39 +474,39 @@ private struct ChatTabView: View {
 
     var body: some View {
         Button(action: onSelect) {
-            VStack(spacing: AppTheme.Spacing.xs) {
-                HStack(spacing: AppTheme.Spacing.xs) {
-                    Text(displayTitle)
-                        .font(.system(size: AppTheme.FontSize.xs, weight: isActive ? .semibold : .regular))
-                        .foregroundStyle(isActive ? AppTheme.Text.primaryColor : AppTheme.Text.mutedColor)
-                        .lineLimit(1)
-                        .fixedSize()
-                    if hovering || isActive {
-                        Button(action: onClose) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: AppTheme.FontSize.xxs, weight: .medium))
-                                .foregroundStyle(AppTheme.Text.mutedColor)
-                                .frame(width: AppTheme.Spacing.mdLg, height: AppTheme.Spacing.mdLg)
-                        }
-                        .buttonStyle(.plain)
-                        .focusable(false)
-                    }
+            HStack(spacing: AppTheme.Spacing.xs) {
+                Image(systemName: systemImage)
+                    .font(.system(size: AppTheme.FontSize.xxs, weight: .medium))
+                    .foregroundStyle(isActive ? AppTheme.Text.secondaryColor : AppTheme.Text.mutedColor)
+                Text(title)
+                    .font(.system(size: AppTheme.FontSize.xs, weight: isActive ? .semibold : .regular))
+                    .foregroundStyle(isActive ? AppTheme.Text.primaryColor : AppTheme.Text.tertiaryColor)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: Layout.chatTabTitleMax, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: AppTheme.FontSize.micro, weight: .semibold))
+                        .foregroundStyle(AppTheme.Text.tertiaryColor)
+                        .frame(width: AppTheme.IconSize.xxs, height: AppTheme.IconSize.xxs)
                 }
-                Rectangle()
-                    .fill(isActive ? AppTheme.Text.primaryColor : Color.clear)
-                    .frame(height: AppTheme.BorderWidth.medium)
+                .buttonStyle(.plain)
+                .focusable(false)
+                .opacity(hovering ? AppTheme.Opacity.opaque : 0)
             }
-            .padding(.horizontal, AppTheme.Spacing.sm)
-            .padding(.top, AppTheme.Spacing.xxs)
+            .padding(.leading, AppTheme.Spacing.sm)
+            .padding(.trailing, AppTheme.Spacing.xs)
+            .frame(height: AppTheme.IconSize.md)
+            .background(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous)
+                    .fill(isActive ? AppTheme.Background.prominentColor : Color.clear)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .focusable(false)
         .onHover { hovering = $0 }
-    }
-
-    private var displayTitle: String {
-        let t = session.title
-        return t.count > 20 ? String(t.prefix(20)) + "…" : t
+        .help(title)
     }
 }

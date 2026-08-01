@@ -35,6 +35,7 @@ enum Layout {
     static let agentPanelMin: CGFloat = 240
     static let agentPanelMax: CGFloat = 640
     static let chatColumnMax: CGFloat = 640
+    static let chatTabTitleMax: CGFloat = 120
 
     // Headers & toolbars
     static let panelHeaderHeight: CGFloat = 28
