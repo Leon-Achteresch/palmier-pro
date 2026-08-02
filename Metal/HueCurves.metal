@@ -19,7 +19,7 @@ static float3 hsv2rgb(float3 c) {
     return c.z * mix(K.xxx, saturate(p - K.xxx), c.y);
 }
 
-extern "C" float4 hueCurves(coreimage::sampler img, coreimage::sampler lut) {
+[[stitchable]] float4 hueCurves(coreimage::sampler img, coreimage::sampler lut) {
     float4 s = img.sample(img.coord());
     float3 hsv = rgb2hsv(saturate(s.rgb));
     float4 L = lut.sample(lut.transform(float2(hsv.x * 256.0, 0.5)));

@@ -42,9 +42,9 @@ extension ToolExecutor {
     }
 
     private func providerKeyPresent(for modelId: String) -> Bool {
-        OpenRouterRunner.handles(modelId)
-            ? OpenRouterService.shared.hasKey
-            : ElevenLabsService.shared.hasKey
+        if OpenRouterRunner.handles(modelId) { return OpenRouterService.shared.hasKey }
+        if GeminiOmniRunner.handles(modelId) { return GeminiOmniService.shared.hasKey }
+        return ElevenLabsService.shared.hasKey
     }
 
     func generate(_ editor: EditorViewModel, _ args: [String: Any], type: ClipType) throws -> ToolResult {

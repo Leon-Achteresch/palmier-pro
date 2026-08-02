@@ -29,7 +29,7 @@ extension EditSubmitter {
             guard let model = VideoModelConfig.edit else { return nil }
             modelId = model.id
         case .image:
-            guard let model = ImageModelConfig.nanoBananaPro else { return nil }
+            guard let model = ImageModelConfig.imageEdit else { return nil }
             modelId = model.id
         case .audio, .text, .lottie, .sequence:
             return nil

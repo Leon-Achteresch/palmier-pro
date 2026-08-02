@@ -9,7 +9,7 @@ static float hash13(float3 p3) {
     return fract((p3.x + p3.y) * p3.z);
 }
 
-extern "C" float4 grain(coreimage::sampler img, float amount, float size, float frame,
+[[stitchable]] float4 grain(coreimage::sampler img, float amount, float size, float frame,
                         coreimage::destination dest) {
     float4 s = img.sample(img.coord());
     float2 co = dest.coord() / max(size, 0.5);

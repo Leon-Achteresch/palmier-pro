@@ -4,7 +4,7 @@ using namespace metal;
 // Per-pixel RGB + master(luma) tone curves. Two 256-wide 1D LUTs sampled per pixel:
 // lutCh holds the per-channel curves (R=red, G=green, B=blue); lutMaster holds the luma curve.
 
-extern "C" float4 gradeCurves(coreimage::sampler img,
+[[stitchable]] float4 gradeCurves(coreimage::sampler img,
                               coreimage::sampler lutCh,
                               coreimage::sampler lutMaster) {
     float4 s = img.sample(img.coord());

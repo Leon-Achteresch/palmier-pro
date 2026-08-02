@@ -14,7 +14,7 @@ extension TimelineView {
         let enhanceActions = actions.filter { $0.group(for: mediaType) == .enhance }
         let audioActions = actions.filter { $0.group(for: mediaType) == .audio }
         let addAction: (EditAction) -> Void = { action in
-            let paidBlocked = action.requiresPaidPlan && !isPaid
+            let paidBlocked = action.paidBlocked(for: mediaType)
             switch action {
             case .upscale:
                 let upscaleItem = NSMenuItem(title: paidBlocked ? "Upscale… (Paid)" : "Upscale…", action: #selector(self.performAIEditUpscale(_:)), keyEquivalent: "")

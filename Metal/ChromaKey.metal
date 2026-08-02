@@ -3,7 +3,7 @@ using namespace metal;
 
 // Chroma key: pixels near `keyHue` (and saturated enough) become transparent, with a soft edge.
 // `spill` desaturates the leftover key tint on partially-keyed edges. Unpremultiplied I/O.
-extern "C" float4 chromaKey(coreimage::sample_t s, float keyHue, float tolerance,
+[[stitchable]] float4 chromaKey(coreimage::sample_t s, float keyHue, float tolerance,
                             float softness, float spill) {
     float3 rgb = s.rgb;
     float mx = max(rgb.r, max(rgb.g, rgb.b));

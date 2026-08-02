@@ -11,7 +11,7 @@ static float3 fetch(coreimage::sampler lut, float n, float3 idx) {
     return lut.sample(lut.transform(float2(idx.x + 0.5, n * n - 1.0 - row + 0.5))).rgb;
 }
 
-extern "C" float4 lutTetra(coreimage::sampler img, coreimage::sampler lut, float n, float intensity) {
+[[stitchable]] float4 lutTetra(coreimage::sampler img, coreimage::sampler lut, float n, float intensity) {
     float4 s = img.sample(img.coord());
     float3 rgb = saturate(s.rgb);
     float3 p = rgb * (n - 1.0);

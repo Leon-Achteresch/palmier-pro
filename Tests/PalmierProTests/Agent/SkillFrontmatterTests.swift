@@ -12,4 +12,20 @@ struct SkillFrontmatterTests {
         #expect(SkillFrontmatter.requiredFields(missingName) == nil)
         #expect(SkillFrontmatter.requiredFields(emptyDescription) == nil)
     }
+
+    @Test func foldsBlockScalarDescriptions() {
+        let folded = """
+            ---
+            name: viral-attention
+            description: >-
+              Win the first 2 seconds.
+              Use for Reels and TikToks.
+            ---
+
+            Instructions
+            """
+        let parsed = SkillFrontmatter.requiredFields(folded)
+        #expect(parsed?.description == "Win the first 2 seconds. Use for Reels and TikToks.")
+        #expect(parsed?.body == "Instructions")
+    }
 }

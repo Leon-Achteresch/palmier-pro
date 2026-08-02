@@ -4,7 +4,7 @@ using namespace metal;
 // Clarity = local-contrast unsharp against a mid-radius blur. Dehaze pushes contrast, local
 // contrast and saturation, weighted by the dark-channel prior (haze = high min-channel) so it's
 // strongest on washed-out regions but still visible everywhere.
-extern "C" float4 clarityHaze(coreimage::sampler img, coreimage::sampler blurred,
+[[stitchable]] float4 clarityHaze(coreimage::sampler img, coreimage::sampler blurred,
                               float clarity, float dehaze) {
     float4 s = img.sample(img.coord());
     float3 b = blurred.sample(blurred.coord()).rgb;

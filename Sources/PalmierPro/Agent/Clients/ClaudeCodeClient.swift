@@ -90,7 +90,7 @@ struct ClaudeCodeClient: Sendable {
     private var command: String {
         var parts = [
             "claude -p --output-format stream-json --include-partial-messages --verbose",
-            "--allowedTools mcp__palmier-pro",
+            "--allowedTools mcp__palmier-pro,Skill,Read,Glob",
             "--mcp-config \(mcpConfigJSON.singleQuotedForShell)",
         ]
         if let model {

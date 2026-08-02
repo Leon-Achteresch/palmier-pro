@@ -1,7 +1,7 @@
 #include <CoreImage/CoreImage.h>
 using namespace metal;
 
-extern "C" float4 edgeRounding(coreimage::sampler image, float4 rect, float edgeRounding, float edgeSoftness,
+[[stitchable]] float4 edgeRounding(coreimage::sampler image, float4 rect, float edgeRounding, float edgeSoftness,
                                coreimage::destination destination) {
     float4 sample = image.sample(image.coord());
     float radius = saturate(edgeRounding) * min(rect.z, rect.w) * 0.5;

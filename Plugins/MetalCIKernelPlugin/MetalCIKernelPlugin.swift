@@ -12,15 +12,15 @@ struct MetalCIKernelPlugin: BuildToolPlugin {
         return names.map { file in
             let stem = (file as NSString).deletingPathExtension
             let metal = metalDir.appending(path: file)
-            let air = context.pluginWorkDirectoryURL.appending(path: "\(stem).air")
             let metallib = context.pluginWorkDirectoryURL.appending(path: "\(stem).metallib")
             return .buildCommand(
                 displayName: "Compile CI kernel \(file)",
                 executable: URL(filePath: "/bin/sh"),
                 arguments: [
                     "-c",
-                    "xcrun metal -c -fcikernel '\(metal.path())' -o '\(air.path())' && " +
-                    "xcrun metallib -cikernel '\(air.path())' -o '\(metallib.path())'",
+                    "xcrun metal '\(metal.path())' " +
+                    "\"$(xcrun --show-sdk-path)/System/Library/Frameworks/CoreImage.framework/CoreImage.metallib\" " +
+                    "-o '\(metallib.path())'",
                 ],
                 inputFiles: [metal],
                 outputFiles: [metallib])

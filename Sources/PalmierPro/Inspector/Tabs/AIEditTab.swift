@@ -222,7 +222,7 @@ struct AIEditTab: View {
             for: asset,
             effectiveDurationOverride: effectiveDurationForAvailability
         )
-        let paidBlocked = action.requiresPaidPlan && !account.isPaid
+        let paidBlocked = action.paidBlocked(for: asset.type)
         let isEnabled = availability.isAvailable && !paidBlocked && aiDisabledReason == nil
         let disabledReason = aiDisabledReason
             ?? (paidBlocked ? "Requires a paid plan" : availability.reason)

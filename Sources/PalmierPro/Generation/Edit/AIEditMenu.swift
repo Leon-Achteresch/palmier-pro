@@ -4,8 +4,6 @@ import SwiftUI
 struct AIEditMenu: View {
     let asset: MediaAsset
     @Environment(EditorViewModel.self) private var editor
-    @Bindable private var openRouter = OpenRouterService.shared
-    @Bindable private var elevenLabs = ElevenLabsService.shared
 
     var body: some View {
         if availableActions.isEmpty && availableAudioTransforms.isEmpty {
@@ -64,7 +62,7 @@ struct AIEditMenu: View {
     }
 
     private var aiAllowed: Bool {
-        AccountService.shared.aiAllowed || openRouter.hasKey || elevenLabs.hasKey
+        AccountService.shared.aiAllowed || OwnKeyGeneration.keyConfigured
     }
 
     private var availableActions: [EditAction] {
@@ -89,7 +87,7 @@ struct AIEditMenu: View {
         action: EditAction,
         perform: @escaping () -> Void
     ) -> some View {
-        if action.requiresPaidPlan && !AccountService.shared.isPaid {
+        if action.paidBlocked(for: asset.type) {
             Button {
                 SettingsWindowController.shared.show(tab: .account)
             } label: {

@@ -51,6 +51,16 @@ struct ModelsPane: View {
                     save: { ElevenLabsKeychain.save($0) },
                     remove: { ElevenLabsKeychain.delete() }
                 )
+                APIKeyField(
+                    title: "Google AI API Key",
+                    explanation: "Generate and edit video and images with Gemini Omni Flash — swap objects, rewrite scenes, and recut footage. Billed by Google, not in credits. Stored in the macOS Keychain.",
+                    linkTitle: "Get Google AI API key",
+                    linkURL: URL(string: "https://aistudio.google.com/apikey")!,
+                    placeholder: "AIza…",
+                    load: { GeminiKeychain.load() },
+                    save: { GeminiKeychain.save($0) },
+                    remove: { GeminiKeychain.delete() }
+                )
             }
 
             searchBar

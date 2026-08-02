@@ -65,6 +65,10 @@ let package = Package(
                     package: "speech-swift",
                     condition: .when(traits: ["BundledSpeech"])
                 ),
+                .product(
+                    name: "SpeechRestoration",
+                    package: "speech-swift"
+                ),
                 .product(name: "Inject", package: "Inject"),
             ],
             path: "Sources/PalmierPro",

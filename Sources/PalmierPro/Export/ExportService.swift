@@ -543,15 +543,22 @@ final class ExportService {
         let mediaURLs = resolver.expectedURLMap()
 
         for track in timeline.tracks {
-            for clip in track.clips where clip.hasDenoiseEnabled && clip.denoiseAmount > 0 {
+            for clip in track.clips {
+                let wantsStudio = clip.hasStudioVoiceEnabled
+                let wantsDenoise = clip.hasDenoiseEnabled && clip.denoiseAmount > 0
+                guard wantsStudio || wantsDenoise else { continue }
                 try Task.checkCancellation()
                 guard !missingMediaRefs.contains(clip.mediaRef), let url = mediaURLs[clip.mediaRef] else { continue }
                 do {
-                    _ = try await AudioEnhancer.denoisedAudio(for: url, mediaRef: clip.mediaRef)
+                    if wantsStudio {
+                        _ = try await AudioEnhancer.studioAudio(for: url, mediaRef: clip.mediaRef)
+                    } else {
+                        _ = try await AudioEnhancer.denoisedAudio(for: url, mediaRef: clip.mediaRef)
+                    }
                 } catch is CancellationError {
                     throw CancellationError()
                 } catch {
-                    Log.export.error("denoise bake failed — exporting original audio. mediaRef=\(clip.mediaRef): \(Log.detail(error))")
+                    Log.export.error("audio enhance bake failed — exporting original audio. mediaRef=\(clip.mediaRef): \(Log.detail(error))")
                 }
             }
         }

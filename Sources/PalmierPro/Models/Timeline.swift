@@ -283,7 +283,12 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
         effects?.first { $0.type == Clip.denoiseEffectType }?.params["amount"]?.value ?? Clip.defaultDenoiseAmount
     }
 
+    var hasStudioVoiceEnabled: Bool {
+        effects?.contains { $0.type == Clip.studioVoiceEffectType && $0.enabled } ?? false
+    }
+
     static let denoiseEffectType = "audio.denoise"
+    static let studioVoiceEffectType = "audio.studioVoice"
     static let defaultDenoiseAmount: Double = 0.6
 
     func rawVolumeAt(frame: Int) -> Double {

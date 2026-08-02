@@ -4,12 +4,14 @@ import Foundation
 enum OwnKeyGeneration {
     static func handles(_ modelId: String) -> Bool {
         ElevenLabsRunner.handles(modelId) || OpenRouterRunner.handles(modelId)
+            || GeminiOmniRunner.handles(modelId)
     }
 
-    /// OpenRouter and/or ElevenLabs key present — AI UI works without Palmier backend.
+    /// Any own-provider key present — AI UI works without Palmier backend.
     @MainActor
     static var keyConfigured: Bool {
         OpenRouterService.shared.hasKey || ElevenLabsService.shared.hasKey
+            || GeminiOmniService.shared.hasKey
     }
 
     @MainActor
@@ -30,6 +32,14 @@ enum OwnKeyGeneration {
                 trimmedSource: trimmedSource
             )
             return [file]
+        }
+        if GeminiOmniRunner.handles(modelId) {
+            return try await GeminiOmniRunner.run(
+                catalogId: modelId,
+                params: buildParams([]),
+                references: references,
+                trimmedSource: trimmedSource
+            )
         }
         // OpenRouter takes references inline as data URLs, so they never pass through an upload service.
         let dataURLs = try await referenceDataURLs(references)

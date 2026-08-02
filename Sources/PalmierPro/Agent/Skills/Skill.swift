@@ -19,15 +19,24 @@ enum SkillFrontmatter {
         var i = 1
         while i < lines.count, lines[i].trimmingCharacters(in: .whitespaces) != "---" {
             let line = lines[i]
-            if let colon = line.firstIndex(of: ":") {
-                let key = line[..<colon].trimmingCharacters(in: .whitespaces)
-                var value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
-                if value.count >= 2, value.hasPrefix("\""), value.hasSuffix("\"") {
-                    value = String(value.dropFirst().dropLast())
-                }
-                if !key.isEmpty { fields[key] = value }
-            }
             i += 1
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let key = line[..<colon].trimmingCharacters(in: .whitespaces)
+            guard !key.isEmpty else { continue }
+            var value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            if value.hasPrefix(">") || value.hasPrefix("|") {
+                let separator = value.hasPrefix("|") ? "\n" : " "
+                var block: [String] = []
+                while i < lines.count, lines[i].trimmingCharacters(in: .whitespaces) != "---",
+                      lines[i].hasPrefix(" ") || lines[i].trimmingCharacters(in: .whitespaces).isEmpty {
+                    block.append(lines[i].trimmingCharacters(in: .whitespaces))
+                    i += 1
+                }
+                value = block.joined(separator: separator).trimmingCharacters(in: .whitespacesAndNewlines)
+            } else if value.count >= 2, value.hasPrefix("\""), value.hasSuffix("\"") {
+                value = String(value.dropFirst().dropLast())
+            }
+            fields[key] = value
         }
         let body = i + 1 < lines.count
             ? lines[(i + 1)...].joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)

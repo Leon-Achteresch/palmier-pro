@@ -35,6 +35,8 @@ extension EditorViewModel {
         mediaAssets[i].url = newURL
         denoiseFailed.remove(id)
         denoiseBaked.remove(id)
+        denoiseFailed.remove(Self.studioBakeKey(id))
+        denoiseBaked.remove(Self.studioBakeKey(id))
         mediaVisualCache.invalidate(id)
         speakerAssignments.removeValue(forKey: id)
         if let j = mediaManifest.entries.firstIndex(where: { $0.id == id }) {

@@ -1,7 +1,7 @@
 #include <CoreImage/CoreImage.h>
 using namespace metal;
 
-extern "C" float4 warpBendWave(coreimage::sampler image, float4 rect, float bend, float waveAmp,
+[[stitchable]] float4 warpBendWave(coreimage::sampler image, float4 rect, float bend, float waveAmp,
                                float waveLength, float wavePhase, coreimage::destination destination) {
     float2 coord = destination.coord();
     float u = clamp((coord.x - rect.x) / max(rect.z, 1.0), 0.0, 1.0);

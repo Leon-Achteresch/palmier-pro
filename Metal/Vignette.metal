@@ -4,7 +4,7 @@ using namespace metal;
 // Centered, shaped, feathered vignette. `roundness` morphs a superellipse from rectangular
 // (frame-following) to round; `midpoint` sets where it starts, `feather` the falloff width.
 // amount<0 darkens edges / >0 lightens. Multiplicative → hue-preserving.
-extern "C" float4 vignette(coreimage::sampler img, float4 rect, float amount,
+[[stitchable]] float4 vignette(coreimage::sampler img, float4 rect, float amount,
                            float midpoint, float roundness, float feather,
                            coreimage::destination dest) {
     float4 s = img.sample(img.coord());

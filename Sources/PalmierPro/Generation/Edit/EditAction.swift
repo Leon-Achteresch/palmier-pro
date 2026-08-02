@@ -19,6 +19,26 @@ enum EditAction {
         }
     }
 
+    @MainActor
+    func paidBlocked(for mediaType: ClipType) -> Bool {
+        guard requiresPaidPlan, !AccountService.shared.isPaid else { return false }
+        switch self {
+        case .upscale:
+            return UpscaleModelConfig.models(for: mediaType).first?.paidOnly ?? true
+        case .edit:
+            let model = mediaType == .image
+                ? ImageModelConfig.imageEdit?.paidOnly
+                : VideoModelConfig.edit?.paidOnly
+            return model ?? true
+        case .lipSync:
+            return VideoModelConfig.lipSync?.paidOnly ?? true
+        case .reframe:
+            return VideoModelConfig.reframe?.paidOnly ?? true
+        case .generateMusic, .generateSFX, .rerun, .createVideo:
+            return false
+        }
+    }
+
     func group(for mediaType: ClipType) -> AIEditActionGroup {
         switch self {
         case .generateMusic, .generateSFX:

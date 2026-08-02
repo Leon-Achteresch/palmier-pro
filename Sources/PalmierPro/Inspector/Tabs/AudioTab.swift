@@ -8,6 +8,7 @@ extension InspectorView {
             levelsSection(audios: audioClips)
             EditorPanelGroup("Enhance", contentSpacing: AppTheme.Spacing.smMd) {
                 denoiseRow(audios: audioClips)
+                studioVoiceRow(audios: audioClips)
             }
             if !hasNonTextVisualClips {
                 speedSection(clips: audioClips)
@@ -144,6 +145,60 @@ extension InspectorView {
                     }
                 } else if failed {
                     Text("Denoise failed. Playback uses the original audio — adjust Strength to retry.")
+                        .font(.system(size: AppTheme.FontSize.xs))
+                        .foregroundStyle(AppTheme.Status.errorColor)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func studioVoiceRow(audios: [Clip]) -> some View {
+        if !audios.isEmpty {
+            let allOn = audios.allSatisfy(\.hasStudioVoiceEnabled)
+            let baking = audios.contains {
+                editor.denoiseInFlight.contains(EditorViewModel.studioBakeKey($0.mediaRef))
+            }
+            let failed = allOn && !baking && audios.contains {
+                editor.denoiseFailed.contains(EditorViewModel.studioBakeKey($0.mediaRef))
+            }
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.smMd) {
+                propertyRow(
+                    label: "Studio Voice",
+                    onReset: {
+                        editor.setStudioVoice(
+                            clipIds: Set(audios.map(\.id)),
+                            enabled: false,
+                            actionName: "Reset Studio Voice"
+                        )
+                    }
+                ) {
+                    Toggle("", isOn: Binding(
+                        get: { allOn },
+                        set: { enabled in
+                            editor.setStudioVoice(
+                                clipIds: Set(audios.map(\.id)),
+                                enabled: enabled,
+                                actionName: enabled ? "Enable Studio Voice" : "Disable Studio Voice"
+                            )
+                        }
+                    ))
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .labelsHidden()
+                    .accessibilityLabel("Studio Voice")
+                }
+                .help("Rebuilds the voice with an on-device model — removes noise, room, and harshness for a studio-mic sound.")
+                if baking {
+                    HStack(spacing: AppTheme.Spacing.xs) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Rebuilding voice…")
+                            .font(.system(size: AppTheme.FontSize.xs))
+                            .foregroundStyle(AppTheme.Text.mutedColor)
+                    }
+                } else if failed {
+                    Text("Studio Voice failed. Playback uses the original audio.")
                         .font(.system(size: AppTheme.FontSize.xs))
                         .foregroundStyle(AppTheme.Status.errorColor)
                 }

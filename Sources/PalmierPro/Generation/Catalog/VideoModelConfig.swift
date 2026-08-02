@@ -10,17 +10,17 @@ struct VideoModelConfig: Identifiable, Sendable {
 
     @MainActor
     static var edit: VideoModelConfig? {
-        allModels.first(where: \.isEdit)
+        preferUsableModel(allModels.filter(\.isEdit), paidOnly: \.paidOnly)
     }
 
     @MainActor
     static var reframe: VideoModelConfig? {
-        allModels.first(where: { $0.id.contains("reframe") })
+        preferUsableModel(allModels.filter { $0.id.contains("reframe") }, paidOnly: \.paidOnly)
     }
 
     @MainActor
     static var lipSync: VideoModelConfig? {
-        allModels.first(where: \.isLipSync)
+        preferUsableModel(allModels.filter(\.isLipSync), paidOnly: \.paidOnly)
     }
 
     let entry: CatalogEntry

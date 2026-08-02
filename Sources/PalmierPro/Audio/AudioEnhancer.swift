@@ -1,4 +1,6 @@
 import AVFoundation
+import Accelerate
+import SpeechRestoration
 #if BUNDLED_SPEECH
 import SpeechEnhancement
 #endif
@@ -6,6 +8,7 @@ import SpeechEnhancement
 enum AudioEnhancer {
     static let cache = DiskCache(named: "EnhancedAudio")
     private static let denoiseGate = AsyncSemaphore(value: 2)
+    private static let processingSampleRate = 48_000
 
     enum EnhanceError: LocalizedError {
         case noAudioTrack
@@ -35,7 +38,7 @@ enum AudioEnhancer {
             wet.append(try await modelBox.enhance(audio: dry[ch], sampleRate: SpeechEnhancer.sampleRate))
             dry[ch] = []
         }
-        removeStaleCaches(for: mediaRef, keeping: outputURL)
+        removeStaleCaches(for: mediaRef, tag: DiskCache.sizeMtimeTag(for: sourceURL))
         try write(channels: wet, to: outputURL)
         let elapsed = Double(start.duration(to: .now).components.seconds)
         Log.preview.notice("denoise ok mediaRef=\(mediaRef) seconds=\(String(format: "%.0f", elapsed))")
@@ -61,11 +64,38 @@ enum AudioEnhancer {
         }
         let isolated = try await ElevenLabsAPI.run(.isolateVoice(source: prepared), apiKey: apiKey)
         try FileManager.default.createDirectory(at: cache.directory, withIntermediateDirectories: true)
-        removeStaleCaches(for: mediaRef, keeping: outputURL)
+        removeStaleCaches(for: mediaRef, tag: DiskCache.sizeMtimeTag(for: sourceURL))
         try FileIO.moveReplacingDestination(from: isolated, to: outputURL)
         let elapsed = Double(start.duration(to: .now).components.seconds)
         Log.preview.notice("denoise ok via elevenlabs mediaRef=\(mediaRef) seconds=\(String(format: "%.0f", elapsed))")
         return outputURL
+    }
+
+    static func studioAudio(for sourceURL: URL, mediaRef: String) async throws -> URL {
+        if let cached = cachedStudioURL(for: sourceURL, mediaRef: mediaRef) { return cached }
+        try await denoiseGate.wait()
+        defer { Task { await denoiseGate.signal() } }
+        let outputURL = studioURL(for: sourceURL, mediaRef: mediaRef)
+        let start = ContinuousClock.now
+        let dry = try await readChannels(from: sourceURL)
+        guard dry.contains(where: { !$0.isEmpty }) else { throw EnhanceError.noAudioTrack }
+        let mono = mixdown(dry)
+        var wet = try await restorerBox.restore(audio: mono, sampleRate: processingSampleRate)
+        VoiceMastering.normalize(&wet, sampleRate: SpeechRestorer.outputSampleRate)
+        removeStaleCaches(for: mediaRef, tag: DiskCache.sizeMtimeTag(for: sourceURL))
+        try write(channels: [wet], to: outputURL)
+        let elapsed = Double(start.duration(to: .now).components.seconds)
+        Log.preview.notice("studio voice ok mediaRef=\(mediaRef) seconds=\(String(format: "%.0f", elapsed))")
+        return outputURL
+    }
+
+    static func cachedStudioURL(for sourceURL: URL, mediaRef: String) -> URL? {
+        let url = studioURL(for: sourceURL, mediaRef: mediaRef)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    private static func studioURL(for sourceURL: URL, mediaRef: String) -> URL {
+        cache.directory.appendingPathComponent("\(mediaRef)_\(DiskCache.sizeMtimeTag(for: sourceURL))_studio.caf")
     }
 
     static func cachedDenoisedURL(for sourceURL: URL, mediaRef: String) -> URL? {
@@ -84,12 +114,35 @@ enum AudioEnhancer {
         cache.directory.appendingPathComponent("\(mediaRef)_\(DiskCache.sizeMtimeTag(for: sourceURL))_wet.mp3")
     }
 
-    private static func removeStaleCaches(for mediaRef: String, keeping keep: URL) {
+    private static func removeStaleCaches(for mediaRef: String, tag: String) {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(at: cache.directory, includingPropertiesForKeys: nil) else { return }
-        for entry in entries where entry.lastPathComponent.hasPrefix("\(mediaRef)_") && entry.lastPathComponent != keep.lastPathComponent {
+        for entry in entries where entry.lastPathComponent.hasPrefix("\(mediaRef)_") && !entry.lastPathComponent.contains(tag) {
             try? fm.removeItem(at: entry)
         }
+    }
+
+    private static let restorerBox = RestorerBox()
+
+    private actor RestorerBox {
+        private var restorer: SpeechRestorer?
+
+        func restore(audio: [Float], sampleRate: Int) async throws -> [Float] {
+            if restorer == nil { restorer = try await SpeechRestorer.fromPretrained() }
+            return try restorer!.restore(audio: audio, sampleRate: sampleRate)
+        }
+    }
+
+    private static func mixdown(_ channels: [[Float]]) -> [Float] {
+        let filled = channels.filter { !$0.isEmpty }
+        guard filled.count > 1, let first = filled.first else { return filled.first ?? [] }
+        var mono = first
+        for ch in filled.dropFirst() {
+            vDSP_vadd(mono, 1, ch, 1, &mono, 1, vDSP_Length(min(mono.count, ch.count)))
+        }
+        var scale = 1 / Float(filled.count)
+        vDSP_vsmul(mono, 1, &scale, &mono, 1, vDSP_Length(mono.count))
+        return mono
     }
 
     #if BUNDLED_SPEECH
@@ -105,8 +158,7 @@ enum AudioEnhancer {
             return try enhancer!.enhanceChunked(audio: audio, sampleRate: sampleRate)
         }
     }
-
-    private static var sampleRate: Double { Double(SpeechEnhancer.sampleRate) }
+    #endif
 
     // MARK: - Reading
 
@@ -120,7 +172,7 @@ enum AudioEnhancer {
             from: url,
             outputSettings: [
                 AVFormatIDKey: kAudioFormatLinearPCM,
-                AVSampleRateKey: sampleRate,
+                AVSampleRateKey: Double(processingSampleRate),
                 AVNumberOfChannelsKey: count,
                 AVLinearPCMBitDepthKey: 32,
                 AVLinearPCMIsFloatKey: true,
@@ -141,7 +193,7 @@ enum AudioEnhancer {
     private static func write(channels: [[Float]], to outputURL: URL) throws {
         guard let frameCount = channels.first?.count, frameCount > 0,
               channels.allSatisfy({ $0.count == frameCount }),
-              let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: AVAudioChannelCount(channels.count)),
+              let format = AVAudioFormat(standardFormatWithSampleRate: Double(processingSampleRate), channels: AVAudioChannelCount(channels.count)),
               let outBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount))
         else { throw EnhanceError.writeFailed }
         outBuffer.frameLength = AVAudioFrameCount(frameCount)
@@ -157,5 +209,4 @@ enum AudioEnhancer {
         try file.write(from: outBuffer)
         try FileIO.moveReplacingDestination(from: tempURL, to: outputURL)
     }
-    #endif
 }

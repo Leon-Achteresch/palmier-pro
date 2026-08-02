@@ -9,6 +9,11 @@ enum ModelKind: Sendable {
     case upscale(UpscaleModelConfig)
 }
 
+@MainActor
+func preferUsableModel<M>(_ models: [M], paidOnly: KeyPath<M, Bool>) -> M? {
+    models.first { AccountService.shared.isPaid || !$0[keyPath: paidOnly] } ?? models.first
+}
+
 enum ModelRegistry {
     @MainActor static var byId: [String: ModelKind] { ModelCatalog.shared.byId }
 
@@ -43,6 +48,7 @@ final class ModelCatalog {
     @ObservationIgnored private var backendEntries: [CatalogEntry] = []
     @ObservationIgnored private var elevenLabsEntries: [CatalogEntry] = []
     @ObservationIgnored private var openRouterEntries: [CatalogEntry] = []
+    @ObservationIgnored private var geminiEntries: [CatalogEntry] = []
     @ObservationIgnored private var subscription: AnyCancellable?
     @ObservationIgnored private var didConfigure = false
     @ObservationIgnored private var retryTask: Task<Void, Never>?
@@ -118,8 +124,15 @@ final class ModelCatalog {
         rebuild()
     }
 
+    /// Gemini Omni models the user runs on their own Google AI key.
+    func setGeminiEntries(_ entries: [CatalogEntry]) {
+        geminiEntries = entries
+        if !entries.isEmpty { isLoaded = true }
+        rebuild()
+    }
+
     private func rebuild() {
-        let entries = backendEntries + elevenLabsEntries + openRouterEntries
+        let entries = backendEntries + elevenLabsEntries + openRouterEntries + geminiEntries
         var newVideo: [VideoModelConfig] = []
         var newImage: [ImageModelConfig] = []
         var newAudio: [AudioModelConfig] = []

@@ -251,10 +251,16 @@ enum CompositionBuilder {
     }
 
     private static func insertDenoisedTwin(_ clip: Clip, parentTrackIndex: Int, ctx: BuildContext) async -> Bool {
-        guard clip.hasDenoiseEnabled, clip.denoiseAmount > 0,
-              let resolved = ctx.resolveURL(clip.mediaRef),
-              let wetURL = AudioEnhancer.cachedDenoisedURL(for: resolved, mediaRef: clip.mediaRef)
-        else { return false }
+        guard let resolved = ctx.resolveURL(clip.mediaRef) else { return false }
+        let cachedWetURL: URL?
+        if clip.hasStudioVoiceEnabled {
+            cachedWetURL = AudioEnhancer.cachedStudioURL(for: resolved, mediaRef: clip.mediaRef)
+        } else if clip.hasDenoiseEnabled, clip.denoiseAmount > 0 {
+            cachedWetURL = AudioEnhancer.cachedDenoisedURL(for: resolved, mediaRef: clip.mediaRef)
+        } else {
+            cachedWetURL = nil
+        }
+        guard let wetURL = cachedWetURL else { return false }
         let asset = AVURLAsset(url: wetURL)
         guard let sourceTrack = try? await asset.loadTracks(withMediaType: .audio).first,
               let compTrack = ctx.composition.addMutableTrack(
@@ -541,7 +547,9 @@ enum CompositionBuilder {
                 for clip in track.clips.sorted(by: { $0.startFrame < $1.startFrame }) {
                     if let clipIds, !clipIds.contains(clip.id) { continue }
                     guard clip.durationFrames > 0, clip.startFrame >= prevEndFrame else { continue }
-                    let strength = clip.hasDenoiseEnabled ? Float(min(1, max(0, clip.denoiseAmount))) : 0
+                    let strength: Float = clip.hasStudioVoiceEnabled
+                        ? 1
+                        : (clip.hasDenoiseEnabled ? Float(min(1, max(0, clip.denoiseAmount))) : 0)
                     let gain: Float = mapping.wetAudio
                         ? strength
                         : (mapping.blendedClipIds.contains(clip.id) ? 1 - strength : 1)

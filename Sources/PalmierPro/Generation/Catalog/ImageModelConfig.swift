@@ -33,6 +33,14 @@ struct ImageModelConfig: Identifiable, Sendable {
         allModels.first(where: { $0.id == "nano-banana-pro" })
     }
 
+    @MainActor
+    static var imageEdit: ImageModelConfig? {
+        preferUsableModel(
+            [nanoBananaPro].compactMap { $0 } + allModels.filter(\.supportsImageReference),
+            paidOnly: \.paidOnly
+        )
+    }
+
     let entry: CatalogEntry
     let caps: ImageCaps
 
