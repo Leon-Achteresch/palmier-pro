@@ -180,7 +180,7 @@ enum ToolDefinitions {
             description: "Lists or cancels exports for the current project. action=list returns newest first with jobId, filename, path, status, progress percent, and any warnings/result. action=cancel requires the exact jobId returned by export_project or list; a waiting job is removed from the queue and an active job begins canceling. Cancel only when the user asks, or to undo an export just queued with incorrect settings. Never infer that an export is stuck from elapsed time alone.",
             inputSchema: objectSchema(
                 properties: [
-                    "action": ["type": "string", "enum": ["list", "cancel"]],
+                    "action": ["type": "string", "enum": ["list", "cancel"], "description": "list reports every queued/running/finished export job with progress and warnings; cancel stops the job named by jobId."],
                     "jobId": ["type": "string", "description": "Required for cancel. Exact jobId from export_project or manage_exports list."],
                 ],
                 required: ["action"]
@@ -319,6 +319,7 @@ enum ToolDefinitions {
                     ],
                     "renames": [
                         "type": "array",
+                        "description": "Display renames, applied after moves. Each item is {item, name}.",
                         "items": [
                             "type": "object",
                             "properties": [
@@ -440,6 +441,7 @@ enum ToolDefinitions {
                     ],
                     "set": [
                         "type": "array",
+                        "description": "Per-track state changes (muted, hidden, syncLocked). Select each track by trackId or index.",
                         "items": [
                             "type": "object",
                             "properties": [
@@ -558,7 +560,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .setKeyframes,
-            description: "Set animated keyframes on clips — the tool for animation: moves, pushes-in, spins, fades, reveals, ducking. By default replaces the existing keyframe track for each property you pass (empty array clears it); properties you don't pass are untouched. mode 'merge' instead upserts the given rows into the existing track — use it to adjust or add single keyframes without resending the whole animation.\n\nAnimate several properties at once with `tracks` ({property: rows}) — one atomic, single-undo action, so a push-in that ramps scale, position, and opacity together is ONE call, not three. `property`+`keyframes` still sets a single track. Target one clip with `clipId` or give the same animation to several with `clipIds`; add `stagger` (frames) to offset each subsequent clip's keyframes for cascading, wave-like motion across layers.\n\nFrames are CLIP-RELATIVE offsets (0 = first frame of the clip), so keyframes follow the clip when it moves. Rows are sorted by frame internally and the LAST row for any duplicate frame wins. Values must be finite numbers. Each row is `[frame, ...values, ease?]` where ease describes the curve OUT of that keyframe (the segment it starts). It accepts a named easing, a cubic-bezier array, or an easing object — the same vocabulary as motion.js:\n  • named — smooth (default; symmetric in-out, natural drifts and Ken Burns), easeOut (decelerating arrival; THE default for elements entering or moving to a target), easeIn (accelerating exit), easeInOut, linear (mechanical moves, volume ramps, continuous spins), hold (freeze until the next keyframe), sineIn/sineOut/sineInOut (gentlest curves), circIn/circOut/circInOut, expoIn/expoOut (sharpest; the modern motion-design standard for punchy reveals)/expoInOut, backIn/backOut (overshoot and settle; snappy pops)/backInOut, elasticIn/elasticOut (springy oscillation)/elasticInOut, bounceIn/bounceOut/bounceInOut, anticipate (pulls back, then shoots forward), spring (bounce 0.25), steps (4 steps)\n  • [x1, y1, x2, y2] — custom cubic bezier with CSS semantics (x1/x2 within 0–1, y unbounded for overshoot/undershoot), e.g. [0.32, 0, 0.67, 0]\n  • {type: 'spring', bounce: 0–1} — physical spring resolved over the segment's duration; bounce 0 glides in critically damped, 1 is maximally bouncy. Motion.js physics form {type: 'spring', stiffness, damping, mass} is accepted and mapped onto the segment duration.\n  • {type: 'steps', count: 1–100} — stepped/typewriter motion\n  • {type: 'cubicBezier', points: [x1, y1, x2, y2]} — object form of the bezier array\n  • {type: 'back', overshoot: 0–10, direction: 'in'|'out'|'inOut'} — back easing with adjustable overshoot (default direction 'out', default overshoot 1.70158 ≈ 10% past the target; 3 ≈ 20%)\n  • {type: 'elastic', amplitude: 1–5, period: 0.05–2, direction: 'in'|'out'|'inOut'} — elastic with adjustable strength (amplitude) and oscillation wavelength (period, default 0.3; smaller = more wobbles)\n  • {out: …, in: …} — SPLIT EASE, the After-Effects model: the segment departs on the 'out' curve and blends into the 'in' curve at the next keyframe. Each side takes any form above (except 'hold' for in). Example: {out: 'easeIn', in: {type: 'back', overshoot: 2.5}} accelerates away and overshoots into the landing. Either side may be omitted (defaults to smooth).\n\nrepeat unrolls the given rows into baked cycles before writing: {count: 2–50, type: 'loop' | 'reverse' | 'mirror', gapFrames?}. 'loop' restarts each cycle from the first value (with a 1-frame jump when gapFrames is 0); 'reverse' and 'mirror' ping-pong back and forth with time-mirrored easing (identical once baked). gapFrames adds rest between cycles. The result is ordinary keyframes, individually editable afterwards. Requires mode 'replace' and applies to every passed track.\n\nProperties and their value layouts:\n  • volumeDb `[frame, decibels]` — −60 through +15 dB; 0 dB keeps source level and −60 dB is mute\n  • opacity `[frame, value]` — value 0.0–1.0\n  • rotation `[frame, degrees]` — clockwise degrees\n  • position `[frame, topLeftX, topLeftY]` — TOP-LEFT corner in 0–1 normalized canvas coords. NOT the center. (Default static transform centers a full-canvas clip, so top-left of the static is (0, 0); a centered half-size clip has top-left (0.25, 0.25).)\n  • scale `[frame, width, height]` — clip's normalized width and height in 0–1 canvas coords (1.0 = fills the canvas axis). NOT a scale factor.\n  • crop `[frame, top, right, bottom, left]` — side insets in 0–1 of the source media.\n\nMotion keyframes (position/scale/rotation) override the static `transform` value when active.",
+            description: "Set animated keyframes on clips — the tool for animation: moves, pushes-in, spins, fades, reveals, ducking. By default replaces the existing keyframe track for each property you pass (empty array clears it); properties you don't pass are untouched. mode 'merge' instead upserts the given rows into the existing track — use it to adjust or add single keyframes without resending the whole animation.\n\nAnimate several properties at once with `tracks` ({property: rows}) — one atomic, single-undo action, so a push-in that ramps scale, position, and opacity together is ONE call, not three. `property`+`keyframes` still sets a single track. Target one clip with `clipId` or give the same animation to several with `clipIds`; add `stagger` (frames) to offset each subsequent clip's keyframes for cascading, wave-like motion across layers.\n\nProperties and their value layouts:\n  • volumeDb `[frame, decibels]` — −60 through +15 dB; 0 dB keeps source level and −60 dB is mute\n  • opacity `[frame, value]` — value 0.0–1.0\n  • rotation `[frame, degrees]` — clockwise degrees\n  • position `[frame, topLeftX, topLeftY]` — TOP-LEFT corner in 0–1 normalized canvas coords. NOT the center. (Default static transform centers a full-canvas clip, so top-left of the static is (0, 0); a centered half-size clip has top-left (0.25, 0.25).)\n  • scale `[frame, width, height]` — clip's normalized width and height in 0–1 canvas coords (1.0 = fills the canvas axis). NOT a scale factor.\n  • crop `[frame, top, right, bottom, left]` — side insets in 0–1 of the source media.\nMotion keyframes (position/scale/rotation) override the static `transform` value when active.\n\nFrames are CLIP-RELATIVE offsets (0 = first frame of the clip), so keyframes follow the clip when it moves. Rows are sorted by frame internally and the LAST row for any duplicate frame wins. Values must be finite numbers. Each row is `[frame, ...values, ease?]` where ease describes the curve OUT of that keyframe (the segment it starts). It accepts a named easing, a cubic-bezier array, or an easing object — the same vocabulary as motion.js:\n  • named — smooth (default; symmetric in-out, natural drifts and Ken Burns), easeOut (decelerating arrival; THE default for elements entering or moving to a target), easeIn (accelerating exit), easeInOut, linear (mechanical moves, volume ramps, continuous spins), hold (freeze until the next keyframe), sineIn/sineOut/sineInOut (gentlest curves), circIn/circOut/circInOut, expoIn/expoOut (sharpest; the modern motion-design standard for punchy reveals)/expoInOut, backIn/backOut (overshoot and settle; snappy pops)/backInOut, elasticIn/elasticOut (springy oscillation)/elasticInOut, bounceIn/bounceOut/bounceInOut, anticipate (pulls back, then shoots forward), spring (bounce 0.25), steps (4 steps)\n  • [x1, y1, x2, y2] — custom cubic bezier with CSS semantics (x1/x2 within 0–1, y unbounded for overshoot/undershoot), e.g. [0.32, 0, 0.67, 0]\n  • {type: 'spring', bounce: 0–1} — physical spring resolved over the segment's duration; bounce 0 glides in critically damped, 1 is maximally bouncy. Motion.js physics form {type: 'spring', stiffness, damping, mass} is accepted and mapped onto the segment duration.\n  • {type: 'steps', count: 1–100} — stepped/typewriter motion\n  • {type: 'cubicBezier', points: [x1, y1, x2, y2]} — object form of the bezier array\n  • {type: 'back', overshoot: 0–10, direction: 'in'|'out'|'inOut'} — back easing with adjustable overshoot (default direction 'out', default overshoot 1.70158 ≈ 10% past the target; 3 ≈ 20%)\n  • {type: 'elastic', amplitude: 1–5, period: 0.05–2, direction: 'in'|'out'|'inOut'} — elastic with adjustable strength (amplitude) and oscillation wavelength (period, default 0.3; smaller = more wobbles)\n  • {out: …, in: …} — SPLIT EASE, the After-Effects model: the segment departs on the 'out' curve and blends into the 'in' curve at the next keyframe. Each side takes any form above (except 'hold' for in). Example: {out: 'easeIn', in: {type: 'back', overshoot: 2.5}} accelerates away and overshoots into the landing. Either side may be omitted (defaults to smooth).\n\nrepeat unrolls the given rows into baked cycles before writing: {count: 2–50, type: 'loop' | 'reverse' | 'mirror', gapFrames?}. 'loop' restarts each cycle from the first value (with a 1-frame jump when gapFrames is 0); 'reverse' and 'mirror' ping-pong back and forth with time-mirrored easing (identical once baked). gapFrames adds rest between cycles. The result is ordinary keyframes, individually editable afterwards. Requires mode 'replace' and applies to every passed track.",
             inputSchema: objectSchema(
                 properties: [
                     "clipId": ["type": "string", "description": "The clip to animate. Use clipIds instead to give several clips the same animation."],
@@ -588,7 +590,7 @@ enum ToolDefinitions {
                     ],
                     "tracks": [
                         "type": "object",
-                        "description": "Animate several properties at once: {property: keyframe rows}, keys from volumeDb, opacity, rotation, position, scale, crop. Row shape depends on the property — see tool description. An empty array clears that property's track. Mutually exclusive with property/keyframes.",
+                        "description": "Animate several properties at once: {property: keyframe rows}, keys from volumeDb, opacity, rotation, position, scale, crop. An empty array clears that property's track. Mutually exclusive with property/keyframes. \(keyframeRowShapes)",
                         "additionalProperties": ["type": "array", "items": ["type": "array"]],
                     ],
                     "property": [
@@ -598,7 +600,7 @@ enum ToolDefinitions {
                     ],
                     "keyframes": [
                         "type": "array",
-                        "description": "Single-track form: replacement keyframe rows for 'property'. Empty array clears the track. Row shape depends on property — see tool description.",
+                        "description": "Single-track form: replacement keyframe rows for 'property'. Empty array clears the track. \(keyframeRowShapes)",
                         "items": ["type": "array"],
                     ],
                 ]
@@ -754,7 +756,7 @@ enum ToolDefinitions {
                         "description": "One entry per slot of the chosen layout. Each entry names a 'slot' and gives exactly one of 'mediaRef' (place a new clip) or 'clipIds' (re-layout existing clip(s) into that slot). Don't mix placement (mediaRef) with re-layout (clipIds) across slots.",
                         "items": objectSchema(
                             properties: [
-                                "slot": ["type": "string", "description": "Slot name for the chosen layout (e.g. 'left', 'inset', or 'r1c1' for the top-left grid cell)."],
+                                "slot": ["type": "string", "description": "Slot name for the chosen layout. Slots per layout — full: main; side_by_side: left, right; top_bottom: top, bottom; pip_*: main, inset; grid_2x2/3x3/4x4: rNcN counted from the top-left (r1c1 is top-left, r2c2 a 3x3's center); main_sidebar: main, sidebar; three_up: left, center, right. Every slot of the layout must be filled."],
                                 "mediaRef": ["type": "string", "description": "Asset ID from get_media to place into this slot. Use this OR clipIds."],
                                 "clipIds": [
                                     "type": "array",
@@ -823,13 +825,15 @@ enum ToolDefinitions {
                             "startFrame": ["type": "integer", "description": "Timeline frame to place the group. Default: timeline end."],
                             "searchWindowSeconds": ["type": "number", "description": "Max ± audio sync search window, seconds (default 240)."],
                         ],
-                        required: ["members"]
+                        required: ["members"],
+                        description: "Build a new multicam group from session media. Pass exactly one of create or ungroup."
                     ),
                     "ungroup": objectSchema(
                         properties: [
                             "groupId": ["type": "string", "description": "Group to dissolve; its clips stay put, unstamped."],
                         ],
-                        required: ["groupId"]
+                        required: ["groupId"],
+                        description: "Dissolve an existing multicam group. Pass exactly one of create or ungroup."
                     ),
                 ]
             )
@@ -1115,8 +1119,8 @@ enum ToolDefinitions {
                         "description": "Effects to add or update on the clips.",
                         "items": objectSchema(
                             properties: [
-                                "type": ["type": "string", "description": "Effect type id, e.g. stylize.glow (see list above)."],
-                                "params": ["type": "object", "description": "Param values keyed by name. Each value is a number (static) or keyframe rows [[frame, value, interp?], ...] for an animated param; empty array clears the animation. Out-of-range values are clamped; omitted params keep their current/default value."],
+                                "type": ["type": "string", "enum": nonColorEffectIds(), "description": "Effect type id."],
+                                "params": ["type": "object", "description": "Param values keyed by name. Each value is a number (static) or keyframe rows [[frame, value, interp?], ...] for an animated param; empty array clears the animation. Out-of-range values are clamped; omitted params keep their current/default value. Valid params per effect — type: param (range, default):\n\(effectCatalog())"],
                                 "enabled": ["type": "boolean", "description": "Default true. false bypasses the effect without removing it."],
                             ],
                             required: ["type"]
@@ -1296,6 +1300,12 @@ enum ToolDefinitions {
         ),
     ]
 
+    private static let keyframeRowShapes = "Row shapes — volumeDb: [frame, dB −60…+15]; opacity: [frame, 0–1]; rotation: [frame, degrees clockwise]; position: [frame, topLeftX, topLeftY] (TOP-LEFT corner in 0–1 canvas coords, NOT the center); scale: [frame, width, height] (normalized 0–1 canvas size, NOT a scale factor); crop: [frame, top, right, bottom, left] (0–1 insets). Optional last row element: the ease out of that keyframe — a name (smooth default, easeOut, easeIn, easeInOut, linear, hold, anticipate, spring, steps, plus sine/circ/expo/back/elastic/bounce with In/Out/InOut), an [x1,y1,x2,y2] bezier, {type: 'spring'|'steps'|'back'|'elastic'|'cubicBezier', …}, or a split ease {out, in}."
+
+    private static func nonColorEffectIds() -> [String] {
+        EffectRegistry.all.map(\.id).filter { !$0.hasPrefix("color.") }
+    }
+
     /// One line per non-color effect for apply_effect's description, generated from the registry.
     private static func effectCatalog() -> String {
         func n(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : String(format: "%g", v) }
@@ -1466,9 +1476,13 @@ enum ToolDefinitions {
 
     private static func objectSchema(
         properties: [String: [String: Any]] = [:],
-        required: [String] = []
+        required: [String] = [],
+        description: String? = nil
     ) -> [String: Any] {
         var dict: [String: Any] = ["type": "object"]
+        if let description {
+            dict["description"] = description
+        }
         if !properties.isEmpty {
             dict["properties"] = properties
         }

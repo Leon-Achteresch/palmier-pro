@@ -34,7 +34,8 @@ extension ToolExecutor {
         var animated = false
         for (i, e) in adds.enumerated() {
             guard let d = EffectRegistry.descriptor(id: e.type) else {
-                throw ToolError("Unknown effect '\(e.type)'. See the apply_effect description for available types.")
+                let available = EffectRegistry.all.map(\.id).filter { !$0.hasPrefix("color.") }
+                throw ToolError("Unknown effect '\(e.type)'. Available: \(available.joined(separator: ", ")). color.* grades go through apply_color.")
             }
             guard !e.type.hasPrefix("color.") else {
                 throw ToolError("'\(e.type)' is a color grade — use apply_color, not apply_effect.")
