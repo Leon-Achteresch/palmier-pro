@@ -75,6 +75,10 @@ enum ToolName: String, CaseIterable, Sendable {
     case generateAudio = "generate_audio"
     case upscaleMedia = "upscale_media"
 
+    // Review
+    case reviewTimeline = "review_timeline"
+    case manageReferences = "manage_references"
+
     // Meta
     case sendFeedback = "send_feedback"
     case readSkill = "read_skill"
@@ -1265,6 +1269,29 @@ enum ToolDefinitions {
                     "severity": ["type": "string", "enum": ["low", "medium", "high"], "description": "Optional. How much this blocked the user."],
                 ],
                 required: ["category", "summary"]
+            )
+        ),
+        AgentTool(
+            name: .reviewTimeline,
+            description: "Read-only quality review of the active timeline. Reports pacing metrics (shot count, average/median shot seconds, per-third pacing), gaps that render black on the primary video track, and cut-to-beat alignment when detect_beats results are cached for the timeline's audio (run detect_beats on the music first, then call this). findings lists concrete issues with frame evidence. capture lists frames to render with capture_frame plus rubric questions — this tool never looks at pixels, so always do that visual pass to judge text readability, framing, and shot-to-shot consistency before calling a review complete. Pass referenceId (from manage_references) to compare pacing and BPM against a stored reference video; compare its look values via inspect_color. Makes no changes and creates no undo entries.",
+            inputSchema: objectSchema(
+                properties: [
+                    "referenceId": ["type": "string", "description": "Optional. A reference profile id from manage_references; adds a pacing/BPM comparison against that reference."],
+                ]
+            )
+        ),
+        AgentTool(
+            name: .manageReferences,
+            description: "Maintain Palmier's app-wide library of reference videos — examples of the pacing, rhythm, and look the user wants their edits to match. Profiles are stored per-user and available in every project. Set action to: 'analyze' to fingerprint a video (shot pacing per third, BPM, loudness, color) and store it — pass mediaRef for project media or an absolute path for any video file, with an optional name; 'list' for all stored profiles; 'remove' with referenceId to delete one. Analysis decodes the whole video and can take a while on long files. Use a stored referenceId with review_timeline to compare the current edit's pacing, and inspect_color to compare its look against the profile's look values.",
+            inputSchema: objectSchema(
+                properties: [
+                    "action": ["type": "string", "enum": ["analyze", "list", "remove"], "description": "What to do with the reference library."],
+                    "mediaRef": ["type": "string", "description": "analyze: id of a video asset in the current project."],
+                    "path": ["type": "string", "description": "analyze: absolute path to a video file on disk; alternative to mediaRef."],
+                    "name": ["type": "string", "description": "analyze: optional display name for the profile; defaults to the file name."],
+                    "referenceId": ["type": "string", "description": "remove: id of the profile to delete."],
+                ],
+                required: ["action"]
             )
         ),
     ]

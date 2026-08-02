@@ -181,7 +181,7 @@ final class ToolExecutor {
         switch tool {
         case .getTimeline, .inspectTimeline, .getMedia, .inspectMedia, .searchMedia,
              .getMulticam, .getTranscript, .detectBeats, .inspectColor, .listModels, .sendFeedback,
-             .readProjectContext:
+             .readProjectContext, .reviewTimeline, .manageReferences:
             true
         default:
             false
@@ -278,6 +278,8 @@ final class ToolExecutor {
         case .setProjectSettings: return try setProjectSettings(editor, args)
         case .createTimeline:     return try createTimeline(editor, args)
         case .setActiveTimeline:  return try setActiveTimeline(editor, args)
+        case .reviewTimeline: return try await reviewTimeline(editor, args)
+        case .manageReferences: return try await manageReferences(editor, args)
         case .readSkill:     return readSkill(args)
         case .manageProject:
             return await manageProject(args)
