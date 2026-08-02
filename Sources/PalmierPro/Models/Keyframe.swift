@@ -3,7 +3,9 @@ import Foundation
 enum Interpolation: String, Codable, CaseIterable, Sendable {
     case linear, hold, smooth
     case easeIn, easeOut, easeInOut
+    case sineIn, sineOut, sineInOut
     case circIn, circOut, circInOut
+    case expoIn, expoOut, expoInOut
     case backIn, backOut, backInOut
     case elasticIn, elasticOut, elasticInOut
     case bounceIn, bounceOut, bounceInOut
@@ -17,9 +19,15 @@ enum Interpolation: String, Codable, CaseIterable, Sendable {
         case .easeIn:       "Ease In"
         case .easeOut:      "Ease Out"
         case .easeInOut:    "Ease In-Out"
+        case .sineIn:       "Sine In"
+        case .sineOut:      "Sine Out"
+        case .sineInOut:    "Sine In-Out"
         case .circIn:       "Circular In"
         case .circOut:      "Circular Out"
         case .circInOut:    "Circular In-Out"
+        case .expoIn:       "Expo In"
+        case .expoOut:      "Expo Out"
+        case .expoInOut:    "Expo In-Out"
         case .backIn:       "Overshoot In"
         case .backOut:      "Overshoot"
         case .backInOut:    "Overshoot In-Out"
@@ -41,8 +49,12 @@ enum Interpolation: String, Codable, CaseIterable, Sendable {
         switch self {
         case .easeIn:     .easeOut
         case .easeOut:    .easeIn
+        case .sineIn:     .sineOut
+        case .sineOut:    .sineIn
         case .circIn:     .circOut
         case .circOut:    .circIn
+        case .expoIn:     .expoOut
+        case .expoOut:    .expoIn
         case .backIn:     .backOut
         case .backOut:    .backIn
         case .elasticIn:  .elasticOut
@@ -65,6 +77,20 @@ enum Interpolation: String, Codable, CaseIterable, Sendable {
             return 1 - pow(1 - t, 3)
         case .easeInOut:
             return t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2
+        case .sineIn:
+            return 1 - cos(t * .pi / 2)
+        case .sineOut:
+            return sin(t * .pi / 2)
+        case .sineInOut:
+            return -(cos(.pi * t) - 1) / 2
+        case .expoIn:
+            return t <= 0 ? 0 : pow(2, 10 * t - 10)
+        case .expoOut:
+            return t >= 1 ? 1 : 1 - pow(2, -10 * t)
+        case .expoInOut:
+            if t <= 0 { return 0 }
+            if t >= 1 { return 1 }
+            return t < 0.5 ? pow(2, 20 * t - 10) / 2 : (2 - pow(2, -20 * t + 10)) / 2
         case .circIn:
             return 1 - sqrt(max(0, 1 - t * t))
         case .circOut:
@@ -74,31 +100,34 @@ enum Interpolation: String, Codable, CaseIterable, Sendable {
                 ? (1 - sqrt(max(0, 1 - 4 * t * t))) / 2
                 : (sqrt(max(0, 1 - pow(-2 * t + 2, 2))) + 1) / 2
         case .backIn:
-            let c1 = 1.70158, c3 = c1 + 1
+            let c1 = params?.first ?? Self.defaultBackOvershoot, c3 = c1 + 1
             return c3 * t * t * t - c1 * t * t
         case .backOut:
-            let c1 = 1.70158, c3 = c1 + 1
+            let c1 = params?.first ?? Self.defaultBackOvershoot, c3 = c1 + 1
             return 1 + c3 * pow(t - 1, 3) + c1 * pow(t - 1, 2)
         case .backInOut:
-            let c2 = 1.70158 * 1.525
+            let c2 = (params?.first ?? Self.defaultBackOvershoot) * 1.525
             return t < 0.5
                 ? pow(2 * t, 2) * ((c2 + 1) * 2 * t - c2) / 2
                 : (pow(2 * t - 2, 2) * ((c2 + 1) * (2 * t - 2) + c2) + 2) / 2
         case .elasticIn:
             if t <= 0 { return 0 }
             if t >= 1 { return 1 }
-            return -pow(2, 10 * t - 10) * sin((t * 10 - 10.75) * (2 * Double.pi / 3))
+            let e = Self.elasticSpec(params, defaultPeriod: 0.3)
+            return -(e.a * pow(2, 10 * (t - 1)) * sin(((t - 1) - e.s) * 2 * .pi / e.p))
         case .elasticOut:
             if t <= 0 { return 0 }
             if t >= 1 { return 1 }
-            return pow(2, -10 * t) * sin((t * 10 - 0.75) * (2 * Double.pi / 3)) + 1
+            let e = Self.elasticSpec(params, defaultPeriod: 0.3)
+            return e.a * pow(2, -10 * t) * sin((t - e.s) * 2 * .pi / e.p) + 1
         case .elasticInOut:
             if t <= 0 { return 0 }
             if t >= 1 { return 1 }
-            let c5 = 2 * Double.pi / 4.5
-            return t < 0.5
-                ? -(pow(2, 20 * t - 10) * sin((20 * t - 11.125) * c5)) / 2
-                : pow(2, -20 * t + 10) * sin((20 * t - 11.125) * c5) / 2 + 1
+            let e = Self.elasticSpec(params, defaultPeriod: 0.45)
+            let u = 2 * t - 1
+            return u < 0
+                ? -0.5 * e.a * pow(2, 10 * u) * sin((u - e.s) * 2 * .pi / e.p)
+                : 0.5 * e.a * pow(2, -10 * u) * sin((u - e.s) * 2 * .pi / e.p) + 1
         case .bounceIn:
             return 1 - Self.bounceOutCurve(1 - t)
         case .bounceOut:
@@ -125,6 +154,17 @@ enum Interpolation: String, Codable, CaseIterable, Sendable {
             let n = max(1, (params?.first).map { Int($0) } ?? 4)
             return (Double(n) * t).rounded(.down) / Double(n)
         }
+    }
+
+    static let defaultBackOvershoot = 1.70158
+
+    /// Penner elastic: amplitude below 1 behaves as 1; s is the phase shift keeping f(1) = 1.
+    private static func elasticSpec(_ params: [Double]?, defaultPeriod: Double) -> (a: Double, p: Double, s: Double) {
+        let rawA = params?.first ?? 1
+        let p = (params?.count ?? 0) >= 2 ? params![1] : defaultPeriod
+        let a = max(1, rawA)
+        let s = rawA < 1 ? p / 4 : p / (2 * .pi) * asin(1 / a)
+        return (a, p, s)
     }
 
     private static func bounceOutCurve(_ t: Double) -> Double {
@@ -190,6 +230,31 @@ struct Keyframe<Value: Codable & Sendable & Equatable>: Codable, Sendable, Equat
     var value: Value
     var interpolationOut: Interpolation = .smooth
     var easingParams: [Double]? = nil
+    /// Optional arrival easing for the segment this keyframe starts. When set, the
+    /// segment departs on `interpolationOut` and blends into this curve toward the
+    /// next keyframe (After-Effects-style split in/out ease). Nil = single curve.
+    var interpolationIn: Interpolation? = nil
+    var easingParamsIn: [Double]? = nil
+
+    /// Eased progress for the segment this keyframe starts, blending depart and arrival curves.
+    func segmentEase(_ t: Double) -> Double {
+        let out = interpolationOut.ease(t, params: easingParams)
+        guard let arrive = interpolationIn else { return out }
+        let w = smoothstep(t)
+        return out * (1 - w) + arrive.ease(t, params: easingParamsIn) * w
+    }
+
+    func retimed(to frame: Int) -> Keyframe {
+        var kf = self
+        kf.frame = frame
+        return kf
+    }
+
+    func withValue(_ value: Value) -> Keyframe {
+        var kf = self
+        kf.value = value
+        return kf
+    }
 }
 
 struct KeyframeTrack<Value: Codable & Sendable & Equatable>: Codable, Sendable, Equatable {
@@ -225,10 +290,13 @@ extension KeyframeTrack where Value: KeyframeInterpolatable {
         let boundary = sample(at: offset, fallback: fallback)
         var kfs = keyframes
             .filter { $0.frame >= offset }
-            .map { Keyframe(frame: $0.frame - offset, value: $0.value, interpolationOut: $0.interpolationOut, easingParams: $0.easingParams) }
+            .map { $0.retimed(to: $0.frame - offset) }
         if kfs.first?.frame != 0 {
-            let interp = keyframes.last { $0.frame < offset }?.interpolationOut ?? .smooth
-            kfs.insert(Keyframe(frame: 0, value: boundary, interpolationOut: interp), at: 0)
+            if let before = keyframes.last(where: { $0.frame < offset }) {
+                kfs.insert(before.retimed(to: 0).withValue(boundary), at: 0)
+            } else {
+                kfs.insert(Keyframe(frame: 0, value: boundary), at: 0)
+            }
         }
         return kfs.isEmpty ? nil : KeyframeTrack(keyframes: kfs)
     }
@@ -330,8 +398,45 @@ extension Clip {
     ) {
         var t = self[keyPath: keyPath] ?? KeyframeTrack<V>()
         // `frame` is an absolute timeline frame; storage is converted to clip-relative via `toOffset`
-        t.upsert(Keyframe(frame: toOffset(frame), value: value))
+        let offset = toOffset(frame)
+        if let existing = t.keyframes.first(where: { $0.frame == offset }) {
+            t.upsert(existing.withValue(value))
+        } else {
+            t.upsert(Keyframe(frame: offset, value: value))
+        }
         self[keyPath: keyPath] = t
+    }
+
+    func arrivalInterpolation(for property: AnimatableProperty, atFrame frame: Int) -> Interpolation? {
+        let o = toOffset(frame)
+        func read<V>(_ track: KeyframeTrack<V>?) -> Interpolation? {
+            track?.keyframes.first(where: { $0.frame == o })?.interpolationIn
+        }
+        switch property {
+        case .opacity:  return read(opacityTrack)
+        case .position: return read(positionTrack)
+        case .scale:    return read(scaleTrack)
+        case .rotation: return read(rotationTrack)
+        case .crop:     return read(cropTrack)
+        case .volume:   return read(volumeTrack)
+        }
+    }
+
+    mutating func setArrivalInterpolation(for property: AnimatableProperty, atFrame frame: Int, _ interpolation: Interpolation?) {
+        let o = toOffset(frame)
+        func update<V>(_ track: inout KeyframeTrack<V>?) {
+            guard let i = track?.keyframes.firstIndex(where: { $0.frame == o }) else { return }
+            track?.keyframes[i].interpolationIn = interpolation
+            track?.keyframes[i].easingParamsIn = nil
+        }
+        switch property {
+        case .opacity:  update(&opacityTrack)
+        case .position: update(&positionTrack)
+        case .scale:    update(&scaleTrack)
+        case .rotation: update(&rotationTrack)
+        case .crop:     update(&cropTrack)
+        case .volume:   update(&volumeTrack)
+        }
     }
 
     mutating func removeKeyframe(for property: AnimatableProperty, at frame: Int) {
@@ -415,6 +520,6 @@ extension KeyframeTrack where Value: KeyframeInterpolatable {
         let b = keyframes[bIdx]
         let raw = Double(frame - a.frame) / Double(b.frame - a.frame)
         if a.interpolationOut == .hold { return a.value }
-        return Value.keyframeInterpolate(a.value, b.value, t: a.interpolationOut.ease(raw, params: a.easingParams))
+        return Value.keyframeInterpolate(a.value, b.value, t: a.segmentEase(raw))
     }
 }

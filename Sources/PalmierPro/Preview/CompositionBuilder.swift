@@ -820,14 +820,14 @@ enum CompositionBuilder {
             }
             if carrier.fadeInFrames > 0 {
                 extraOffsets.append(toClipOffset(carrier.fadeInFrames))
-                if carrier.fadeInInterpolation == .smooth {
+                if carrier.fadeInInterpolation != .linear {
                     extraOffsets += smoothSubdivisions(from: 0, to: carrier.fadeInFrames).map(toClipOffset)
                 }
             }
             if carrier.fadeOutFrames > 0 {
                 let fadeStart = carrier.durationFrames - carrier.fadeOutFrames
                 extraOffsets.append(toClipOffset(fadeStart))
-                if carrier.fadeOutInterpolation == .smooth {
+                if carrier.fadeOutInterpolation != .linear {
                     extraOffsets += smoothSubdivisions(from: fadeStart, to: carrier.durationFrames).map(toClipOffset)
                 }
             }
@@ -880,14 +880,14 @@ enum CompositionBuilder {
         if clip.fadeInFrames > 0 {
             let endOffset = min(dur, clip.fadeInFrames)
             offsetSet.insert(endOffset)
-            if clip.fadeInInterpolation == .smooth {
+            if clip.fadeInInterpolation != .linear {
                 offsetSet.formUnion(smoothSubdivisions(from: 0, to: endOffset))
             }
         }
         if clip.fadeOutFrames > 0 {
             let startOffset = max(0, dur - clip.fadeOutFrames)
             offsetSet.insert(startOffset)
-            if clip.fadeOutInterpolation == .smooth {
+            if clip.fadeOutInterpolation != .linear {
                 offsetSet.formUnion(smoothSubdivisions(from: startOffset, to: dur))
             }
         }

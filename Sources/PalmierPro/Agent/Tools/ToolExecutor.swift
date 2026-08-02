@@ -231,6 +231,7 @@ final class ToolExecutor {
         case .detectBeats:   return try await detectBeats(editor, args)
         case .inspectTimeline: return try await inspectTimeline(editor, args)
         case .searchMedia:   return try await searchMedia(editor, args)
+        case .searchStockMedia: return try await searchStockMedia(editor, args)
         case .applyColor:    return try applyColor(editor, args)
         case .applyEffect:   return try applyEffect(editor, args)
         case .denoiseAudio:  return try denoiseAudio(editor, args)

@@ -460,23 +460,52 @@ extension ToolExecutor {
             keyframes[propKey] = zip(kfs, values).map { kf, exposedValues -> [Any] in
                 var row: [Any] = [kf["frame"] ?? 0]
                 row.append(contentsOf: exposedValues)
-                let interp = kf["interpolationOut"] as? String ?? "smooth"
-                let params = (kf["easingParams"] as? [Any])?.compactMap { ($0 as? NSNumber)?.doubleValue }
-                if let params, !params.isEmpty {
-                    switch interp {
-                    case "cubicBezier": row.append(params)
-                    case "spring": row.append(["type": "spring", "bounce": params[0]])
-                    case "steps": row.append(["type": "steps", "count": Int(params[0])])
-                    default: row.append(interp)
-                    }
-                } else if interp != "smooth" {
-                    row.append(interp)
+                let outToken = easeToken(
+                    kf["interpolationOut"] as? String ?? "smooth",
+                    (kf["easingParams"] as? [Any])?.compactMap { ($0 as? NSNumber)?.doubleValue }
+                )
+                if let interpIn = kf["interpolationIn"] as? String {
+                    let inToken = easeToken(
+                        interpIn,
+                        (kf["easingParamsIn"] as? [Any])?.compactMap { ($0 as? NSNumber)?.doubleValue }
+                    ) ?? interpIn
+                    row.append(["out": outToken ?? "smooth", "in": inToken])
+                } else if let outToken {
+                    row.append(outToken)
                 }
                 return row
             }
         }
         if !keyframes.isEmpty { out["keyframes"] = keyframes }
         return out
+    }
+
+    /// Nil for the default (smooth, no params); otherwise the same easing forms set_keyframes accepts.
+    private static func easeToken(_ interp: String, _ params: [Double]?) -> Any? {
+        if let params, !params.isEmpty {
+            switch interp {
+            case "cubicBezier": return params
+            case "spring": return ["type": "spring", "bounce": params[0]]
+            case "steps": return ["type": "steps", "count": Int(params[0])]
+            case "backIn", "backOut", "backInOut":
+                return ["type": "back", "overshoot": params[0], "direction": easeDirectionSuffix(interp, prefix: "back")]
+            case "elasticIn", "elasticOut", "elasticInOut":
+                var token: [String: Any] = [
+                    "type": "elastic",
+                    "amplitude": params[0],
+                    "direction": easeDirectionSuffix(interp, prefix: "elastic"),
+                ]
+                if params.count >= 2 { token["period"] = params[1] }
+                return token
+            default: return interp
+            }
+        }
+        return interp == "smooth" ? nil : interp
+    }
+
+    private static func easeDirectionSuffix(_ interp: String, prefix: String) -> String {
+        let suffix = String(interp.dropFirst(prefix.count))
+        return suffix == "InOut" ? "inOut" : suffix.lowercased()
     }
 
     /// True when absorbed: identity tracks vanish; constants become the static field when it's at default.

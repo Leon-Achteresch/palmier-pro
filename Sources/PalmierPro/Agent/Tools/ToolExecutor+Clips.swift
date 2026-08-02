@@ -904,27 +904,22 @@ extension ToolExecutor {
             if spec.pingPong {
                 let base = first + i * (span + spec.gapFrames)
                 if i.isMultiple(of: 2) {
-                    iteration = kfs.map {
-                        Keyframe(frame: base + ($0.frame - first), value: $0.value, interpolationOut: $0.interpolationOut, easingParams: $0.easingParams)
-                    }
+                    iteration = kfs.map { $0.retimed(to: base + ($0.frame - first)) }
                 } else {
                     iteration = (0..<kfs.count).reversed().map { j in
                         let src = kfs[j]
                         // The outgoing easing of a reversed keyframe is the time-mirrored easing of the segment it now starts.
-                        let segment = j > 0 ? kfs[j - 1] : nil
-                        return Keyframe(
-                            frame: base + (span - (src.frame - first)),
-                            value: src.value,
-                            interpolationOut: segment.map { $0.interpolationOut.mirrored } ?? .smooth,
-                            easingParams: segment.flatMap { Self.mirroredEasingParams($0) }
-                        )
+                        var kf = Keyframe(frame: base + (span - (src.frame - first)), value: src.value)
+                        if let segment = j > 0 ? kfs[j - 1] : nil {
+                            (kf.interpolationOut, kf.easingParams, kf.interpolationIn, kf.easingParamsIn) =
+                                Self.reversedSegmentEasing(segment)
+                        }
+                        return kf
                     }
                 }
             } else {
                 let base = i * (span + max(spec.gapFrames, 1))
-                iteration = kfs.map {
-                    Keyframe(frame: $0.frame + base, value: $0.value, interpolationOut: $0.interpolationOut, easingParams: $0.easingParams)
-                }
+                iteration = kfs.map { $0.retimed(to: $0.frame + base) }
             }
             for kf in iteration {
                 if kf.frame == out.last?.frame { out[out.count - 1] = kf } else { out.append(kf) }
@@ -933,9 +928,22 @@ extension ToolExecutor {
         return KeyframeTrack(keyframes: out)
     }
 
-    private static func mirroredEasingParams<V>(_ kf: Keyframe<V>) -> [Double]? {
-        guard let p = kf.easingParams else { return nil }
-        if kf.interpolationOut == .cubicBezier, p.count == 4 {
+    /// A time-reversed split-ease segment swaps depart and arrival curves, each mirrored.
+    private static func reversedSegmentEasing<V>(
+        _ seg: Keyframe<V>
+    ) -> (Interpolation, [Double]?, Interpolation?, [Double]?) {
+        guard let arrive = seg.interpolationIn else {
+            return (seg.interpolationOut.mirrored, mirroredEasingParams(seg.interpolationOut, seg.easingParams), nil, nil)
+        }
+        return (
+            arrive.mirrored, mirroredEasingParams(arrive, seg.easingParamsIn),
+            seg.interpolationOut.mirrored, mirroredEasingParams(seg.interpolationOut, seg.easingParams)
+        )
+    }
+
+    private static func mirroredEasingParams(_ interp: Interpolation, _ params: [Double]?) -> [Double]? {
+        guard let p = params else { return nil }
+        if interp == .cubicBezier, p.count == 4 {
             return [1 - p[2], 1 - p[3], 1 - p[0], 1 - p[1]]
         }
         return p
@@ -948,9 +956,7 @@ extension ToolExecutor {
         ) throws -> (inout Clip, Int) -> Void {
             let kfs = try repeatSpec.map { try Self.unrollRepeat(parsed, $0, path: path) } ?? parsed
             return { clip, offset in
-                let shifted = offset == 0 ? kfs.keyframes : kfs.keyframes.map {
-                    Keyframe(frame: $0.frame + offset, value: $0.value, interpolationOut: $0.interpolationOut, easingParams: $0.easingParams)
-                }
+                let shifted = offset == 0 ? kfs.keyframes : kfs.keyframes.map { $0.retimed(to: $0.frame + offset) }
                 if merge {
                     var track = clip[keyPath: keyPath] ?? KeyframeTrack<V>()
                     for kf in shifted { track.upsert(kf) }
@@ -1185,8 +1191,12 @@ extension ToolExecutor {
                 try kfDouble(row[k + 1], at: "\(path)[\(i)][\(k + 1)] (\(fieldNames[k]))")
             }
             try validateValues(i, values)
-            let (interp, params) = try kfInterp(row.count > minLen ? row[minLen] : nil, at: "\(path)[\(i)][\(minLen)] (interp)")
-            out.append(Keyframe(frame: frame, value: build(values), interpolationOut: interp, easingParams: params))
+            let ease = try kfInterp(row.count > minLen ? row[minLen] : nil, at: "\(path)[\(i)][\(minLen)] (interp)")
+            out.append(Keyframe(
+                frame: frame, value: build(values),
+                interpolationOut: ease.interp, easingParams: ease.params,
+                interpolationIn: ease.interpIn, easingParamsIn: ease.paramsIn
+            ))
         }
         return KeyframeTrack(keyframes: sortAndDedupe(out))
     }
@@ -1253,12 +1263,40 @@ extension ToolExecutor {
         return v
     }
 
-    private static func kfInterp(_ raw: Any?, at path: String) throws -> (Interpolation, [Double]?) {
-        guard let raw else { return (.smooth, nil) }
+    struct ParsedEase {
+        var interp: Interpolation = .smooth
+        var params: [Double]? = nil
+        var interpIn: Interpolation? = nil
+        var paramsIn: [Double]? = nil
+    }
+
+    static func kfInterp(_ raw: Any?, at path: String) throws -> ParsedEase {
+        guard let raw else { return ParsedEase() }
+        if let obj = raw as? [String: Any], obj["type"] == nil {
+            try validateKeys(obj, allowed: ["out", "in"], at: path)
+            guard obj["out"] != nil || obj["in"] != nil else {
+                throw ToolError("\(path): easing object needs a 'type', or 'out'/'in' curves for a split ease")
+            }
+            var ease = ParsedEase()
+            if let out = obj["out"] {
+                (ease.interp, ease.params) = try kfSimpleEase(out, at: "\(path).out")
+            }
+            if let arrive = obj["in"] {
+                let (i, p) = try kfSimpleEase(arrive, at: "\(path).in")
+                guard i != .hold else { throw ToolError("\(path).in: 'hold' is not a valid arrival ease") }
+                (ease.interpIn, ease.paramsIn) = (i, p)
+            }
+            return ease
+        }
+        let (i, p) = try kfSimpleEase(raw, at: path)
+        return ParsedEase(interp: i, params: p)
+    }
+
+    private static func kfSimpleEase(_ raw: Any, at path: String) throws -> (Interpolation, [Double]?) {
         if let s = raw as? String {
             guard let i = Interpolation(rawValue: s) else {
                 let names = Interpolation.allCases.map { "'\($0.rawValue)'" }.joined(separator: ", ")
-                throw ToolError("\(path): expected one of \(names), a [x1,y1,x2,y2] bezier array, or {type: 'spring'|'steps'|'cubicBezier', …} (got '\(s)')")
+                throw ToolError("\(path): expected one of \(names), a [x1,y1,x2,y2] bezier array, {type: 'spring'|'steps'|'cubicBezier'|'back'|'elastic', …}, or a split ease {out, in} (got '\(s)')")
             }
             return (i, nil)
         }
@@ -1267,7 +1305,7 @@ extension ToolExecutor {
         }
         if let obj = raw as? [String: Any] {
             guard let type = obj["type"] as? String else {
-                throw ToolError("\(path): easing object needs a 'type' of 'spring', 'steps', or 'cubicBezier'")
+                throw ToolError("\(path): easing object needs a 'type' of 'spring', 'steps', 'cubicBezier', 'back', or 'elastic'")
             }
             switch type {
             case "spring":
@@ -1304,11 +1342,44 @@ extension ToolExecutor {
                     throw ToolError("\(path).points: expected [x1, y1, x2, y2]")
                 }
                 return (.cubicBezier, try bezierPoints(pts, at: "\(path).points"))
+            case "back":
+                try validateKeys(obj, allowed: ["type", "overshoot", "direction"], at: path)
+                let overshoot = try obj["overshoot"].map { try kfDouble($0, at: "\(path).overshoot") }
+                    ?? Interpolation.defaultBackOvershoot
+                guard (0...10).contains(overshoot) else {
+                    throw ToolError("\(path).overshoot: must be between 0 and 10 (got \(overshoot))")
+                }
+                let interp = try easeDirection(obj["direction"], at: path, in: .backIn, out: .backOut, inOut: .backInOut)
+                return (interp, [overshoot])
+            case "elastic":
+                try validateKeys(obj, allowed: ["type", "amplitude", "period", "direction"], at: path)
+                let amplitude = try obj["amplitude"].map { try kfDouble($0, at: "\(path).amplitude") } ?? 1
+                guard (1...5).contains(amplitude) else {
+                    throw ToolError("\(path).amplitude: must be between 1 and 5 (got \(amplitude))")
+                }
+                let interp = try easeDirection(obj["direction"], at: path, in: .elasticIn, out: .elasticOut, inOut: .elasticInOut)
+                guard let rawPeriod = obj["period"] else { return (interp, [amplitude]) }
+                let period = try kfDouble(rawPeriod, at: "\(path).period")
+                guard (0.05...2).contains(period) else {
+                    throw ToolError("\(path).period: must be between 0.05 and 2 (got \(period))")
+                }
+                return (interp, [amplitude, period])
             default:
-                throw ToolError("\(path): unknown easing type '\(type)'. Expected 'spring', 'steps', or 'cubicBezier'.")
+                throw ToolError("\(path): unknown easing type '\(type)'. Expected 'spring', 'steps', 'cubicBezier', 'back', or 'elastic'.")
             }
         }
-        throw ToolError("\(path): expected an easing name, a [x1,y1,x2,y2] bezier array, or an easing object")
+        throw ToolError("\(path): expected an easing name, a [x1,y1,x2,y2] bezier array, an easing object, or a split ease {out, in}")
+    }
+
+    private static func easeDirection(
+        _ raw: Any?, at path: String,
+        in inCase: Interpolation, out outCase: Interpolation, inOut: Interpolation
+    ) throws -> Interpolation {
+        guard let raw else { return outCase }
+        guard let s = raw as? String, ["in", "out", "inOut"].contains(s) else {
+            throw ToolError("\(path).direction: expected 'in', 'out', or 'inOut'")
+        }
+        return s == "in" ? inCase : s == "out" ? outCase : inOut
     }
 
     private static func bezierPoints(_ arr: [Any], at path: String) throws -> [Double] {

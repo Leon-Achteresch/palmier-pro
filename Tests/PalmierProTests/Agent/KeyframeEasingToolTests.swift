@@ -185,6 +185,99 @@ struct KeyframeEasingToolTests {
         #expect(track.keyframes[1].easingParams == mirroredBezier)
     }
 
+    @Test func sineAndExpoNamedEasingsAccepted() async throws {
+        let h = ToolHarness()
+        let clipId = try makeClip(h)
+        _ = try await h.runOK("set_keyframes", args: [
+            "clipId": clipId,
+            "property": "opacity",
+            "keyframes": [
+                [0, 0.0, "expoOut"],
+                [20, 1.0, "sineInOut"],
+                [40, 0.0, "expoInOut"],
+                [60, 1.0],
+            ],
+        ])
+        let track = try opacityTrack(h, clipId)
+        #expect(track.keyframes.map(\.interpolationOut) == [.expoOut, .sineInOut, .expoInOut, .smooth])
+    }
+
+    @Test func parametricBackAndElasticStoreParams() async throws {
+        let h = ToolHarness()
+        let clipId = try makeClip(h)
+        _ = try await h.runOK("set_keyframes", args: [
+            "clipId": clipId,
+            "property": "opacity",
+            "keyframes": [
+                [0, 0.0, ["type": "back", "overshoot": 3.0]],
+                [20, 1.0, ["type": "back", "direction": "inOut"]],
+                [40, 0.0, ["type": "elastic", "amplitude": 2.0, "period": 0.5, "direction": "in"]],
+                [60, 1.0, ["type": "elastic"]],
+                [80, 0.0],
+            ],
+        ])
+        let track = try opacityTrack(h, clipId)
+        #expect(track.keyframes[0].interpolationOut == .backOut)
+        #expect(track.keyframes[0].easingParams == [3])
+        #expect(track.keyframes[1].interpolationOut == .backInOut)
+        #expect(track.keyframes[2].interpolationOut == .elasticIn)
+        #expect(track.keyframes[2].easingParams == [2, 0.5])
+        #expect(track.keyframes[3].interpolationOut == .elasticOut)
+        #expect(track.keyframes[3].easingParams == [1])
+    }
+
+    @Test func splitEaseStoresAndRoundTrips() async throws {
+        let h = ToolHarness()
+        let clipId = try makeClip(h)
+        _ = try await h.runOK("set_keyframes", args: [
+            "clipId": clipId,
+            "property": "opacity",
+            "keyframes": [
+                [0, 0.0, ["out": "easeIn", "in": ["type": "back", "overshoot": 2.5]]],
+                [30, 1.0, ["in": "expoOut"]],
+                [60, 0.0],
+            ],
+        ])
+        let track = try opacityTrack(h, clipId)
+        #expect(track.keyframes[0].interpolationOut == .easeIn)
+        #expect(track.keyframes[0].interpolationIn == .backOut)
+        #expect(track.keyframes[0].easingParamsIn == [2.5])
+        #expect(track.keyframes[1].interpolationOut == .smooth)
+        #expect(track.keyframes[1].interpolationIn == .expoOut)
+
+        let timeline = try #require(try await h.runOK("get_timeline") as? [String: Any])
+        let clip = try #require(((timeline["tracks"] as? [[String: Any]]) ?? [])
+            .flatMap { ($0["clips"] as? [[String: Any]]) ?? [] }
+            .first { ($0["id"] as? String).map { clipId.hasPrefix($0) } == true })
+        let rows = try #require((clip["keyframes"] as? [String: Any])?["opacity"] as? [[Any]])
+        let split = try #require(rows[0].last as? [String: Any])
+        #expect(split["out"] as? String == "easeIn")
+        let arrival = try #require(split["in"] as? [String: Any])
+        #expect(arrival["type"] as? String == "back")
+        #expect((arrival["overshoot"] as? NSNumber)?.doubleValue == 2.5)
+        #expect(arrival["direction"] as? String == "out")
+    }
+
+    @Test func repeatMirrorSwapsSplitEaseSides() async throws {
+        let h = ToolHarness()
+        let clipId = try makeClip(h)
+        _ = try await h.runOK("set_keyframes", args: [
+            "clipId": clipId,
+            "property": "opacity",
+            "keyframes": [
+                [0, 0.0, ["out": "easeIn", "in": ["type": "back", "overshoot": 2.5]]],
+                [30, 1.0],
+            ],
+            "repeat": ["count": 2, "type": "mirror"],
+        ])
+        let track = try opacityTrack(h, clipId)
+        #expect(track.keyframes.map(\.frame) == [0, 30, 60])
+        let mirrored = track.keyframes[1]
+        #expect(mirrored.interpolationOut == .backIn)
+        #expect(mirrored.easingParams == [2.5])
+        #expect(mirrored.interpolationIn == .easeOut)
+    }
+
     @Test func invalidEasingsRejected() async throws {
         let h = ToolHarness()
         let clipId = try makeClip(h)
@@ -194,6 +287,13 @@ struct KeyframeEasingToolTests {
             ["type": "spring", "bounce": 2.0],
             ["type": "steps", "count": 0],
             "zoomies",
+            ["type": "back", "overshoot": 20.0],
+            ["type": "elastic", "amplitude": 0.5],
+            ["type": "elastic", "period": 5.0],
+            ["type": "back", "direction": "sideways"],
+            ["in": "hold"],
+            ["out": "easeIn", "in": "expoOut", "wiggle": true],
+            [String: Any](),
         ] {
             let result = await h.runRaw("set_keyframes", args: [
                 "clipId": clipId,

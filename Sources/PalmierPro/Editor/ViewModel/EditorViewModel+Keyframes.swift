@@ -59,6 +59,16 @@ extension EditorViewModel {
         commitClipProperty(clipId: clipId, actionName: "Change Interpolation") { $0.setInterpolation(for: property, atFrame: frame, interpolation) }
     }
 
+    func arrivalInterpolation(clipId: String, property: AnimatableProperty, atFrame frame: Int) -> Interpolation? {
+        clipFor(id: clipId)?.arrivalInterpolation(for: property, atFrame: frame)
+    }
+
+    func setArrivalInterpolation(clipId: String, property: AnimatableProperty, frame: Int, interpolation: Interpolation?) {
+        commitClipProperty(clipId: clipId, actionName: "Change Interpolation") {
+            $0.setArrivalInterpolation(for: property, atFrame: frame, interpolation)
+        }
+    }
+
     // MARK: - Drag-to-move keyframe
 
     /// Live move during a drag — pair with `commitMoveKeyframe` on release for a single undo entry.

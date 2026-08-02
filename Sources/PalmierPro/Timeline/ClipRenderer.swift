@@ -463,7 +463,7 @@ enum ClipRenderer {
                         for s in 1...steps {
                             let t = Double(s) / Double(steps)
                             let x = aX + (bX - aX) * CGFloat(t)
-                            let dB = a.value + (b.value - a.value) * a.interpolationOut.ease(t, params: a.easingParams)
+                            let dB = a.value + (b.value - a.value) * a.segmentEase(t)
                             context.addLine(to: CGPoint(x: x, y: y(forDb: dB, in: body)))
                         }
                     }

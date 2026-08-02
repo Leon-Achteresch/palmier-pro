@@ -238,9 +238,26 @@ struct KeyframesLaneRow: View {
     @ViewBuilder
     private func contextMenu(for frame: Int) -> some View {
         let current = editor.interpolation(clipId: clip.id, property: property, atFrame: frame) ?? .smooth
+        let currentArrival = editor.arrivalInterpolation(clipId: clip.id, property: property, atFrame: frame)
         ForEach(Interpolation.allCases, id: \.self) { interp in
             Button { editor.setInterpolation(clipId: clip.id, property: property, frame: frame, interpolation: interp) } label: {
                 Label(interp.displayName, systemImage: current == interp ? "checkmark" : "")
+            }
+        }
+        Divider()
+        Menu("Arrival Ease") {
+            Button {
+                editor.setArrivalInterpolation(clipId: clip.id, property: property, frame: frame, interpolation: nil)
+            } label: {
+                Label("Match Departure", systemImage: currentArrival == nil ? "checkmark" : "")
+            }
+            Divider()
+            ForEach(Interpolation.allCases.filter { $0 != .hold }, id: \.self) { interp in
+                Button {
+                    editor.setArrivalInterpolation(clipId: clip.id, property: property, frame: frame, interpolation: interp)
+                } label: {
+                    Label(interp.displayName, systemImage: currentArrival == interp ? "checkmark" : "")
+                }
             }
         }
         Divider()

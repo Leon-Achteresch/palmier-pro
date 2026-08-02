@@ -61,6 +61,26 @@ struct ModelsPane: View {
                     save: { GeminiKeychain.save($0) },
                     remove: { GeminiKeychain.delete() }
                 )
+                APIKeyField(
+                    title: "Pexels API Key",
+                    explanation: "Browse and import free stock photos and videos from Pexels in the Stock tab. Free key, no billing. Stored in the macOS Keychain.",
+                    linkTitle: "Get Pexels API key",
+                    linkURL: StockMediaProvider.pexels.keyURL,
+                    placeholder: "Pexels key…",
+                    load: { StockMediaKeychain.load(provider: .pexels) },
+                    save: { StockMediaKeychain.save($0, provider: .pexels) },
+                    remove: { StockMediaKeychain.delete(provider: .pexels) }
+                )
+                APIKeyField(
+                    title: "Pixabay API Key",
+                    explanation: "Browse and import free stock photos and videos from Pixabay in the Stock tab. Free key, no billing. Stored in the macOS Keychain.",
+                    linkTitle: "Get Pixabay API key",
+                    linkURL: StockMediaProvider.pixabay.keyURL,
+                    placeholder: "Pixabay key…",
+                    load: { StockMediaKeychain.load(provider: .pixabay) },
+                    save: { StockMediaKeychain.save($0, provider: .pixabay) },
+                    remove: { StockMediaKeychain.delete(provider: .pixabay) }
+                )
             }
 
             searchBar

@@ -308,13 +308,14 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
         let inMul: Double = {
             guard fadeInFrames > 0 else { return 1.0 }
             let t = min(1.0, Double(rel) / Double(fadeInFrames))
-            return fadeInInterpolation == .smooth ? smoothstep(t) : t
+            return fadeInInterpolation.ease(t)
         }()
         let outRem = durationFrames - rel
         let outMul: Double = {
             guard fadeOutFrames > 0 else { return 1.0 }
             let t = min(1.0, Double(outRem) / Double(fadeOutFrames))
-            return fadeOutInterpolation == .smooth ? smoothstep(t) : t
+            // Eased over fade progress (1 − t) so asymmetric curves shape the fade-out forward in time.
+            return 1 - fadeOutInterpolation.ease(1 - t)
         }()
         return min(inMul, outMul)
     }

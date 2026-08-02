@@ -1,9 +1,7 @@
 import Foundation
 
 extension ToolExecutor {
-    nonisolated static let remoteImportMaxBytes: Int64 = 5 * 1024 * 1024 * 1024
     nonisolated static let importBytesMaxBase64Length = 15 * 1024 * 1024
-    nonisolated static let remoteImportRequestTimeout: TimeInterval = 15 * 60
 
     private static let importMediaAllowedKeys: Set<String> = ["source", "name", "folder"]
     private static let importSourceAllowedKeys: Set<String> = ["url", "path", "bytes", "matte", "mimeType"]
@@ -175,10 +173,6 @@ extension ToolExecutor {
             throw ToolError("Unsupported file extension '.\(fileExt)'")
         }
 
-        guard let projectURL = editor.projectURL else {
-            throw ToolError("No project is open; cannot import from URL")
-        }
-
         let displayName: String
         if let name {
             displayName = name
@@ -187,19 +181,14 @@ extension ToolExecutor {
             displayName = stem.isEmpty ? "Imported asset" : stem
         }
 
-        let placeholder = createImportPlaceholder(
-            editor: editor,
-            projectURL: projectURL,
+        guard let placeholder = editor.importRemoteMedia(
+            url: url,
             type: type,
             fileExtension: fileExt,
-            displayName: displayName,
-            folderId: folderId,
-            importInput: MediaImportInput(sourceURL: url.absoluteString, createdAt: Date())
-        )
-
-        Task { @MainActor [weak editor] in
-            guard let editor else { return }
-            await Self.downloadImportedAsset(asset: placeholder, remoteURL: url, editor: editor)
+            name: displayName,
+            folderId: folderId
+        ) else {
+            throw ToolError("No project is open; cannot import from URL")
         }
 
         return .ok(Self.jsonString([
@@ -208,70 +197,6 @@ extension ToolExecutor {
             "status": "downloading",
             "note": "Downloading in the background. Poll get_media with ids:[\"\(placeholder.id)\"] until generationStatus clears.",
         ]) ?? "{}")
-    }
-
-    private func createImportPlaceholder(
-        editor: EditorViewModel,
-        projectURL: URL,
-        type: ClipType,
-        fileExtension: String,
-        displayName: String,
-        folderId: String?,
-        importInput: MediaImportInput
-    ) -> MediaAsset {
-        let id = UUID().uuidString
-        let mediaDir = projectURL.appendingPathComponent(Project.mediaDirectoryName, isDirectory: true)
-        let destURL = mediaDir.appendingPathComponent("imported-\(id.prefix(8)).\(fileExtension)")
-        let placeholder = MediaAsset(id: id, url: destURL, type: type, name: displayName)
-        placeholder.folderId = folderId
-        placeholder.importInput = importInput
-        placeholder.generationStatus = .downloading
-        editor.importMediaAsset(placeholder)
-        editor.onProjectCheckpointRequired?()
-        return placeholder
-    }
-
-    @MainActor
-    private static func downloadImportedAsset(asset: MediaAsset, remoteURL: URL, editor: EditorViewModel) async {
-        do {
-            var request = URLRequest(url: remoteURL)
-            request.timeoutInterval = remoteImportRequestTimeout
-            let delegate = ImportDownloadDelegate(maxBytes: remoteImportMaxBytes)
-            let (tempURL, response) = try await URLSession.shared.download(for: request, delegate: delegate)
-
-            if let httpResp = response as? HTTPURLResponse, !(200..<300).contains(httpResp.statusCode) {
-                await Task.detached(priority: .utility) {
-                    try? FileManager.default.removeItem(at: tempURL)
-                }.value
-                throw ToolError("server returned HTTP \(httpResp.statusCode)")
-            }
-
-            asset.url = try await editor.commitStagedProjectMedia(tempURL, filename: asset.url.lastPathComponent, maxBytes: remoteImportMaxBytes)
-            await finishImportedAsset(asset, editor: editor)
-        } catch {
-            let message = (error as? ToolError)?.message ?? error.localizedDescription
-            Log.project.error("import_media download failed url=\(remoteURL.absoluteString) error=\(message)")
-            failImportedAsset(asset, editor: editor, message: message)
-        }
-    }
-
-    @MainActor
-    private static func finishImportedAsset(_ asset: MediaAsset, editor: EditorViewModel) async {
-        let finalized = await editor.finalizeImportedAsset(asset)
-        guard finalized else {
-            editor.onProjectCheckpointRequired?()
-            return
-        }
-        asset.importInput = nil
-        editor.updateManifestMetadata(for: [asset])
-        editor.onProjectCheckpointRequired?()
-    }
-
-    @MainActor
-    private static func failImportedAsset(_ asset: MediaAsset, editor: EditorViewModel, message: String) {
-        asset.generationStatus = .failed(message)
-        editor.updateManifestMetadata(for: [asset])
-        editor.onProjectCheckpointRequired?()
     }
 
     private func applyImportMetadata(editor: EditorViewModel, asset: MediaAsset, name: String?, folderId: String?) {
@@ -351,30 +276,5 @@ extension ToolExecutor {
             "type": asset.type.rawValue,
             "status": "ready",
         ]) ?? "{}")
-    }
-}
-
-fileprivate final class ImportDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
-    let maxBytes: Int64
-    init(maxBytes: Int64) { self.maxBytes = maxBytes }
-
-    func urlSession(
-        _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        didWriteData bytesWritten: Int64,
-        totalBytesWritten: Int64,
-        totalBytesExpectedToWrite: Int64
-    ) {
-        if totalBytesExpectedToWrite > 0 && totalBytesExpectedToWrite > maxBytes {
-            downloadTask.cancel()
-            return
-        }
-        if totalBytesWritten > maxBytes {
-            downloadTask.cancel()
-        }
-    }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        // No-op: the async download(for:delegate:) API copies the temp file for us.
     }
 }
