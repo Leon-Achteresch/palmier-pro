@@ -167,4 +167,19 @@ struct SubjectMaskTests {
     func qualityParameterMapsToASegmentationLevel(param: Double, expected: SubjectMask.Quality) {
         #expect(SubjectMask.Quality(param: param) == expected)
     }
+
+    @Test func identicalInputReusesTheCachedMaskWithoutRerunningVision() {
+        let extent = CGRect(x: 0, y: 0, width: 96, height: 96)
+        let image = CIFilter(name: "CILinearGradient", parameters: [
+            "inputPoint0": CIVector(x: 0, y: 0),
+            "inputPoint1": CIVector(x: 96, y: 96),
+            "inputColor0": CIColor(red: 0.13, green: 0.57, blue: 0.29),
+            "inputColor1": CIColor(red: 0.71, green: 0.03, blue: 0.88),
+        ])!.outputImage!.cropped(to: extent)
+
+        _ = SubjectMask.apply(image, extent: extent, quality: 1, feather: 0, expand: 0, invert: 0)
+        let runsAfterFirst = SubjectMask.visionRunCount
+        _ = SubjectMask.apply(image, extent: extent, quality: 1, feather: 0, expand: 0, invert: 0)
+        #expect(SubjectMask.visionRunCount == runsAfterFirst)
+    }
 }

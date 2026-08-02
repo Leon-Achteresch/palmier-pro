@@ -100,6 +100,22 @@ extension InspectorView {
         ]
     }
 
+    private var perspectiveControls: [EffectControl] {
+        [
+            EffectControl(effectId: "distort.perspective", paramKey: "tiltX", label: "Tilt X"),
+            EffectControl(effectId: "distort.perspective", paramKey: "tiltY", label: "Tilt Y"),
+            EffectControl(effectId: "distort.perspective", paramKey: "distance", label: "Distance"),
+        ]
+    }
+
+    private var occlusionControls: [EffectControl] {
+        [
+            EffectControl(effectId: "key.occlusion", paramKey: "quality", label: "Quality"),
+            EffectControl(effectId: "key.occlusion", paramKey: "feather", label: "Feather"),
+            EffectControl(effectId: "key.occlusion", paramKey: "expand", label: "Expand"),
+        ]
+    }
+
     private var chromaKeyControls: [EffectControl] {
         [
             EffectControl(effectId: "key.chroma", paramKey: "tolerance", label: "Range"),
@@ -148,7 +164,7 @@ extension InspectorView {
     }
 
     private var effectsEffectIds: Set<String> {
-        Set((detailControls + blurControls + motionBlurControls + vignetteControls + grainControls + glowControls + warpControls + chromaKeyControls + subjectKeyControls).map(\.effectId))
+        Set((detailControls + blurControls + motionBlurControls + vignetteControls + grainControls + glowControls + warpControls + perspectiveControls + chromaKeyControls + subjectKeyControls + occlusionControls).map(\.effectId))
             .union(["stylize.invert"])
     }
 
@@ -183,8 +199,10 @@ extension InspectorView {
                 adjustSubgroup(title: "Film Grain", controls: grainControls, clips: clips)
                 adjustSubgroup(title: "Glow", controls: glowControls, clips: clips)
                 adjustSubgroup(title: "Warp", controls: warpControls, clips: clips)
+                adjustSubgroup(title: "Perspective", controls: perspectiveControls, clips: clips)
                 adjustSubgroup(title: "Chroma Key", controls: chromaKeyControls, clips: clips)
                 adjustSubgroup(title: "Subject Key", controls: subjectKeyControls, clips: clips)
+                adjustSubgroup(title: "Behind Subject", controls: occlusionControls, clips: clips)
                 adjustToggleRow(
                     title: "Invert Colors",
                     isOn: Binding(

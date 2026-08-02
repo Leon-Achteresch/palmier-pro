@@ -125,6 +125,35 @@ struct EffectModelTests {
         #expect(alpha(x: 100, y: 20) < 0.1, "below the shifted stripe is empty")
     }
 
+    @Test func perspectiveTiltShrinksFarEdgeAndKeepsCenter() throws {
+        let descriptor = try #require(EffectRegistry.descriptor(id: "distort.perspective"))
+        let canvas = CGRect(x: 0, y: 0, width: 200, height: 100)
+        let solid = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: canvas)
+        var effect = descriptor.makeEffect()
+        effect.params["tiltX"] = EffectParam(value: 60)
+        let output = descriptor.render(solid, effect: effect, atOffset: 0)
+
+        let ctx = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
+        func alpha(x: Int, y: Int) -> Double {
+            var px = [Float](repeating: 0, count: 4)
+            ctx.render(output, toBitmap: &px, rowBytes: 16,
+                       bounds: CGRect(x: x, y: y, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+            return Double(px[3])
+        }
+
+        #expect(alpha(x: 100, y: 50) > 0.9, "center stays covered")
+        #expect(alpha(x: 2, y: 97) < 0.1, "far (top) corner recedes inward")
+        #expect(alpha(x: 197, y: 97) < 0.1, "far (top) corner recedes inward")
+    }
+
+    @Test func perspectiveWithZeroTiltIsPassthrough() throws {
+        let descriptor = try #require(EffectRegistry.descriptor(id: "distort.perspective"))
+        let canvas = CGRect(x: 0, y: 0, width: 64, height: 64)
+        let solid = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5)).cropped(to: canvas)
+        let output = descriptor.render(solid, effect: descriptor.makeEffect(), atOffset: 0)
+        #expect(output === solid)
+    }
+
     @Test func invertEffectReturnsComplementaryChannels() throws {
         let descriptor = try #require(EffectRegistry.descriptor(id: "stylize.invert"))
         let input = CIImage(color: CIColor(red: 0.2, green: 0.4, blue: 0.75))
@@ -216,6 +245,7 @@ struct EffectRenderingTests {
             "blur.noiseReduction": ["amount": 1],
             "blur.motion": ["radius": 20, "angle": 0],
             "distort.warp": ["bend": 60, "waveAmplitude": 30, "waveLength": 120],
+            "distort.perspective": ["tiltX": 55],
             "mockup.iphone17": ["orbitYaw": 30, "orbitPitch": 15],
         ]
 
@@ -238,9 +268,9 @@ struct EffectRenderingTests {
         // (catches a bad filter key) but don't assert a pixel change.
         let noOpOnSaturated: Set<String> = ["color.vibrance"]
         // color.curves / color.hueCurves carry JSON curves, not Double params — covered by their own tests.
-        // key.subject is a passthrough on footage with no subject, which this synthetic pattern is —
-        // its masking is covered by SubjectMaskTests.
-        let excluded: Set<String> = ["color.curves", "color.hueCurves", "key.subject"]
+        // key.subject and key.occlusion are passthroughs on footage with no subject, which this
+        // synthetic pattern is — their masking is covered by SubjectMaskTests / compositor tests.
+        let excluded: Set<String> = ["color.curves", "color.hueCurves", "key.subject", "key.occlusion"]
         let base = try await frame(nil)
         for descriptor in EffectRegistry.all where descriptor.resourceKey == nil && !excluded.contains(descriptor.id) {
             let params = nonDefault[descriptor.id]

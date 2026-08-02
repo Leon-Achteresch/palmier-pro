@@ -85,13 +85,41 @@ enum FrameRenderer {
             }
             guard let image else { continue }
             if isNormal {
-                accum = image.composited(over: accum)
+                if let occlusion = layer.clip.effects?.first(where: { $0.type == "key.occlusion" && $0.enabled }) {
+                    accum = occludedComposite(image, over: accum, effect: occlusion,
+                                              offset: frame - layer.clip.startFrame)
+                } else {
+                    accum = image.composited(over: accum)
+                }
             } else {
                 let opacity = min(1.0, max(0.0, layer.clip.opacityAt(frame: frame)))
                 accum = blend(image, over: accum, filter: mode.ciFilterName!, opacity: opacity)
             }
         }
         return accum
+    }
+
+    /// Composites `image`, then re-blends the subject of the frame below back on top,
+    /// so the layer reads as sitting behind people in the scene. Passthrough composite
+    /// when Vision finds no subject.
+    private static func occludedComposite(
+        _ image: CIImage,
+        over accum: CIImage,
+        effect: Effect,
+        offset: Int
+    ) -> CIImage {
+        let composed = image.composited(over: accum)
+        guard let descriptor = EffectRegistry.descriptor(id: effect.type) else { return composed }
+        let p = descriptor.resolve(effect, atOffset: offset)
+        guard let matte = SubjectMask.matte(
+            for: accum, extent: accum.extent,
+            quality: p.value("quality"), feather: p.value("feather"),
+            expand: p.value("expand"), invert: 0
+        ) else { return composed }
+        return accum.applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputMaskImageKey: matte,
+            kCIInputBackgroundImageKey: composed,
+        ]).cropped(to: accum.extent)
     }
 
     private static func textStencilMatte(

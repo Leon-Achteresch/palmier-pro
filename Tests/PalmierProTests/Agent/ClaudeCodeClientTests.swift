@@ -5,7 +5,7 @@ import Testing
 @Suite("ClaudeCodeClient - stream event mapping")
 struct ClaudeCodeClientTests {
 
-    private func events(_ json: String) -> [ClaudeCodeClient.Event] {
+    private func events(_ json: String) -> [CLIAgentEvent] {
         let object = try! JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
         return ClaudeCodeClient.events(from: object)
     }

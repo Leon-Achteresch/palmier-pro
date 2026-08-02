@@ -343,6 +343,21 @@ enum EffectRegistry {
                 )
             }
         ),
+        EffectDescriptor(
+            id: "distort.perspective", displayName: "Perspective", category: "Distort",
+            params: [
+                EffectParamSpec(key: "tiltX", label: "Tilt X", range: -80...80, defaultValue: 0, unit: "°"),
+                EffectParamSpec(key: "tiltY", label: "Tilt Y", range: -80...80, defaultValue: 0, unit: "°"),
+                EffectParamSpec(key: "distance", label: "Distance", range: 0.5...4, defaultValue: 1.5, unit: ""),
+            ],
+            apply: { image, p, extent in
+                PerspectiveProjection.apply(
+                    image, extent: extent,
+                    tiltX: p.value("tiltX"), tiltY: p.value("tiltY"),
+                    distance: p.value("distance")
+                )
+            }
+        ),
     ]
 
     private static let detail: [EffectDescriptor] = [
@@ -374,6 +389,17 @@ enum EffectRegistry {
                     expand: p.value("expand"), invert: p.value("invert")
                 )
             }
+        ),
+        EffectDescriptor(
+            id: "key.occlusion", displayName: "Behind Subject", category: "Key",
+            params: [
+                EffectParamSpec(key: "quality", label: "Quality", range: 0...2, defaultValue: 1, unit: ""),
+                EffectParamSpec(key: "feather", label: "Feather", range: 0...1, defaultValue: 0.15, unit: ""),
+                EffectParamSpec(key: "expand", label: "Expand", range: -1...1, defaultValue: 0, unit: ""),
+            ],
+            // Needs the composited frame below, so FrameRenderer applies it at
+            // composite time; the per-clip apply is identity.
+            apply: { image, _, _ in image }
         ),
         EffectDescriptor(
             id: "key.chroma", displayName: "Chroma Key", category: "Key",
@@ -422,9 +448,10 @@ enum EffectRegistry {
     static let canonicalOrder: [String] = [
         "color.exposure", "color.contrast", "color.highlightsShadows", "color.blacksWhites",
         "color.temperature", "color.vibrance", "color.saturation", "color.wheels", "color.curves",
-        "color.hueCurves", "color.lut", "detail.clarity", "key.chroma", "key.subject", "blur.gaussian", "blur.sharpen",
+        "color.hueCurves", "color.lut", "detail.clarity", "key.chroma", "key.subject", "key.occlusion",
+        "blur.gaussian", "blur.sharpen",
         "blur.noiseReduction", "blur.motion", "stylize.invert", "stylize.grain", "stylize.vignette",
-        "stylize.glow", "distort.warp", "mockup.iphone17",
+        "stylize.glow", "distort.warp", "distort.perspective", "mockup.iphone17",
     ]
 
     static func insertIndex(_ effects: [Effect], for id: String) -> Int {

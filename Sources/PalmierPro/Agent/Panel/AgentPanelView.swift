@@ -166,7 +166,6 @@ struct AgentPanelView: View {
     }
 
     @State private var showHistory = false
-    @State private var showModelPicker = false
     @State private var isScrolledFromBottom = false
 
     private var historyButton: some View {
@@ -202,7 +201,23 @@ struct AgentPanelView: View {
     }
 
     private var modelPicker: some View {
-        Button { showModelPicker.toggle() } label: {
+        Menu {
+            ForEach(service.modelGroups, id: \.provider) { group in
+                Menu(group.provider) {
+                    ForEach(group.models) { model in
+                        Button {
+                            service.selectModel(model)
+                        } label: {
+                            if service.effectiveModel.id == model.id {
+                                Label(model.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(model.displayName)
+                            }
+                        }
+                    }
+                }
+            }
+        } label: {
             HStack(spacing: AppTheme.Spacing.xs) {
                 Text(service.effectiveModel.displayName)
                     .font(.system(size: AppTheme.FontSize.xs, weight: .medium))
@@ -213,20 +228,10 @@ struct AgentPanelView: View {
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
             }
         }
-        .buttonStyle(.plain)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
         .fixedSize()
-        .help("OpenRouter chat model")
-        .popover(isPresented: $showModelPicker, arrowEdge: .top) {
-            AgentModelPicker(
-                models: service.availableModels,
-                selectedId: service.effectiveModel.id,
-                isLoading: service.isLoadingModels,
-                onSelect: { model in
-                    service.selectModel(model)
-                    showModelPicker = false
-                }
-            )
-        }
+        .help("Chat model")
     }
 
     private var effortPicker: some View {

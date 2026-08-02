@@ -71,12 +71,25 @@ final class AgentService {
 
     var hasApiKey: Bool { !apiKey.isEmpty }
 
-    var usesClaudeCode: Bool { effectiveModel.isClaudeCode }
+    var usesCLIAgent: Bool { effectiveModel.isCLIAgent }
 
-    var canStream: Bool { usesClaudeCode || hasApiKey }
+    var canStream: Bool { usesCLIAgent || hasApiKey }
 
     var availableModels: [AgentModel] {
-        AgentModel.claudeCodeCatalog + (catalogModels.isEmpty ? AgentModel.fallbackCatalog : catalogModels)
+        AgentModel.claudeCodeCatalog
+            + AgentModel.codexCatalog
+            + (catalogModels.isEmpty ? AgentModel.fallbackCatalog : catalogModels)
+    }
+
+    /// Models grouped by provider for the two-level model menu, CLI agents first.
+    var modelGroups: [(provider: String, models: [AgentModel])] {
+        var order: [String] = []
+        var grouped: [String: [AgentModel]] = [:]
+        for model in availableModels {
+            if grouped[model.provider] == nil { order.append(model.provider) }
+            grouped[model.provider, default: []].append(model)
+        }
+        return order.map { ($0, grouped[$0] ?? []) }
     }
 
     private func selectClient() -> (any AgentClient)? {
@@ -474,8 +487,8 @@ final class AgentService {
     }
 
     private func runLoop() async {
-        if usesClaudeCode {
-            await runClaudeCodeTurn()
+        if usesCLIAgent {
+            await runCLITurn()
             return
         }
         guard let client = selectClient() else {
@@ -535,7 +548,7 @@ final class AgentService {
         }
     }
 
-    private func runClaudeCodeTurn() async {
+    private func runCLITurn() async {
         guard let lastUser = messages.last(where: { $0.role == .user }) else { return }
         var prompt = lastUser.blocks
             .compactMap { if case let .text(s) = $0 { return s } else { return nil } }
@@ -543,26 +556,41 @@ final class AgentService {
         if let hint = lastUser.contextHint { prompt = hint + "\n\n" + prompt }
         guard !prompt.isEmpty else { return }
 
-        let resumeId = currentSessionId
-            .flatMap { id in sessions.first { $0.id == id } }?
-            .claudeSessionId
-        let client = ClaudeCodeClient(
-            workingDirectory: editor?.projectURL?.deletingLastPathComponent(),
-            mcpPort: MCPService.port,
-            resumeSessionId: resumeId,
-            model: effectiveModel.claudeCodeModelId,
-            effort: effectiveReasoningEffort
-        )
+        let model = effectiveModel
+        let session = currentSessionId.flatMap { id in sessions.first { $0.id == id } }
+        let workingDirectory = editor?.projectURL?.deletingLastPathComponent()
+        let stream: AsyncThrowingStream<CLIAgentEvent, Error>
+        if model.isCodex {
+            stream = CodexClient(
+                workingDirectory: workingDirectory,
+                mcpPort: MCPService.port,
+                resumeSessionId: session?.codexSessionId,
+                model: model.codexModelId,
+                effort: effectiveReasoningEffort
+            ).stream(prompt: prompt)
+        } else {
+            stream = ClaudeCodeClient(
+                workingDirectory: workingDirectory,
+                mcpPort: MCPService.port,
+                resumeSessionId: session?.claudeSessionId,
+                model: model.claudeCodeModelId,
+                effort: effectiveReasoningEffort
+            ).stream(prompt: prompt)
+        }
 
         var assistantID: UUID?
         do {
-            for try await event in client.stream(prompt: prompt) {
+            for try await event in stream {
                 try Task.checkCancellation()
                 switch event {
                 case .sessionId(let id):
                     if let current = currentSessionId,
                        let idx = sessions.firstIndex(where: { $0.id == current }) {
-                        sessions[idx].claudeSessionId = id
+                        if model.isCodex {
+                            sessions[idx].codexSessionId = id
+                        } else {
+                            sessions[idx].claudeSessionId = id
+                        }
                     }
                 case .textDelta(let text):
                     appendTextDelta(text, toAssistant: currentAssistant(&assistantID))

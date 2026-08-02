@@ -7,6 +7,7 @@ struct ChatSession: Codable, Identifiable {
     var messages: [AgentMessage]
     var isOpen: Bool
     var claudeSessionId: String?
+    var codexSessionId: String?
 
     init(id: UUID = UUID(), title: String = "New chat", messages: [AgentMessage] = [], isOpen: Bool = true) {
         self.id = id
@@ -16,7 +17,9 @@ struct ChatSession: Codable, Identifiable {
         self.isOpen = isOpen
     }
 
-    private enum CodingKeys: String, CodingKey { case id, title, updatedAt, messages, isOpen, claudeSessionId }
+    private enum CodingKeys: String, CodingKey {
+        case id, title, updatedAt, messages, isOpen, claudeSessionId, codexSessionId
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -26,6 +29,7 @@ struct ChatSession: Codable, Identifiable {
         self.messages = try c.decode([AgentMessage].self, forKey: .messages)
         self.isOpen = try c.decodeIfPresent(Bool.self, forKey: .isOpen) ?? true
         self.claudeSessionId = try c.decodeIfPresent(String.self, forKey: .claudeSessionId)
+        self.codexSessionId = try c.decodeIfPresent(String.self, forKey: .codexSessionId)
     }
 }
 

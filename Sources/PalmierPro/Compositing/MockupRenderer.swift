@@ -22,10 +22,17 @@ final class MockupRenderer: @unchecked Sendable {
         let camera: SCNCamera
         let radius: CGFloat
         let screenAspect: CGFloat
+        let device: MTLDevice
+        let commandQueue: MTLCommandQueue
     }
 
     private let lock = NSLock()
     private var rig: Rig??
+    private var screenTexture: MTLTexture?
+    private var msaaTexture: MTLTexture?
+    private var outputPool: CVPixelBufferPool?
+    private var outputSize: (width: Int, height: Int) = (0, 0)
+    private var textureCache: CVMetalTextureCache?
 
     func render(screen: CIImage, pose: CameraPose, extent: CGRect) -> CIImage? {
         lock.lock()
@@ -34,10 +41,7 @@ final class MockupRenderer: @unchecked Sendable {
         guard let rig = rig ?? nil else { return nil }
 
         let cropped = Self.centerCropped(screen, toAspect: rig.screenAspect)
-        guard let cgScreen = CustomVideoCompositor.ciContext.createCGImage(cropped, from: cropped.extent) else {
-            return nil
-        }
-        rig.screenMaterial.diffuse.contents = cgScreen
+        guard uploadScreen(cropped, rig: rig) else { return nil }
 
         rig.camera.fieldOfView = pose.fov
         rig.pivot.eulerAngles = SCNVector3(
@@ -53,10 +57,8 @@ final class MockupRenderer: @unchecked Sendable {
         )
 
         let renderSize = Self.boundedRenderSize(extent.size)
-        let snapshot = rig.renderer.snapshot(atTime: 0, with: renderSize, antialiasingMode: .multisampling4X)
-        var proposed = CGRect(origin: .zero, size: snapshot.size)
-        guard let cg = snapshot.cgImage(forProposedRect: &proposed, context: nil, hints: nil) else { return nil }
-        var image = CIImage(cgImage: cg)
+        guard let output = renderScene(rig, size: renderSize) else { return nil }
+        var image = CIImage(cvPixelBuffer: output)
         let scale = extent.width / image.extent.width
         if scale != 1 {
             image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
@@ -65,6 +67,95 @@ final class MockupRenderer: @unchecked Sendable {
             translationX: extent.origin.x - image.extent.origin.x,
             y: extent.origin.y - image.extent.origin.y
         )).cropped(to: extent)
+    }
+
+    private func uploadScreen(_ image: CIImage, rig: Rig) -> Bool {
+        let extent = image.extent
+        guard extent.width >= 1, extent.height >= 1 else { return false }
+        let scale = min(1, 2048 / max(extent.width, extent.height))
+        let width = max(1, Int((extent.width * scale).rounded()))
+        let height = max(1, Int((extent.height * scale).rounded()))
+        if screenTexture.map({ $0.width != width || $0.height != height }) ?? true {
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false
+            )
+            descriptor.usage = [.shaderRead, .shaderWrite]
+            screenTexture = rig.device.makeTexture(descriptor: descriptor)
+        }
+        guard let screenTexture else { return false }
+        let scaled = image
+            .transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY))
+            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            .transformed(by: CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: CGFloat(height)))
+        CustomVideoCompositor.ciContext.render(
+            scaled, to: screenTexture, commandBuffer: nil,
+            bounds: CGRect(x: 0, y: 0, width: width, height: height),
+            colorSpace: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        )
+        rig.screenMaterial.diffuse.contents = screenTexture
+        return true
+    }
+
+    private func renderScene(_ rig: Rig, size: CGSize) -> CVPixelBuffer? {
+        let width = max(1, Int(size.width.rounded()))
+        let height = max(1, Int(size.height.rounded()))
+        if outputPool == nil || outputSize != (width, height) {
+            var pool: CVPixelBufferPool?
+            CVPixelBufferPoolCreate(kCFAllocatorDefault, nil, [
+                kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey: width,
+                kCVPixelBufferHeightKey: height,
+                kCVPixelBufferIOSurfacePropertiesKey: [:],
+                kCVPixelBufferMetalCompatibilityKey: true,
+            ] as CFDictionary, &pool)
+            outputPool = pool
+            outputSize = (width, height)
+            msaaTexture = nil
+        }
+        if msaaTexture == nil {
+            let descriptor = MTLTextureDescriptor()
+            descriptor.textureType = .type2DMultisample
+            descriptor.pixelFormat = .bgra8Unorm
+            descriptor.width = width
+            descriptor.height = height
+            descriptor.sampleCount = 4
+            descriptor.usage = .renderTarget
+            descriptor.storageMode = .private
+            msaaTexture = rig.device.makeTexture(descriptor: descriptor)
+        }
+        if textureCache == nil {
+            var cache: CVMetalTextureCache?
+            CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, rig.device, nil, &cache)
+            textureCache = cache
+        }
+        guard let outputPool, let msaaTexture, let textureCache else { return nil }
+
+        var buffer: CVPixelBuffer?
+        CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, outputPool, &buffer)
+        guard let buffer else { return nil }
+        var cvTexture: CVMetalTexture?
+        CVMetalTextureCacheCreateTextureFromImage(
+            kCFAllocatorDefault, textureCache, buffer, nil, .bgra8Unorm, width, height, 0, &cvTexture
+        )
+        guard let cvTexture, let resolve = CVMetalTextureGetTexture(cvTexture) else { return nil }
+
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = msaaTexture
+        pass.colorAttachments[0].resolveTexture = resolve
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        pass.colorAttachments[0].storeAction = .multisampleResolve
+
+        guard let commandBuffer = rig.commandQueue.makeCommandBuffer() else { return nil }
+        rig.renderer.render(
+            atTime: 0,
+            viewport: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)),
+            commandBuffer: commandBuffer,
+            passDescriptor: pass
+        )
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+        return withExtendedLifetime(cvTexture) { buffer }
     }
 
     private func loadRig() -> Rig? {
@@ -111,7 +202,12 @@ final class MockupRenderer: @unchecked Sendable {
         cameraNode.camera = camera
         pivot.addChildNode(cameraNode)
 
-        let renderer = SCNRenderer(device: MTLCreateSystemDefaultDevice(), options: nil)
+        guard let device = MTLCreateSystemDefaultDevice(),
+              let commandQueue = device.makeCommandQueue() else {
+            Log.preview.error("MockupRenderer: Metal device unavailable")
+            return nil
+        }
+        let renderer = SCNRenderer(device: device, options: nil)
         renderer.scene = scene
         renderer.autoenablesDefaultLighting = true
 
@@ -122,7 +218,9 @@ final class MockupRenderer: @unchecked Sendable {
             cameraNode: cameraNode,
             camera: camera,
             radius: CGFloat(sphere.radius),
-            screenAspect: screenAspect
+            screenAspect: screenAspect,
+            device: device,
+            commandQueue: commandQueue
         )
     }
 

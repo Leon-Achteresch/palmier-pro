@@ -1108,6 +1108,14 @@ enum ToolDefinitions {
             continuous flag wave). Combine animated blur/glow/warp with set_keyframes and the text \
             animation presets for After-Effects-style title reveals.
 
+            IN-SCENE TEXT: to embed text into the shot, combine distort.perspective (tilts the layer \
+            plane in 3D — positive tiltX lays it back like writing on the ground, tiltY angles it like \
+            a wall, distance controls how aggressive the vanishing is) with key.occlusion, which \
+            composites the layer BEHIND the people in the frame: the compositor segments the subject of \
+            the tracks below and re-blends it on top, so someone walking past covers the text. \
+            key.occlusion works on any overlay (text, image, video); frames with no detected person \
+            composite normally. feather/expand tune the occlusion edge like key.subject.
+
             Available effects — type: param (range, default):
             \(Self.effectCatalog())
             """,

@@ -57,27 +57,69 @@ struct AgentModel: Hashable, Identifiable, Sendable {
 
     static let claudeCodeCatalog: [AgentModel] = [
         claudeCode,
-        claudeCodeVariant("claude-fable-5", "Claude Code · Fable 5"),
-        claudeCodeVariant("claude-opus-5", "Claude Code · Opus 5"),
-        claudeCodeVariant("claude-sonnet-5", "Claude Code · Sonnet 5"),
-        claudeCodeVariant("claude-haiku-4-5-20251001", "Claude Code · Haiku 4.5"),
+        cliVariant("claude-code", "claude-fable-5", "Fable 5"),
+        cliVariant("claude-code", "claude-opus-5", "Opus 5"),
+        cliVariant("claude-code", "claude-sonnet-5", "Sonnet 5"),
+        cliVariant("claude-code", "claude-haiku-4-5-20251001", "Haiku 4.5"),
     ]
 
-    private static func claudeCodeVariant(_ model: String, _ name: String) -> AgentModel {
-        AgentModel(
-            id: "claude-code/\(model)",
+    static let codex = AgentModel(
+        id: "codex",
+        name: "Codex",
+        supportedEfforts: [.xhigh, .high, .medium, .low],
+        defaultEffort: .medium
+    )
+
+    static let codexCatalog: [AgentModel] = [
+        codex,
+        cliVariant("codex", "gpt-5.6-sol", "GPT-5.6 Sol"),
+        cliVariant("codex", "gpt-5.6-terra", "GPT-5.6 Terra"),
+        cliVariant("codex", "gpt-5.6-luna", "GPT-5.6 Luna"),
+        cliVariant("codex", "gpt-5.5", "GPT-5.5"),
+        cliVariant("codex", "gpt-5.4", "GPT-5.4"),
+    ]
+
+    private static func cliVariant(_ cli: String, _ model: String, _ name: String) -> AgentModel {
+        let base = cli == "codex" ? codex : claudeCode
+        return AgentModel(
+            id: "\(cli)/\(model)",
             name: name,
-            supportedEfforts: claudeCode.supportedEfforts,
-            defaultEffort: claudeCode.defaultEffort
+            supportedEfforts: base.supportedEfforts,
+            defaultEffort: base.defaultEffort
         )
     }
 
     var isClaudeCode: Bool { id == AgentModel.claudeCode.id || id.hasPrefix("claude-code/") }
 
-    var claudeCodeModelId: String? {
-        guard id.hasPrefix("claude-code/") else { return nil }
-        return String(id.dropFirst("claude-code/".count))
+    var isCodex: Bool { id == AgentModel.codex.id || id.hasPrefix("codex/") }
+
+    var isCLIAgent: Bool { isClaudeCode || isCodex }
+
+    var claudeCodeModelId: String? { cliModelId(prefix: "claude-code/") }
+
+    var codexModelId: String? { cliModelId(prefix: "codex/") }
+
+    private func cliModelId(prefix: String) -> String? {
+        guard id.hasPrefix(prefix) else { return nil }
+        return String(id.dropFirst(prefix.count))
     }
+
+    /// Menu group the model is listed under.
+    var provider: String {
+        if isClaudeCode { return "Claude Code" }
+        if isCodex { return "Codex" }
+        guard let vendor = id.split(separator: "/").first, id.contains("/") else { return "Other" }
+        return Self.vendorNames[String(vendor)] ?? String(vendor).capitalized
+    }
+
+    private static let vendorNames = [
+        "openai": "OpenAI",
+        "x-ai": "xAI",
+        "meta-llama": "Meta",
+        "mistralai": "Mistral",
+        "deepseek": "DeepSeek",
+        "z-ai": "Z.ai",
+    ]
 
     static let fallback = AgentModel(
         id: "anthropic/claude-sonnet-5",

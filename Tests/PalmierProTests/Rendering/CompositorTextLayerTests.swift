@@ -65,6 +65,22 @@ struct CompositorTextLayerTests {
         #expect(whiteInBand(f) == 0, "text behind an opaque video must be hidden: \(whiteInBand(f))")
     }
 
+    @Test func occlusionWithoutSubjectCompositesNormally() async throws {
+        func render(_ effects: [Effect]?) async throws -> CompositorRenderTests.Frame {
+            var text = textClip("HELLO")
+            text.effects = effects
+            let tl = CompositorRenderTests.timelineWith(
+                Fixtures.videoTrack(clips: [text]),
+                Fixtures.videoTrack(clips: [CompositorFixtures.patternClip(id: "bg")])
+            )
+            return try await CompositorRenderTests.render(tl, frame: 15, renderSize: Self.size)
+        }
+        let plain = try await render(nil)
+        let occluded = try await render([Effect.make("key.occlusion")])
+        #expect(whiteInBand(occluded) > 30, "with no subject below, occluded text still composites")
+        #expect(whiteInBand(occluded) == whiteInBand(plain))
+    }
+
     @Test func textUsesVideoCanvasRotation() async throws {
         let timeline = CompositorRenderTests.timelineWith(
             Fixtures.videoTrack(clips: [backgroundTextClip(rotation: 90)])
