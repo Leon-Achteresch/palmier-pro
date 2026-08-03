@@ -77,10 +77,10 @@ enum AudioEnhancer {
         defer { Task { await denoiseGate.signal() } }
         let outputURL = studioURL(for: sourceURL, mediaRef: mediaRef)
         let start = ContinuousClock.now
-        let dry = try await readChannels(from: sourceURL)
+        let dry = try await readChannels(from: sourceURL, sampleRate: SpeechRestorer.inputSampleRate)
         guard dry.contains(where: { !$0.isEmpty }) else { throw EnhanceError.noAudioTrack }
         let mono = mixdown(dry)
-        var wet = try await restorerBox.restore(audio: mono, sampleRate: processingSampleRate)
+        var wet = try await restorerBox.restore(audio: mono)
         VoiceMastering.normalize(&wet, sampleRate: SpeechRestorer.outputSampleRate)
         removeStaleCaches(for: mediaRef, tag: DiskCache.sizeMtimeTag(for: sourceURL))
         try write(channels: [wet], to: outputURL)
@@ -95,7 +95,7 @@ enum AudioEnhancer {
     }
 
     private static func studioURL(for sourceURL: URL, mediaRef: String) -> URL {
-        cache.directory.appendingPathComponent("\(mediaRef)_\(DiskCache.sizeMtimeTag(for: sourceURL))_studio.caf")
+        cache.directory.appendingPathComponent("\(mediaRef)_\(DiskCache.sizeMtimeTag(for: sourceURL))_studio2.caf")
     }
 
     static func cachedDenoisedURL(for sourceURL: URL, mediaRef: String) -> URL? {
@@ -127,10 +127,50 @@ enum AudioEnhancer {
     private actor RestorerBox {
         private var restorer: SpeechRestorer?
 
-        func restore(audio: [Float], sampleRate: Int) async throws -> [Float] {
+        func restore(audio: [Float]) async throws -> [Float] {
             if restorer == nil { restorer = try await SpeechRestorer.fromPretrained() }
-            return try restorer!.restore(audio: audio, sampleRate: sampleRate)
+            let restorer = restorer!
+            return try AudioEnhancer.overlapAddRestore(audio) { try restorer.restoreWindow(samples: $0) }
         }
+    }
+
+    // SpeechRestorer.restore concatenates fixed windows without overlap and each
+    // window emits ~21 ms less than its input span, causing clicks and drift.
+    static func overlapAddRestore(
+        _ samples: [Float],
+        config: SidonConfig = .default,
+        restoreWindow: ([Float]) throws -> [Float]
+    ) throws -> [Float] {
+        let win = config.windowSamples
+        let ratio = config.outputSampleRate / config.inputSampleRate
+        let overlap = config.inputSampleRate
+        let hop = win - overlap
+        let totalOut = samples.count * ratio
+        var acc = [Float](repeating: 0, count: totalOut)
+        var weight = [Float](repeating: 0, count: totalOut)
+        var start = 0
+        while start < samples.count {
+            try Task.checkCancellation()
+            let end = Swift.min(start + win, samples.count)
+            let restored = try restoreWindow(Array(samples[start..<end]))
+            let outStart = start * ratio
+            let valid = Swift.min(restored.count, (end - start) * ratio, totalOut - outStart)
+            guard valid > 0 else { break }
+            let fade = Swift.min(overlap * ratio, valid / 2)
+            for i in 0..<valid {
+                var w: Float = 1
+                if start > 0, i < fade { w = Float(i + 1) / Float(fade + 1) }
+                if end < samples.count, i >= valid - fade {
+                    w = Swift.min(w, Float(valid - i) / Float(fade + 1))
+                }
+                acc[outStart + i] += restored[i] * w
+                weight[outStart + i] += w
+            }
+            if end == samples.count { break }
+            start += hop
+        }
+        for i in acc.indices where weight[i] > 0 { acc[i] /= weight[i] }
+        return acc
     }
 
     private static func mixdown(_ channels: [[Float]]) -> [Float] {
@@ -162,7 +202,7 @@ enum AudioEnhancer {
 
     // MARK: - Reading
 
-    private static func readChannels(from url: URL) async throws -> [[Float]] {
+    private static func readChannels(from url: URL, sampleRate: Int = processingSampleRate) async throws -> [[Float]] {
         let track = try await AVURLAsset(url: url).loadTracks(withMediaType: .audio).first
         let desc = try await track?.load(.formatDescriptions).first
         let sourceChannels = desc.flatMap { CMAudioFormatDescriptionGetStreamBasicDescription($0)?.pointee.mChannelsPerFrame } ?? 1
@@ -172,7 +212,7 @@ enum AudioEnhancer {
             from: url,
             outputSettings: [
                 AVFormatIDKey: kAudioFormatLinearPCM,
-                AVSampleRateKey: Double(processingSampleRate),
+                AVSampleRateKey: Double(sampleRate),
                 AVNumberOfChannelsKey: count,
                 AVLinearPCMBitDepthKey: 32,
                 AVLinearPCMIsFloatKey: true,
