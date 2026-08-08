@@ -29,6 +29,15 @@ secrets.json
 # Motion runtime toolchain (the built runtime itself is checked in under Sources/)
 web/node_modules/
 
+# React Native toolchain (rebuild with native/rn/build-host.sh; the JS bundle is checked in)
+native/rn/node_modules/
+native/rn/build/
+native/rn/macos/Pods/
+native/rn/macos/build/
+native/rn/macos/PalmierRN.xcodeproj/
+native/rn/macos/PalmierRN.xcworkspace/
+native/rn/macos/Podfile.lock
+
 # mcpb shim dependencies (vendored only inside the packed .mcpb)
 mcpb/server/node_modules/
 mcpb/server/package-lock.json

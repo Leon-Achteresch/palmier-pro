@@ -1,8 +1,15 @@
 import CryptoKit
 import Foundation
 
-/// A React + Motion scene stored in the project package. The source is authored text; the rendered
-/// video is a derived artifact keyed by `contentHash`.
+/// Which runtime renders a scene. `web` is React + Motion + shadcn in a WKWebView; `reactNative`
+/// is react-native-macos rendering real RN views through Fabric and Yoga.
+enum MotionSceneRuntime: String, Codable, Equatable, Sendable, CaseIterable {
+    case web
+    case reactNative = "react-native"
+}
+
+/// A React scene stored in the project package. The source is authored text; the rendered video is
+/// a derived artifact keyed by `contentHash`.
 struct MotionScene: Codable, Equatable, Sendable {
     static let fileExtension = "motion"
     static let currentVersion = 1
@@ -18,14 +25,35 @@ struct MotionScene: Codable, Equatable, Sendable {
     var fps: Double
     var durationInFrames: Int
     var source: String
+    var runtime: MotionSceneRuntime
 
-    init(width: Int, height: Int, fps: Double, durationInFrames: Int, source: String) {
+    init(
+        width: Int,
+        height: Int,
+        fps: Double,
+        durationInFrames: Int,
+        source: String,
+        runtime: MotionSceneRuntime = .web
+    ) {
         self.version = Self.currentVersion
         self.width = width
         self.height = height
         self.fps = fps
         self.durationInFrames = durationInFrames
         self.source = source
+        self.runtime = runtime
+    }
+
+    /// Scenes written before the React Native runtime existed carry no `runtime` key.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(Int.self, forKey: .version)
+        width = try container.decode(Int.self, forKey: .width)
+        height = try container.decode(Int.self, forKey: .height)
+        fps = try container.decode(Double.self, forKey: .fps)
+        durationInFrames = try container.decode(Int.self, forKey: .durationInFrames)
+        source = try container.decode(String.self, forKey: .source)
+        runtime = try container.decodeIfPresent(MotionSceneRuntime.self, forKey: .runtime) ?? .web
     }
 
     var duration: Double { Double(durationInFrames) / fps }
@@ -35,7 +63,9 @@ struct MotionScene: Codable, Equatable, Sendable {
     /// Stable across encodings so a re-saved but unchanged scene keeps its cached render.
     var contentHash: String {
         var hasher = SHA256()
-        hasher.update(data: Data("\(version)|\(width)|\(height)|\(fps)|\(durationInFrames)|".utf8))
+        hasher.update(
+            data: Data("\(version)|\(width)|\(height)|\(fps)|\(durationInFrames)|\(runtime.rawValue)|".utf8)
+        )
         hasher.update(data: Data(source.utf8))
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
@@ -102,6 +132,7 @@ struct MotionScene: Codable, Equatable, Sendable {
 
 enum MotionSceneError: LocalizedError, Equatable {
     case runtimeMissing
+    case reactNativeUnavailable
     case unsupportedVersion(Int)
     case invalidField(String)
     case malformed(String)
@@ -115,6 +146,7 @@ enum MotionSceneError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .runtimeMissing: "the bundled motion runtime is missing"
+        case .reactNativeUnavailable: "this build does not include the React Native runtime"
         case .unsupportedVersion(let version): "scene version \(version) is newer than this app supports"
         case .invalidField(let detail): "invalid scene: \(detail)"
         case .malformed(let detail): "could not read scene: \(detail)"

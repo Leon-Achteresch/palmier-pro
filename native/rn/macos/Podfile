@@ -1,0 +1,19 @@
+require_relative '../node_modules/react-native-macos/scripts/react_native_pods'
+
+platform :osx, '14.0'
+
+# No app target exists — PalmierPro is SwiftPM. The pods are built on their own and vendored.
+install! 'cocoapods', :integrate_targets => false, :deterministic_uuids => false
+
+prepare_react_native_project!
+
+project 'PalmierRN.xcodeproj'
+
+target 'PalmierRN' do
+  use_react_native!(
+    :path => '../node_modules/react-native-macos',
+    :fabric_enabled => true,
+    :new_arch_enabled => true,
+    :hermes_enabled => true
+  )
+end

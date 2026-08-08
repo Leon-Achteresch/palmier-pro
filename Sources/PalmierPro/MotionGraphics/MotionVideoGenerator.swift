@@ -50,8 +50,7 @@ enum MotionVideoGenerator {
     // that ever becomes the bottleneck.
     @MainActor
     private static func render(scene: MotionScene, target: CGSize, to outputURL: URL) async throws {
-        let runtimeHTML = try await MotionSceneRenderer.loadRuntimeHTML()
-        let renderer = MotionSceneRenderer(size: scene.size, runtimeHTML: runtimeHTML)
+        let renderer = try await MotionSceneRendererFactory.renderer(for: scene)
         defer { renderer.tearDown() }
         try await renderer.load(scene: scene)
 

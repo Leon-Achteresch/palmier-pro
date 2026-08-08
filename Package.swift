@@ -12,6 +12,7 @@ let package = Package(
         .trait(name: "BundledSpeech", description: "Include on-device speech models and MLX."),
         .trait(name: "ProductionTelemetry", description: "Include Sentry and PostHog telemetry."),
         .trait(name: "HotReload", description: "Link interposable so InjectionIII can hot-reload SwiftUI."),
+        .trait(name: "ReactNative", description: "Link react-native-macos for React Native motion scenes."),
     ],
     dependencies: [
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0"),
@@ -70,6 +71,7 @@ let package = Package(
                     package: "speech-swift"
                 ),
                 .product(name: "Inject", package: "Inject"),
+                .target(name: "PalmierRNHost", condition: .when(traits: ["ReactNative"])),
             ],
             path: "Sources/PalmierPro",
             exclude: [
@@ -87,25 +89,42 @@ let package = Package(
                 .copy("Resources/Models"),
                 .copy("Resources/Mockups"),
                 .copy("Resources/MotionRuntime"),
+                .copy("Resources/RNRuntime"),
             ],
             swiftSettings: [
                 .define("BUNDLED_SPEECH", .when(traits: ["BundledSpeech"])),
                 .define("PRODUCTION_TELEMETRY", .when(traits: ["ProductionTelemetry"])),
+                .define("REACT_NATIVE", .when(traits: ["ReactNative"])),
             ],
             linkerSettings: [
                 // Interposing breaks the test bundle's Rust symbols, so keep it opt-in.
                 .unsafeFlags(["-Xlinker", "-interposable"], .when(configuration: .debug, traits: ["HotReload"])),
+                .unsafeFlags(
+                    [
+                        // RN registers its modules through ObjC categories, which the linker drops without -ObjC.
+                        "-Xlinker", "-ObjC",
+                        "-F", "native/rn/build",
+                        "-framework", "hermes",
+                        "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks",
+                        "-Xlinker", "-rpath", "-Xlinker", "native/rn/build",
+                    ],
+                    .when(traits: ["ReactNative"])
+                ),
             ],
             plugins: ["MetalCIKernelPlugin"]
         ),
         .plugin(name: "MetalCIKernelPlugin", capability: .buildTool()),
+        .binaryTarget(name: "PalmierRNHost", path: "native/rn/build/PalmierRNHost.xcframework"),
         .testTarget(
             name: "PalmierProTests",
             dependencies: [
                 "PalmierPro",
                 .product(name: "MCP", package: "swift-sdk"),
             ],
-            path: "Tests/PalmierProTests"
+            path: "Tests/PalmierProTests",
+            swiftSettings: [
+                .define("REACT_NATIVE", .when(traits: ["ReactNative"])),
+            ]
         ),
     ]
 )
