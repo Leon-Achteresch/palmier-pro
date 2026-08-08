@@ -5,6 +5,33 @@ import SceneKit
 final class MockupRenderer: @unchecked Sendable {
     static let shared = MockupRenderer()
 
+    enum Device: String, CaseIterable, Sendable {
+        case iPhone17Pro
+        case macBookUltra
+
+        var resource: String {
+            switch self {
+            case .iPhone17Pro: "Mockups/iPhone17Pro.usdz"
+            case .macBookUltra: "Mockups/MacBookUltra.usdz"
+            }
+        }
+
+        var screenMaterial: String {
+            switch self {
+            case .iPhone17Pro: "Screen_BG"
+            case .macBookUltra: "material"
+            }
+        }
+
+        /// Materials on geometry coplanar with the screen, which would z-fight with it.
+        var occludingMaterials: Set<String> {
+            switch self {
+            case .iPhone17Pro: []
+            case .macBookUltra: ["Display_glass_nanotexture"]
+            }
+        }
+    }
+
     struct CameraPose {
         let orbitYaw: Double
         let orbitPitch: Double
@@ -27,34 +54,38 @@ final class MockupRenderer: @unchecked Sendable {
     }
 
     private let lock = NSLock()
-    private var rig: Rig??
-    private var screenTexture: MTLTexture?
+    private var rigs: [Device: Rig?] = [:]
+    private var screenTextures: [Device: MTLTexture] = [:]
     private var msaaTexture: MTLTexture?
     private var outputPool: CVPixelBufferPool?
     private var outputSize: (width: Int, height: Int) = (0, 0)
     private var textureCache: CVMetalTextureCache?
 
-    func render(screen: CIImage, pose: CameraPose, extent: CGRect) -> CIImage? {
+    func render(device: Device, screen: CIImage, pose: CameraPose, extent: CGRect) -> CIImage? {
         lock.lock()
         defer { lock.unlock() }
-        if rig == nil { rig = loadRig() }
-        guard let rig = rig ?? nil else { return nil }
+        if rigs[device] == nil { rigs[device] = loadRig(device) }
+        guard let rig = rigs[device] ?? nil else { return nil }
 
         let cropped = Self.centerCropped(screen, toAspect: rig.screenAspect)
-        guard uploadScreen(cropped, rig: rig) else { return nil }
+        var uploaded = false
+        Self.commit {
+            uploaded = uploadScreen(cropped, device: device, rig: rig)
 
-        rig.camera.fieldOfView = pose.fov
-        rig.pivot.eulerAngles = SCNVector3(
-            -pose.orbitPitch * .pi / 180,
-            pose.orbitYaw * .pi / 180,
-            0
-        )
-        let dist = rig.radius / tan(CGFloat(pose.fov) * .pi / 360) * CGFloat(pose.distance)
-        rig.cameraNode.position = SCNVector3(
-            -CGFloat(pose.panX) * rig.radius,
-            -CGFloat(pose.panY) * rig.radius,
-            dist
-        )
+            rig.camera.fieldOfView = pose.fov
+            rig.pivot.eulerAngles = SCNVector3(
+                -pose.orbitPitch * .pi / 180,
+                pose.orbitYaw * .pi / 180,
+                0
+            )
+            let dist = rig.radius / tan(CGFloat(pose.fov) * .pi / 360) * CGFloat(pose.distance)
+            rig.cameraNode.position = SCNVector3(
+                -CGFloat(pose.panX) * rig.radius,
+                -CGFloat(pose.panY) * rig.radius,
+                dist
+            )
+        }
+        guard uploaded else { return nil }
 
         let renderSize = Self.boundedRenderSize(extent.size)
         guard let output = renderScene(rig, size: renderSize) else { return nil }
@@ -69,20 +100,20 @@ final class MockupRenderer: @unchecked Sendable {
         )).cropped(to: extent)
     }
 
-    private func uploadScreen(_ image: CIImage, rig: Rig) -> Bool {
+    private func uploadScreen(_ image: CIImage, device: Device, rig: Rig) -> Bool {
         let extent = image.extent
         guard extent.width >= 1, extent.height >= 1 else { return false }
         let scale = min(1, 2048 / max(extent.width, extent.height))
         let width = max(1, Int((extent.width * scale).rounded()))
         let height = max(1, Int((extent.height * scale).rounded()))
-        if screenTexture.map({ $0.width != width || $0.height != height }) ?? true {
+        if screenTextures[device].map({ $0.width != width || $0.height != height }) ?? true {
             let descriptor = MTLTextureDescriptor.texture2DDescriptor(
                 pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false
             )
             descriptor.usage = [.shaderRead, .shaderWrite]
-            screenTexture = rig.device.makeTexture(descriptor: descriptor)
+            screenTextures[device] = rig.device.makeTexture(descriptor: descriptor)
         }
-        guard let screenTexture else { return false }
+        guard let screenTexture = screenTextures[device] else { return false }
         let scaled = image
             .transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY))
             .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
@@ -158,41 +189,52 @@ final class MockupRenderer: @unchecked Sendable {
         return withExtendedLifetime(cvTexture) { buffer }
     }
 
-    private func loadRig() -> Rig? {
-        guard let url = BundledResource.url("Mockups/iPhone17Pro.usdz"),
+    private func loadRig(_ device: Device) -> Rig? {
+        guard let url = BundledResource.url(device.resource),
               let scene = try? SCNScene(url: url, options: nil) else {
-            Log.preview.error("MockupRenderer: iPhone17Pro.usdz missing or unreadable")
+            Log.preview.error("MockupRenderer: \(device.resource) missing or unreadable")
             return nil
         }
 
         var screenMaterial: SCNMaterial?
-        var screenExtents: SCNVector3 = SCNVector3Zero
-        scene.rootNode.enumerateHierarchy { node, _ in
-            guard let geometry = node.geometry,
-                  geometry.materials.contains(where: { $0.name == "Screen_BG" }) else { return }
-            let remapped = Self.screenGeometry(geometry)
-            node.geometry = remapped
-            for material in remapped.materials where material.name == "Screen_BG" {
-                material.lightingModel = .constant
-                material.diffuse.wrapS = .clamp
-                material.diffuse.wrapT = .clamp
-                material.emission.contents = NSColor.black
-                screenMaterial = material
+        var screenAspect: CGFloat?
+        Self.commit {
+            scene.rootNode.enumerateHierarchy { node, _ in
+                guard let geometry = node.geometry else { return }
+                if geometry.materials.contains(where: { device.occludingMaterials.contains($0.name ?? "") }) {
+                    node.isHidden = true
+                    return
+                }
+                guard screenMaterial == nil,
+                      geometry.materials.contains(where: { $0.name == device.screenMaterial }),
+                      let projected = Self.screenGeometry(node) else { return }
+                node.geometry = projected.geometry
+                screenAspect = projected.aspect
+                for material in projected.geometry.materials where material.name == device.screenMaterial {
+                    material.lightingModel = .constant
+                    material.diffuse.wrapS = .clamp
+                    material.diffuse.wrapT = .clamp
+                    material.emission.contents = NSColor.black
+                    screenMaterial = material
+                }
             }
-            let (bbMin, bbMax) = remapped.boundingBox
-            screenExtents = SCNVector3(bbMax.x - bbMin.x, bbMax.y - bbMin.y, bbMax.z - bbMin.z)
         }
-        guard let screenMaterial else {
-            Log.preview.error("MockupRenderer: Screen_BG material not found in iPhone17Pro.usdz")
+        guard let screenMaterial, let screenAspect else {
+            Log.preview.error("MockupRenderer: \(device.screenMaterial) screen not found in \(device.resource)")
             return nil
         }
 
-        let dims = [screenExtents.x, screenExtents.y, screenExtents.z].sorted(by: >)
-        let screenAspect = dims[0] > 0 ? max(dims[1] / dims[0], 0.1) : 0.46
-
-        let sphere = scene.rootNode.boundingSphere
+        let (boxMin, boxMax) = scene.rootNode.boundingBox
+        let size = SCNVector3(boxMax.x - boxMin.x, boxMax.y - boxMin.y, boxMax.z - boxMin.z)
+        let radius = Self.length(size) / 2
+        guard radius > 0 else {
+            Log.preview.error("MockupRenderer: \(device.resource) has no renderable geometry")
+            return nil
+        }
         let pivot = SCNNode()
-        pivot.position = sphere.center
+        pivot.position = SCNVector3(
+            (boxMin.x + boxMax.x) / 2, (boxMin.y + boxMax.y) / 2, (boxMin.z + boxMax.z) / 2
+        )
         scene.rootNode.addChildNode(pivot)
 
         let camera = SCNCamera()
@@ -217,46 +259,81 @@ final class MockupRenderer: @unchecked Sendable {
             pivot: pivot,
             cameraNode: cameraNode,
             camera: camera,
-            radius: CGFloat(sphere.radius),
+            radius: radius,
             screenAspect: screenAspect,
             device: device,
             commandQueue: commandQueue
         )
     }
 
-    private static func screenGeometry(_ geometry: SCNGeometry) -> SCNGeometry {
-        guard let source = geometry.sources(for: .texcoord).first,
-              source.componentsPerVector >= 2,
-              source.bytesPerComponent == MemoryLayout<Float>.size else { return geometry }
+    /// Replaces the authored UVs with a planar projection of the screen face, so the source image
+    /// lands upright and edge-to-edge no matter how the model was unwrapped.
+    private static func screenGeometry(_ node: SCNNode) -> (geometry: SCNGeometry, aspect: CGFloat)? {
+        guard let geometry = node.geometry,
+              let source = geometry.sources(for: .vertex).first,
+              source.componentsPerVector >= 3,
+              source.bytesPerComponent == MemoryLayout<Float>.size else { return nil }
         let stride = source.dataStride / MemoryLayout<Float>.size
         let offset = source.dataOffset / MemoryLayout<Float>.size
         var floats = [Float](repeating: 0, count: source.data.count / MemoryLayout<Float>.size)
         _ = floats.withUnsafeMutableBytes { source.data.copyBytes(to: $0) }
 
-        var minU: Float = .greatestFiniteMagnitude, maxU: Float = -.greatestFiniteMagnitude
-        var minV: Float = .greatestFiniteMagnitude, maxV: Float = -.greatestFiniteMagnitude
-        for i in 0..<source.vectorCount {
-            let base = offset + i * stride
-            minU = min(minU, floats[base]); maxU = max(maxU, floats[base])
-            minV = min(minV, floats[base + 1]); maxV = max(maxV, floats[base + 1])
-        }
-        let du = maxU - minU, dv = maxV - minV
-        guard du > 0, dv > 0 else { return geometry }
+        let (bbMin, bbMax) = geometry.boundingBox
+        let mins = [bbMin.x, bbMin.y, bbMin.z]
+        let extents = [bbMax.x - bbMin.x, bbMax.y - bbMin.y, bbMax.z - bbMin.z]
+        let plane = [0, 1, 2].sorted { extents[$0] > extents[$1] }.prefix(2)
+        guard let first = plane.first, let second = plane.last, extents[second] > 0 else { return nil }
+
+        let transform = node.worldTransform
+        let firstDirection = Self.worldAxis(first, transform)
+        let secondDirection = Self.worldAxis(second, transform)
+        let horizontal = abs(firstDirection.x) >= abs(secondDirection.x)
+        let uAxis = horizontal ? first : second
+        let vAxis = horizontal ? second : first
+        let uDirection = horizontal ? firstDirection : secondDirection
+        let vDirection = horizontal ? secondDirection : firstDirection
+        let flipU = uDirection.x < 0
+        let flipV = vDirection.y > 0
 
         var uvs: [CGPoint] = []
         uvs.reserveCapacity(source.vectorCount)
         for i in 0..<source.vectorCount {
             let base = offset + i * stride
-            let nu = (floats[base] - minU) / du
-            let nv = (floats[base + 1] - minV) / dv
-            uvs.append(CGPoint(x: CGFloat(1 - nv), y: CGFloat(1 - nu)))
+            let u = (CGFloat(floats[base + uAxis]) - mins[uAxis]) / extents[uAxis]
+            let v = (CGFloat(floats[base + vAxis]) - mins[vAxis]) / extents[vAxis]
+            uvs.append(CGPoint(x: flipU ? 1 - u : u, y: flipV ? 1 - v : v))
         }
-        let remapped = SCNGeometry(
+        let projected = SCNGeometry(
             sources: geometry.sources.filter { $0.semantic != .texcoord } + [SCNGeometrySource(textureCoordinates: uvs)],
             elements: geometry.elements
         )
-        remapped.materials = geometry.materials
-        return remapped
+        projected.materials = geometry.materials
+
+        let width = extents[uAxis] * Self.length(uDirection)
+        let height = extents[vAxis] * Self.length(vDirection)
+        guard width > 0, height > 0, (width / height).isFinite else { return nil }
+        return (projected, min(max(width / height, 0.05), 20))
+    }
+
+    /// SceneKit defers scene mutations to its implicit transaction, which a headless renderer never
+    /// flushes — without this the render lags one frame behind the pose and the uploaded screen.
+    private static func commit(_ mutations: () -> Void) {
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = 0
+        mutations()
+        SCNTransaction.commit()
+    }
+
+    private static func worldAxis(_ index: Int, _ m: SCNMatrix4) -> SCNVector3 {
+        switch index {
+        case 0: SCNVector3(m.m11, m.m12, m.m13)
+        case 1: SCNVector3(m.m21, m.m22, m.m23)
+        default: SCNVector3(m.m31, m.m32, m.m33)
+        }
+    }
+
+    private static func length(_ v: SCNVector3) -> CGFloat {
+        CGFloat((v.x * v.x + v.y * v.y + v.z * v.z).squareRoot())
     }
 
     private static func centerCropped(_ image: CIImage, toAspect aspect: CGFloat) -> CIImage {

@@ -144,6 +144,13 @@ else
   exit 1
 fi
 
+if [ -d "$RES_BUNDLE/Mockups" ]; then
+  cp -R "$RES_BUNDLE/Mockups" "$APP/Contents/Resources/"
+else
+  echo "!! missing Mockups/ in SwiftPM resource bundle at $RES_BUNDLE — device mockups would not render" >&2
+  exit 1
+fi
+
 if [ -f "$RES_BUNDLE/MotionRuntime/index.html" ]; then
   cp -R "$RES_BUNDLE/MotionRuntime" "$APP/Contents/Resources/"
 else

@@ -247,6 +247,7 @@ struct EffectRenderingTests {
             "distort.warp": ["bend": 60, "waveAmplitude": 30, "waveLength": 120],
             "distort.perspective": ["tiltX": 55],
             "mockup.iphone17": ["orbitYaw": 30, "orbitPitch": 15],
+            "mockup.macbook": ["orbitYaw": 30, "orbitPitch": 15],
         ]
 
         func frame(_ effects: [Effect]?) async throws -> [UInt8] {

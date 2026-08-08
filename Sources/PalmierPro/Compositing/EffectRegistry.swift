@@ -417,8 +417,15 @@ enum EffectRegistry {
     ]
 
     private static let mockup: [EffectDescriptor] = [
+        mockupDescriptor(id: "mockup.iphone17", displayName: "iPhone 17 Mockup", device: .iPhone17Pro),
+        mockupDescriptor(id: "mockup.macbook", displayName: "MacBook Mockup", device: .macBookUltra),
+    ]
+
+    private static func mockupDescriptor(
+        id: String, displayName: String, device: MockupRenderer.Device
+    ) -> EffectDescriptor {
         EffectDescriptor(
-            id: "mockup.iphone17", displayName: "iPhone 17 Mockup", category: "Mockup",
+            id: id, displayName: displayName, category: "Mockup",
             params: [
                 EffectParamSpec(key: "orbitYaw", label: "Orbit", range: -180...180, defaultValue: 0, unit: "°"),
                 EffectParamSpec(key: "orbitPitch", label: "Tilt", range: -89...89, defaultValue: 0, unit: "°"),
@@ -433,10 +440,10 @@ enum EffectRegistry {
                     distance: p.value("distance"), panX: p.value("panX"),
                     panY: p.value("panY"), fov: p.value("fov")
                 )
-                return MockupRenderer.shared.render(screen: image, pose: pose, extent: extent) ?? image
+                return MockupRenderer.shared.render(device: device, screen: image, pose: pose, extent: extent) ?? image
             }
-        ),
-    ]
+        )
+    }
 
     static let byId: [String: EffectDescriptor] = Dictionary(
         uniqueKeysWithValues: all.map { ($0.id, $0) }
@@ -451,7 +458,7 @@ enum EffectRegistry {
         "color.hueCurves", "color.lut", "detail.clarity", "key.chroma", "key.subject", "key.occlusion",
         "blur.gaussian", "blur.sharpen",
         "blur.noiseReduction", "blur.motion", "stylize.invert", "stylize.grain", "stylize.vignette",
-        "stylize.glow", "distort.warp", "distort.perspective", "mockup.iphone17",
+        "stylize.glow", "distort.warp", "distort.perspective", "mockup.iphone17", "mockup.macbook",
     ]
 
     static func insertIndex(_ effects: [Effect], for id: String) -> Int {

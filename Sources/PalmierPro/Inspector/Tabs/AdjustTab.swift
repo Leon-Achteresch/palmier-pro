@@ -148,14 +148,14 @@ extension InspectorView {
         ]
     }
 
-    private var mockupControls: [EffectControl] {
+    private func mockupControls(effectId: String) -> [EffectControl] {
         [
-            EffectControl(effectId: "mockup.iphone17", paramKey: "orbitYaw", label: "Orbit"),
-            EffectControl(effectId: "mockup.iphone17", paramKey: "orbitPitch", label: "Tilt"),
-            EffectControl(effectId: "mockup.iphone17", paramKey: "distance", label: "Distance"),
-            EffectControl(effectId: "mockup.iphone17", paramKey: "panX", label: "Pan X"),
-            EffectControl(effectId: "mockup.iphone17", paramKey: "panY", label: "Pan Y"),
-            EffectControl(effectId: "mockup.iphone17", paramKey: "fov", label: "Focal Angle"),
+            EffectControl(effectId: effectId, paramKey: "orbitYaw", label: "Orbit"),
+            EffectControl(effectId: effectId, paramKey: "orbitPitch", label: "Tilt"),
+            EffectControl(effectId: effectId, paramKey: "distance", label: "Distance"),
+            EffectControl(effectId: effectId, paramKey: "panX", label: "Pan X"),
+            EffectControl(effectId: effectId, paramKey: "panY", label: "Pan Y"),
+            EffectControl(effectId: effectId, paramKey: "fov", label: "Focal Angle"),
         ]
     }
 
@@ -212,8 +212,9 @@ extension InspectorView {
                 )
             }
             if editor.enabledAddons.contains(ProjectAddon.deviceMockups) {
-                adjustSection(title: "Device Mockup", effectIds: ["mockup.iphone17"], clips: clips) {
-                    adjustSubgroup(title: "iPhone 17 Pro", controls: mockupControls, clips: clips)
+                adjustSection(title: "Device Mockup", effectIds: ["mockup.iphone17", "mockup.macbook"], clips: clips) {
+                    adjustSubgroup(title: "iPhone 17 Pro", controls: mockupControls(effectId: "mockup.iphone17"), clips: clips)
+                    adjustSubgroup(title: "MacBook", controls: mockupControls(effectId: "mockup.macbook"), clips: clips)
                 }
             }
         }
