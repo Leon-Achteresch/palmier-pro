@@ -52,6 +52,8 @@ extension ToolExecutor {
         switch type {
         case .sequence:
             throw ToolError("Cannot generate a sequence. Sequences are timelines.")
+        case .motion:
+            throw ToolError("Motion scenes are authored as code, not generated. Use manage_motion_scene.")
         case .video:
             let modelId = try args.string("model") ?? defaultModelId(
                 VideoModelConfig.allModels.map { (id: $0.id, paidOnly: $0.paidOnly) }, kind: "video")

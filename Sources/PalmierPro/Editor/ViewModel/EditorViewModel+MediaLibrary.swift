@@ -46,6 +46,7 @@ private struct MediaImportPlan: Sendable {
     var files: [File] = []
     var rejectedUnsupportedNames: [String] = []
     var rejectedLottieNames: [String] = []
+    var rejectedMotionNames: [String] = []
 }
 
 private enum MediaImportScanner {
@@ -117,6 +118,10 @@ private enum MediaImportScanner {
             plan.rejectedLottieNames.append(url.lastPathComponent)
             return
         }
+        if type == .motion, !MotionScene.isMotionScene(at: url) {
+            plan.rejectedMotionNames.append(url.lastPathComponent)
+            return
+        }
         plan.files.append(.init(
             url: url,
             type: type,
@@ -134,7 +139,11 @@ extension EditorViewModel {
         maxBytes: Int64? = nil,
         workAlreadyAdmitted: Bool = false
     ) async throws -> URL {
-        defer { try? FileManager.default.removeItem(at: stagedURL) }
+        defer {
+            Task.detached(priority: .utility) {
+                try? FileManager.default.removeItem(at: stagedURL)
+            }
+        }
         guard projectURL != nil else {
             let destination = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
             return try await Task.detached(priority: .userInitiated) {
@@ -149,7 +158,11 @@ extension EditorViewModel {
                 let preparedURL = try await Task.detached(priority: .userInitiated) {
                     try FileIO.prepareStagedFile(from: stagedURL, nextTo: targetProjectURL, maxBytes: maxBytes)
                 }.value
-                defer { try? FileManager.default.removeItem(at: preparedURL) }
+                defer {
+                    Task.detached(priority: .utility) {
+                        try? FileManager.default.removeItem(at: preparedURL)
+                    }
+                }
                 try Task.checkCancellation()
                 if !workAlreadyAdmitted {
                     try projectPackageCoordinator.beginMutation()
@@ -242,6 +255,10 @@ extension EditorViewModel {
         }
         if type == .lottie, !LottieVideoGenerator.isLottie(at: url) {
             mediaPanelToast = "Can't import \"\(url.lastPathComponent)\" — not a Lottie animation."
+            return nil
+        }
+        if type == .motion, !MotionScene.isMotionScene(at: url) {
+            mediaPanelToast = "Can't import \"\(url.lastPathComponent)\" — not a motion scene."
             return nil
         }
         return addMediaAsset(from: url, type: type, folderId: folderId, finalize: finalize)
@@ -347,6 +364,8 @@ extension EditorViewModel {
             mediaPanelToast = "Can't import \"\(name)\" — unsupported file type."
         } else if let name = plan.rejectedLottieNames.last {
             mediaPanelToast = "Can't import \"\(name)\" — not a Lottie animation."
+        } else if let name = plan.rejectedMotionNames.last {
+            mediaPanelToast = "Can't import \"\(name)\" — not a motion scene."
         }
 
         let summary = MediaImportSummary(
@@ -654,7 +673,7 @@ extension EditorViewModel {
             mediaVisualCache.generateWaveform(for: asset)
         case .image:
             mediaVisualCache.generateImageThumbnail(for: asset)
-        case .text, .lottie, .sequence:
+        case .text, .lottie, .motion, .sequence:
             break
         }
     }

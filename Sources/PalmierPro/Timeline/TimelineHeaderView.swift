@@ -12,7 +12,8 @@ final class TimelineHeaderView: NSView {
         .foregroundColor: AppTheme.Text.secondary,
     ]
 
-    /// Rects for mute/hide/sync-lock buttons, indexed by track. Used for hit testing.
+    /// Rects for track controls, indexed by track. Used for hit testing.
+    var recordButtonRects: [Int: NSRect] = [:]
     var muteButtonRects: [Int: NSRect] = [:]
     var hideButtonRects: [Int: NSRect] = [:]
     var syncLockButtonRects: [Int: NSRect] = [:]
@@ -45,13 +46,14 @@ final class TimelineHeaderView: NSView {
         let clipTop = bounds.origin.y + Layout.rulerHeight
         ctx.clip(to: NSRect(x: bounds.origin.x, y: clipTop, width: bounds.width, height: bounds.height))
 
+        recordButtonRects.removeAll()
         muteButtonRects.removeAll()
         hideButtonRects.removeAll()
         syncLockButtonRects.removeAll()
         dragHandleRects.removeAll()
         let stripWidth: CGFloat = 3
-        let iconSize: CGFloat = 14
-        let iconConfig = NSImage.SymbolConfiguration(pointSize: 11, weight: .regular)
+        let iconSize = AppTheme.IconSize.xs
+        let iconConfig = NSImage.SymbolConfiguration(pointSize: AppTheme.FontSize.sm, weight: .regular)
         let headerWidth = bounds.width
 
         let geo = TimelineGeometry(editor: editor, bounds: bounds)
@@ -71,27 +73,51 @@ final class TimelineHeaderView: NSView {
             ctx.fill(NSRect(x: 0, y: y, width: stripWidth, height: h))
 
             // Drag handle (reorder grip)
-            let gripX = stripWidth + 6
+            let gripX = stripWidth + AppTheme.Spacing.sm
             let gripRect = NSRect(x: gripX, y: y + (h - iconSize) / 2, width: iconSize, height: iconSize)
             drawSymbol("line.3.horizontal", in: gripRect, tint: AppTheme.Text.secondary.withAlphaComponent(0.4), config: iconConfig, context: ctx)
-            dragHandleRects[i] = gripRect.insetBy(dx: -4, dy: -4)
+            dragHandleRects[i] = gripRect.insetBy(dx: -AppTheme.Spacing.xs, dy: -AppTheme.Spacing.xs)
 
             // Track label
             let str = NSAttributedString(string: editor.timelineTrackDisplayLabel(at: i), attributes: Self.labelAttrs)
             let labelSize = str.size()
             let labelY = y + (h - labelSize.height) / 2
-            str.draw(at: NSPoint(x: gripX + iconSize + 6, y: labelY))
+            str.draw(at: NSPoint(x: gripX + iconSize + AppTheme.Spacing.sm, y: labelY))
 
 
             let iconY = y + (h - iconSize) / 2
-            let rightmostX = headerWidth - iconSize - 6
-            let syncX = rightmostX - iconSize - 4
+            let rightmostX = headerWidth - iconSize - AppTheme.Spacing.sm
+            let syncX = rightmostX - iconSize - AppTheme.Spacing.xs
+            let recordX = syncX - iconSize - AppTheme.Spacing.xs
 
             syncLockButtonRects[i] = drawToggleIcon(
                 x: syncX, y: iconY, size: iconSize, config: iconConfig, context: ctx,
                 active: track.syncLocked, onSymbol: "link", offSymbol: "personalhotspot.slash"
             )
             if track.type == .audio {
+                let isRecordingTarget = editor.audioRecordingState.trackId == track.id
+                let recordingActive = editor.audioRecordingState.trackId != nil
+                let recordSymbol: String
+                if isRecordingTarget, case .finalizing = editor.audioRecordingState {
+                    recordSymbol = "ellipsis.circle"
+                } else {
+                    recordSymbol = isRecordingTarget ? "stop.circle.fill" : "record.circle"
+                }
+                let recordRect = NSRect(x: recordX, y: iconY, width: iconSize, height: iconSize)
+                drawSymbol(
+                    recordSymbol,
+                    in: recordRect,
+                    tint: isRecordingTarget
+                        ? AppTheme.Status.error
+                        : AppTheme.Text.secondary.withAlphaComponent(
+                            recordingActive ? AppTheme.Opacity.moderate : AppTheme.Opacity.opaque
+                        ),
+                    config: iconConfig,
+                    context: ctx
+                )
+                if !recordingActive || (isRecordingTarget && editor.audioRecordingState.canCancel) {
+                    recordButtonRects[i] = recordRect.insetBy(dx: -AppTheme.Spacing.xs, dy: -AppTheme.Spacing.xs)
+                }
                 muteButtonRects[i] = drawToggleIcon(
                     x: rightmostX, y: iconY, size: iconSize, config: iconConfig, context: ctx,
                     active: !track.muted, onSymbol: "speaker.wave.2.fill", offSymbol: "speaker.slash.fill"
@@ -131,7 +157,7 @@ final class TimelineHeaderView: NSView {
         let rect = NSRect(x: x, y: y, width: size, height: size)
         let tint = active ? AppTheme.Text.secondary : AppTheme.Text.secondary.withAlphaComponent(0.3)
         drawSymbol(active ? onSymbol : offSymbol, in: rect, tint: tint, config: config, context: context)
-        return rect.insetBy(dx: -4, dy: -4)
+        return rect.insetBy(dx: -AppTheme.Spacing.xs, dy: -AppTheme.Spacing.xs)
     }
 
     private static var tintedSymbols: [String: NSImage] = [:]
@@ -176,6 +202,13 @@ final class TimelineHeaderView: NSView {
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
 
+        for (ti, rect) in recordButtonRects {
+            if rect.contains(point), editor.timeline.tracks.indices.contains(ti) {
+                editor.toggleAudioRecording(trackId: editor.timeline.tracks[ti].id)
+                needsDisplay = true
+                return
+            }
+        }
         for (ti, rect) in muteButtonRects {
             if rect.contains(point) {
                 editor.toggleTrackMute(trackIndex: ti)

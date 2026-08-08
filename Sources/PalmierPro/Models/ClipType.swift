@@ -4,6 +4,7 @@ enum ClipType: String, Codable, Sendable, CaseIterable {
     case image
     case text
     case lottie
+    case motion
     case sequence
 
     var sfSymbolName: String {
@@ -13,6 +14,7 @@ enum ClipType: String, Codable, Sendable, CaseIterable {
         case .image: "photo"
         case .text: "textformat"
         case .lottie: "sparkles"
+        case .motion: "wand.and.sparkles"
         case .sequence: "film.stack"
         }
     }
@@ -24,6 +26,7 @@ enum ClipType: String, Codable, Sendable, CaseIterable {
         case .image: "Image"
         case .text: "Text"
         case .lottie: "Lottie"
+        case .motion: "Motion"
         case .sequence: "Video"
         }
     }
@@ -44,6 +47,7 @@ enum ClipType: String, Codable, Sendable, CaseIterable {
         case "mp3", "wav", "aac", "m4a", "aiff", "aif", "aifc", "caf", "flac": self = .audio
         case "png", "jpg", "jpeg", "tiff", "heic", "webp": self = .image
         case "json", "lottie": self = .lottie
+        case "motion": self = .motion
         default: return nil
         }
     }

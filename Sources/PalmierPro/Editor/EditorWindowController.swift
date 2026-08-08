@@ -185,6 +185,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             return false
 
         case 53: // Escape
+            if editorViewModel.audioRecordingState.canCancel {
+                editorViewModel.cancelAudioRecording()
+                return true
+            }
             if editorViewModel.pendingSwapClipId != nil {
                 editorViewModel.cancelMediaSwap()
                 return true

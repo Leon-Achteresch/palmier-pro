@@ -264,6 +264,7 @@ final class ToolExecutor {
         case .addTexts:      return try addTexts(editor, args)
         case .updateText:    return try updateText(editor, args)
         case .addCaptions:   return try await addCaptions(editor, args)
+        case .manageMotionScene: return try await manageMotionScene(editor, args)
         case .exportProject: return try await exportProject(editor, args)
         case .manageExports: return try manageExports(editor, args)
         case .generateVideo: return try generate(editor, args, type: .video)

@@ -47,7 +47,7 @@ enum Layout {
     static let timelineMinHeight: CGFloat = 100
     static let trackHeight: CGFloat = 50
     static let rulerHeight: CGFloat = 24
-    static let trackHeaderWidth: CGFloat = 100
+    static let trackHeaderWidth: CGFloat = 120
     static let dropZoneHeight: CGFloat = 60
     static let insertThreshold: CGFloat = 10
     static let dragThreshold: CGFloat = 3

@@ -61,6 +61,9 @@ enum ToolName: String, CaseIterable, Sendable {
     case updateText = "update_text"
     case addCaptions = "add_captions"
 
+    // Motion graphics
+    case manageMotionScene = "manage_motion_scene"
+
     // Color & effects
     case applyColor = "apply_color"
     case applyEffect = "apply_effect"
@@ -1015,6 +1018,24 @@ enum ToolDefinitions {
                     "animation": ["type": "string", "enum": TextAnimation.Preset.agentValues, "description": "Caption animation preset."],
                     "highlightColor": ["type": "string", "description": "Active-word hex."],
                 ])
+            )
+        ),
+        AgentTool(
+            name: .manageMotionScene,
+            description: "Author animated motion graphics as React code and render them into the media library as an alpha video clip. Use this for animated titles, lower thirds, kinetic typography, logo reveals, UI/product demos, dashboards, chart animations, and anything that should look like a real app interface moving — especially when combined with a device mockup via apply_layout. Do NOT use it for plain static captions or simple text overlays; add_texts is cheaper and editable in the Inspector.\n\nThe scene is a single TSX module that must `export default` a React component. Animate with Motion (`import { motion } from \"motion/react\"`) — its declarative props (initial/animate/transition, variants, stagger) all render frame-accurately because rendering drives a virtual clock rather than wall time. The full shadcn/ui set is importable (`import { Button } from \"@/components/ui/button\"`, also card, dialog, table, chart, badge, tabs, progress, sidebar, …) plus `lucide-react` icons and any Tailwind utility class including arbitrary values like `w-[347px]`. `PalmierMotion.useSceneTime()` returns seconds and `PalmierMotion.useSceneFrame()` the frame index, for values you must compute per frame such as counters. Give the root element a transparent or explicit background: the render preserves alpha, so anything you do not paint stays see-through over the clips beneath.\n\nThe scene is rendered before it is saved, so a syntax error, a bad import or a component that throws comes back as a tool error and nothing is added to the project. Rendering is deterministic — Math.random and Date are seeded — so the same source always yields the same frames. action='create' returns a mediaRef to place with add_clips; action='update' re-renders in place and every clip already on the timeline picks up the new version. Read a scene back (source plus sampled frames) with inspect_media.",
+            inputSchema: objectSchema(
+                properties: [
+                    "action": ["type": "string", "enum": ["create", "update"], "description": "'create' adds a new scene to the media library. 'update' replaces an existing one in place and re-renders it."],
+                    "mediaRef": ["type": "string", "description": "Required for action='update'. The scene asset to replace."],
+                    "name": ["type": "string", "description": "Display name in the media library, e.g. 'Pricing Table Reveal'."],
+                    "folderId": ["type": "string", "description": "Optional media folder to file the new scene under."],
+                    "source": ["type": "string", "description": "The TSX module. Must `export default` a React component. Required for 'create'; on 'update' omit it to keep the current source and only change timing or size."],
+                    "width": ["type": "integer", "description": "Render width in pixels (16–4096). Defaults to the project width."],
+                    "height": ["type": "integer", "description": "Render height in pixels (16–4096). Defaults to the project height."],
+                    "fps": ["type": "number", "description": "Frames per second (1–120). Defaults to the project fps. Match the timeline unless the scene needs to be smoother."],
+                    "durationInFrames": ["type": "integer", "description": "How many frames to render (1–36000). Defaults to 5 seconds. The last frame is held, so a clip can be extended past the animation as a freeze-frame."],
+                ],
+                required: ["action"]
             )
         ),
         AgentTool(

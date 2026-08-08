@@ -368,6 +368,13 @@ enum CompositionBuilder {
                 Log.preview.error("lottieVideo failed mediaRef=\(clip.mediaRef) size=\(Int(lottieSize.width))x\(Int(lottieSize.height)): \(Log.detail(error))")
                 return FileManager.default.fileExists(atPath: resolved.path) ? .unprocessable : .offline
             }
+        } else if clip.mediaType == .motion {
+            do {
+                mediaURL = try await MotionVideoGenerator.motionVideo(for: resolved, mediaRef: clip.mediaRef)
+            } catch {
+                Log.preview.error("motionVideo failed mediaRef=\(clip.mediaRef): \(Log.detail(error))")
+                return FileManager.default.fileExists(atPath: resolved.path) ? .unprocessable : .offline
+            }
         } else if mediaType == .video {
             mediaURL = (try? await AlphaVideoNormalizer.premultipliedVideo(for: resolved, mediaRef: clip.mediaRef)) ?? resolved
         } else {

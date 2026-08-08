@@ -86,6 +86,7 @@ let package = Package(
                 .copy("Resources/Localization"),
                 .copy("Resources/Models"),
                 .copy("Resources/Mockups"),
+                .copy("Resources/MotionRuntime"),
             ],
             swiftSettings: [
                 .define("BUNDLED_SPEECH", .when(traits: ["BundledSpeech"])),

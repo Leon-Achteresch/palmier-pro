@@ -26,6 +26,9 @@ secrets.json
 *.local
 *.provisionprofile
 
+# Motion runtime toolchain (the built runtime itself is checked in under Sources/)
+web/node_modules/
+
 # mcpb shim dependencies (vendored only inside the packed .mcpb)
 mcpb/server/node_modules/
 mcpb/server/package-lock.json

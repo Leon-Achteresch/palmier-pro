@@ -161,7 +161,7 @@ final class MediaAsset: Identifiable {
         switch type {
         case .image:
             await loadImageThumbnail(maxPixelSize: ImageEncoder.libraryThumbnailMaxPixelSize)
-        case .video, .lottie:
+        case .video, .lottie, .motion:
             guard thumbnail == nil, await acquireThumbnailPermit() else { return }
             defer { releaseThumbnailPermit() }
             guard thumbnail == nil, !Task.isCancelled else { return }
@@ -209,6 +209,17 @@ final class MediaAsset: Identifiable {
                 thumbnailMaxPixelSize = ImageEncoder.maxLongestEdge
             }
             return metadata.width != nil && metadata.height != nil
+        }
+
+        if type == .motion {
+            let sceneURL = url
+            guard let scene = try? await MotionVideoGenerator.loadScene(at: sceneURL),
+                  !Task.isCancelled, url == sceneURL else { return false }
+            duration = scene.duration
+            sourceWidth = scene.width
+            sourceHeight = scene.height
+            sourceFPS = scene.fps
+            return true
         }
 
         if type == .lottie {

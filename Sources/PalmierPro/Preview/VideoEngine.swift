@@ -159,6 +159,18 @@ final class VideoEngine {
             }
             return
         }
+        if asset.type == .motion {
+            // AVPlayer can't read scene source — bake (cached) to a playable mov first.
+            let url = asset.url, ref = asset.id
+            let startFrame = editor?.sourcePlayheadFrame ?? 0
+            Task { @MainActor [weak self] in
+                guard let self, let mov = try? await MotionVideoGenerator.motionVideo(for: url, mediaRef: ref) else { return }
+                guard case .mediaAsset(let activeId, _, _) = self.editor?.activePreviewTab, activeId == ref else { return }
+                self.replacePlayerItem(AVPlayerItem(url: mov), reason: "previewMotion")
+                self.seek(to: startFrame, mode: .exact)
+            }
+            return
+        }
         if asset.type == .video {
             loadSourcePreview(id: asset.id, url: asset.url)
             return

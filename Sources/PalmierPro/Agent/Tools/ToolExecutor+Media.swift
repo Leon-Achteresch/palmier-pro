@@ -106,6 +106,7 @@ extension ToolExecutor {
         case .video: return try await readVideo(editor: editor, asset: asset, args: args, mapping: mapping, preferredLocale: preferredLocale)
         case .audio: return try await readAudio(editor: editor, asset: asset, args: args, mapping: mapping, preferredLocale: preferredLocale)
         case .lottie: return try await readLottie(asset: asset, args: args)
+        case .motion: return try await readMotion(asset: asset, args: args)
         case .text: throw ToolError("Text clips are not stored as media assets.")
         case .sequence: throw ToolError("Sequences are timelines, not media assets. Use get_timeline.")
         }
@@ -266,6 +267,52 @@ extension ToolExecutor {
             Self.compositeJPEG(frame.image).map { .image(base64: $0.base64EncodedString(), mediaType: "image/jpeg") }
         }
         guard !imageBlocks.isEmpty else { throw ToolError("Failed to encode Lottie frames") }
+        guard let metaJSON = Self.jsonString(roundJSONFloatingPointNumbers(meta, toPlaces: 3)) else {
+            throw ToolError("Failed to encode metadata")
+        }
+        return ToolResult(content: imageBlocks + [.text(metaJSON)], isError: false)
+    }
+
+    /// Returns the authored source alongside rendered frames so the Agent can both see the result
+    /// and edit it without a second round trip.
+    private func readMotion(asset: MediaAsset, args: [String: Any]) async throws -> ToolResult {
+        let scene = try await MotionVideoGenerator.loadScene(at: asset.url)
+        let requested = args.int("maxFrames") ?? Self.defaultReadVideoFrames
+        let count = max(1, min(min(requested, Self.readVideoMaxFrames), scene.durationInFrames))
+        let renderedURL = try await MotionVideoGenerator.motionVideo(for: asset.url, mediaRef: asset.id)
+
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: renderedURL))
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(
+            width: Self.readVideoFrameMaxDimension,
+            height: Self.readVideoFrameMaxDimension
+        )
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+
+        var imageBlocks: [ToolResult.Block] = []
+        var sampledIndices: [Int] = []
+        for i in 0..<count {
+            let fraction = count == 1 ? 0 : Double(i) / Double(count - 1)
+            let index = Int((Double(scene.durationInFrames - 1) * fraction).rounded())
+            let time = CMTime(seconds: Double(index) / scene.fps, preferredTimescale: 600)
+            guard let image = try? await generator.image(at: time).image,
+                  let jpeg = Self.compositeJPEG(image) else { continue }
+            sampledIndices.append(index)
+            imageBlocks.append(.image(base64: jpeg.base64EncodedString(), mediaType: "image/jpeg"))
+        }
+        guard !imageBlocks.isEmpty else { throw ToolError("Failed to render motion scene frames from \(asset.name)") }
+
+        var meta = Self.baseMeta(for: asset)
+        meta["width"] = scene.width
+        meta["height"] = scene.height
+        meta["fps"] = scene.fps
+        meta["frameCount"] = scene.durationInFrames
+        meta["durationSeconds"] = scene.duration
+        meta["sampledFrameIndices"] = sampledIndices
+        meta["source"] = scene.source
+        meta["note"] = "Motion scene frames sampled evenly; transparent areas composited over gray. Edit with manage_motion_scene."
+
         guard let metaJSON = Self.jsonString(roundJSONFloatingPointNumbers(meta, toPlaces: 3)) else {
             throw ToolError("Failed to encode metadata")
         }

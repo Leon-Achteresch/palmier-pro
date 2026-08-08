@@ -80,10 +80,13 @@ extension ToolExecutor {
         }
         let ext = fileURL.pathExtension.lowercased()
         guard let type = ClipType(fileExtension: ext) else {
-            throw ToolError("Unsupported file extension '.\(ext)'. Supported: mov/mp4/m4v, mp3/wav/aac/m4a/aiff/aifc/caf/flac, png/jpg/jpeg/tiff/heic, json (Lottie).")
+            throw ToolError("Unsupported file extension '.\(ext)'. Supported: mov/mp4/m4v, mp3/wav/aac/m4a/aiff/aifc/caf/flac, png/jpg/jpeg/tiff/heic, json (Lottie), motion (React/Motion scene).")
         }
         if type == .lottie, !LottieVideoGenerator.isLottie(at: fileURL) {
             throw ToolError("Unsupported Lottie file: \(fileURL.lastPathComponent)")
+        }
+        if type == .motion, !MotionScene.isMotionScene(at: fileURL) {
+            throw ToolError("Unsupported motion scene: \(fileURL.lastPathComponent)")
         }
         guard editor.projectURL != nil else {
             throw ToolError("No project is open; cannot import from path")
@@ -126,6 +129,9 @@ extension ToolExecutor {
         }
         if type == .lottie, !LottieVideoGenerator.isLottie(at: imported.url) {
             throw ToolError("source.bytes is not a valid Lottie animation")
+        }
+        if type == .motion, !MotionScene.isMotionScene(at: imported.url) {
+            throw ToolError("source.bytes is not a valid motion scene")
         }
         let committedURL = try await editor.commitStagedProjectMedia(imported.url, filename: imported.filename)
         let asset = editor.undo.perform("Import Media (Agent)") {

@@ -2,6 +2,7 @@
   "name": "palmier-pro",
   "private": true,
   "scripts": {
+    "build:motion": "cd web && npm ci && npm run build",
     "install": "scripts/bundle.sh release && rm -rf /Applications/PalmierPro.app && cp -R .build/PalmierPro.app /Applications/ && echo 'PalmierPro installed to /Applications'"
   }
 }

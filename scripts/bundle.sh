@@ -144,6 +144,14 @@ else
   exit 1
 fi
 
+if [ -f "$RES_BUNDLE/MotionRuntime/index.html" ]; then
+  cp -R "$RES_BUNDLE/MotionRuntime" "$APP/Contents/Resources/"
+else
+  echo "!! missing MotionRuntime/index.html in SwiftPM resource bundle at $RES_BUNDLE — motion scenes would not render" >&2
+  echo "   rebuild it with: npm run build:motion" >&2
+  exit 1
+fi
+
 if ! ls "$RES_BUNDLE"/*.metallib >/dev/null 2>&1; then
   echo "!! no .metallib in SwiftPM resource bundle at $RES_BUNDLE — Metal effects would be missing" >&2
   exit 1

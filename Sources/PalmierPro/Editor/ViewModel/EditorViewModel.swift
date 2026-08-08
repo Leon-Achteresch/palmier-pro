@@ -25,6 +25,36 @@ struct PendingTransitionPlacement {
     let gapLengthFrames: Int
 }
 
+struct AudioRecordingSession: Equatable, Sendable {
+    let id: UUID
+    let timelineId: String
+    let trackId: String
+    let startFrame: Int
+    let shouldPausePlaybackWhenFinished: Bool
+}
+
+enum AudioRecordingState: Equatable, Sendable {
+    case idle
+    case starting(AudioRecordingSession)
+    case recording(AudioRecordingSession)
+    case finalizing(AudioRecordingSession)
+
+    var trackId: String? {
+        switch self {
+        case .idle: nil
+        case .starting(let session), .recording(let session), .finalizing(let session):
+            session.trackId
+        }
+    }
+
+    var canCancel: Bool {
+        switch self {
+        case .starting, .recording: true
+        case .idle, .finalizing: false
+        }
+    }
+}
+
 @Observable
 @MainActor
 final class EditorViewModel {
@@ -128,6 +158,7 @@ final class EditorViewModel {
     @ObservationIgnored var timelineScrollOffsetX: Double = 0
     var timelineScrollRestoreX: Double?
     var isScrubbing: Bool = false
+    var audioRecordingState: AudioRecordingState = .idle
     var toolMode: ToolMode = .pointer
     var showExportDialog: Bool = false
     var showGenerationPanel: Bool = false {
@@ -267,6 +298,9 @@ final class EditorViewModel {
     @ObservationIgnored var mediaImportSequence: Int = 0
     @ObservationIgnored var frameCaptureTask: Task<Void, Never>?
     @ObservationIgnored var transitionSeedTask: Task<Void, Never>?
+    @ObservationIgnored var audioRecordingTransitionTask: Task<Void, Never>?
+    @ObservationIgnored let audioTrackRecorder = AudioTrackRecorder()
+    @ObservationIgnored var audioRecordingFailureMessage: String?
     @ObservationIgnored var pendingManifestMetadataUpdates: [String: MediaAsset] = [:]
     @ObservationIgnored var pendingManifestMetadataFlushTask: Task<Void, Never>?
 

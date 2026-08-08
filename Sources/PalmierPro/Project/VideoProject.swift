@@ -202,6 +202,7 @@ class VideoProject: NSDocument {
     func saveBeforeClosing() async throws {
         isSavingBeforeClose = true
         defer { isSavingBeforeClose = false }
+        try await editorViewModel.finishAudioRecordingBeforeClose()
         let coordinator = editorViewModel.projectPackageCoordinator
         await coordinator.beginClosing()
         do {

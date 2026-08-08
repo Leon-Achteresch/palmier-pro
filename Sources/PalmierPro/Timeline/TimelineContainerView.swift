@@ -67,7 +67,8 @@ struct TimelineContainerView: NSViewRepresentable {
             selectedClipIds: editor.selectedClipIds,
             selectedTimelineRange: editor.selectedTimelineRange,
             pendingReplacements: editor.pendingReplacements,
-            generatingAssetIds: Set(editor.mediaAssets.lazy.filter(\.isGenerating).map(\.id))
+            generatingAssetIds: Set(editor.mediaAssets.lazy.filter(\.isGenerating).map(\.id)),
+            audioRecordingState: editor.audioRecordingState
         )
 
         if context.coordinator.needsRender(for: renderState) {
@@ -94,6 +95,7 @@ struct TimelineContainerView: NSViewRepresentable {
         let selectedTimelineRange: TimelineRangeSelection?
         let pendingReplacements: Set<String>
         let generatingAssetIds: Set<String>
+        let audioRecordingState: AudioRecordingState
     }
 
     @MainActor final class Coordinator: NSObject {

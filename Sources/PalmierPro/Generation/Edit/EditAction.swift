@@ -57,7 +57,7 @@ enum EditAction {
         case .image: candidates = [.upscale, .edit, .rerun, .createVideo]
         case .video: candidates = [.upscale, .edit, .rerun, .lipSync, .reframe, .generateMusic, .generateSFX]
         case .audio, .text: candidates = [.upscale, .edit, .rerun]
-        case .lottie, .sequence: candidates = []
+        case .lottie, .motion, .sequence: candidates = []
         }
         return candidates.filter {
             $0.availability(for: asset, effectiveDurationOverride: effectiveDurationOverride).isAvailable
@@ -129,6 +129,8 @@ enum EditAction {
                 return .disabled(reason: "Edit doesn't support text")
             case .lottie:
                 return .disabled(reason: "Edit doesn't support Lottie")
+            case .motion:
+                return .disabled(reason: "Edit doesn't support motion scenes")
             case .sequence:
                 return .disabled(reason: "Edit doesn't support sequences")
             }
