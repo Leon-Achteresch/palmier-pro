@@ -299,13 +299,24 @@ enum FrameRenderer {
             edgeSoftness: clip.edgeSoftness
         )
 
-        let t = clip.transformAt(frame: frame)
-        let av = layer.preferredTransform.concatenating(
-            CompositionBuilder.affineTransform(for: t, natSize: layer.natSize, renderSize: renderSize)
-        )
-        // Conjugate the AV top-left-origin mapping into CI's bottom-left space.
-        let ci = flipY(srcHeight).concatenating(av).concatenating(flipY(renderSize.height))
-        image = image.transformed(by: ci)
+        if let quad = clip.cornerPinQuad(at: frame) {
+            // Source rotation metadata still applies; the pin then places the upright frame.
+            if !layer.preferredTransform.isIdentity {
+                image = image.transformed(by: flipY(srcHeight)
+                    .concatenating(layer.preferredTransform)
+                    .concatenating(flipY(layer.natSize.height)))
+            }
+            guard let pinned = cornerPinned(image, quad: quad, renderSize: renderSize) else { return nil }
+            image = pinned
+        } else {
+            let t = clip.transformAt(frame: frame)
+            let av = layer.preferredTransform.concatenating(
+                CompositionBuilder.affineTransform(for: t, natSize: layer.natSize, renderSize: renderSize)
+            )
+            // Conjugate the AV top-left-origin mapping into CI's bottom-left space.
+            let ci = flipY(srcHeight).concatenating(av).concatenating(flipY(renderSize.height))
+            image = image.transformed(by: ci)
+        }
         image = image.premultiplyingAlpha()
 
         if bakeOpacity, alpha < 1 {
@@ -315,6 +326,28 @@ enum FrameRenderer {
             ])
         }
         return image
+    }
+
+    /// Warps the layer onto its pin quad in canvas space, replacing the affine placement.
+    /// Nil when the quad collapsed — nothing visible to composite.
+    private static func cornerPinned(
+        _ image: CIImage,
+        quad: CornerPin.Quad,
+        renderSize: CGSize
+    ) -> CIImage? {
+        let extent = image.extent
+        guard extent.width >= 1, extent.height >= 1, !extent.isInfinite, !extent.isNull,
+              quad.isRenderable(in: renderSize) else { return nil }
+        // Canvas coords are top-left origin; CI's are bottom-left.
+        func vector(_ p: CGPoint) -> CIVector {
+            CIVector(x: p.x * renderSize.width, y: (1 - p.y) * renderSize.height)
+        }
+        return image.applyingFilter("CIPerspectiveTransform", parameters: [
+            "inputTopLeft": vector(quad.topLeft),
+            "inputTopRight": vector(quad.topRight),
+            "inputBottomRight": vector(quad.bottomRight),
+            "inputBottomLeft": vector(quad.bottomLeft),
+        ])
     }
 
     /// Text renders in place; effects run before rotation and opacity, matching visual clips.
@@ -337,7 +370,12 @@ enum FrameRenderer {
                 image = descriptor.render(image, effect: effect, atOffset: offset)
             }
         }
-        image = rotatedTextImage(image, clip: clip, frame: frame, renderSize: renderSize)
+        if let quad = clip.cornerPinQuad(at: frame) {
+            guard let pinned = cornerPinned(image, quad: quad, renderSize: renderSize) else { return nil }
+            image = pinned
+        } else {
+            image = rotatedTextImage(image, clip: clip, frame: frame, renderSize: renderSize)
+        }
         image = image.premultiplyingAlpha()
 
         if bakeOpacity, alpha < 1 {

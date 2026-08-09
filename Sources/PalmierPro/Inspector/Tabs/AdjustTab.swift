@@ -165,7 +165,7 @@ extension InspectorView {
 
     private var effectsEffectIds: Set<String> {
         Set((detailControls + blurControls + motionBlurControls + vignetteControls + grainControls + glowControls + warpControls + perspectiveControls + chromaKeyControls + subjectKeyControls + occlusionControls).map(\.effectId))
-            .union(["stylize.invert"])
+            .union(["stylize.invert", CornerPin.effectType])
     }
 
     @ViewBuilder
@@ -200,6 +200,7 @@ extension InspectorView {
                 adjustSubgroup(title: "Glow", controls: glowControls, clips: clips)
                 adjustSubgroup(title: "Warp", controls: warpControls, clips: clips)
                 adjustSubgroup(title: "Perspective", controls: perspectiveControls, clips: clips)
+                cornerPinRow(clips: clips)
                 adjustSubgroup(title: "Chroma Key", controls: chromaKeyControls, clips: clips)
                 adjustSubgroup(title: "Subject Key", controls: subjectKeyControls, clips: clips)
                 adjustSubgroup(title: "Behind Subject", controls: occlusionControls, clips: clips)
@@ -352,6 +353,44 @@ extension InspectorView {
                 .toggleStyle(.checkbox)
                 .labelsHidden()
                 .accessibilityLabel(title)
+        }
+        .padding(.leading, adjustSubgroupInset)
+    }
+
+    // MARK: Corner Pin
+
+    /// Corners are dragged on the canvas, so the inspector only arms the pin and stamps
+    /// keyframes — numeric rows here would overwrite the animation with a static value.
+    @ViewBuilder
+    private func cornerPinRow(clips: [Clip]) -> some View {
+        let clip = clips.count == 1 ? clips.first.flatMap { editor.clipFor(id: $0.id) } : nil
+        HStack(spacing: AppTheme.Spacing.xs) {
+            Color.clear
+                .frame(width: AppTheme.IconSize.xxs, height: AppTheme.IconSize.xxs)
+            adjustSubgroupTitleLabel(title: "Corner Pin")
+            Spacer(minLength: 0)
+            if let clip, clip.cornerPinEffect != nil {
+                Button { editor.stampCornerPinKeyframe(clipId: clip.id) } label: {
+                    Image(systemName: clip.isCornerPinAnimated ? "stopwatch.fill" : "stopwatch")
+                        .foregroundStyle(clip.isCornerPinAnimated ? AppTheme.Accent.primary : AppTheme.Text.secondaryColor)
+                }
+                .buttonStyle(.plain)
+                .disabled(!clip.contains(timelineFrame: editor.activeFrame))
+                .help("Keyframe the corners at the playhead")
+                .accessibilityLabel("Keyframe Corner Pin")
+            }
+            Toggle("", isOn: Binding(
+                get: { clip?.cornerPinEffect != nil },
+                set: { on in
+                    guard let clip else { return }
+                    if on { editor.addCornerPin(clipId: clip.id) } else { editor.removeCornerPin(clipId: clip.id) }
+                }
+            ))
+            .toggleStyle(.checkbox)
+            .labelsHidden()
+            .disabled(clip == nil)
+            .help(clip == nil ? "Select a single clip to pin its corners" : "Pin the clip's corners onto the canvas")
+            .accessibilityLabel("Corner Pin")
         }
         .padding(.leading, adjustSubgroupInset)
     }

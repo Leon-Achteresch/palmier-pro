@@ -1142,6 +1142,22 @@ enum ToolDefinitions {
             key.occlusion works on any overlay (text, image, video); frames with no detected person \
             composite normally. feather/expand tune the occlusion edge like key.subject.
 
+            SCREEN REPLACEMENT (distort.cornerPin): pins the clip's four corners to four points \
+            in CANVAS coordinates (0–1, top-left origin — the same space as set_keyframes position), \
+            like After Effects' Corner Pin. This is how you paste an image, video, or nested \
+            timeline onto a screen, phone display, sign, poster, or wall inside the shot so it reads \
+            as part of the scene. It REPLACES that clip's position/scale/rotation: the whole frame is \
+            warped onto the quad, so the transform is ignored while the pin is enabled (corners \
+            default to the full canvas). Put the overlay on a track ABOVE the plate.\n\
+            Workflow: inspect_timeline at the frame → read the surface's four corners off the \
+            rendered image → apply_effect with topLeftX/topLeftY/topRightX/topRightY/bottomRightX/\
+            bottomRightY/bottomLeftX/bottomLeftY → inspect_timeline again to check the fit and \
+            nudge. If the surface MOVES, keyframe all eight params on the same frames (sample the \
+            corners every few frames from inspect_timeline) and use 'linear' interp between tracking \
+            keyframes — eased corners read as a wobble against the plate. Add key.occlusion to the \
+            pinned clip when a hand or person passes in front of the surface, and blur.gaussian or \
+            color.* (via apply_color) to match the plate's softness and grade.
+
             Available effects — type: param (range, default):
             \(Self.effectCatalog())
             """,

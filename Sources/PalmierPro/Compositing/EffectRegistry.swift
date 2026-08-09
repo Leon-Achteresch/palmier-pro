@@ -344,6 +344,19 @@ enum EffectRegistry {
             }
         ),
         EffectDescriptor(
+            id: CornerPin.effectType, displayName: "Corner Pin", category: "Distort",
+            params: CornerPin.Corner.allCases.flatMap { corner in
+                [
+                    EffectParamSpec(key: corner.xKey, label: "\(corner.displayName) X",
+                                    range: CornerPin.range, defaultValue: corner.defaultPoint.x, unit: ""),
+                    EffectParamSpec(key: corner.yKey, label: "\(corner.displayName) Y",
+                                    range: CornerPin.range, defaultValue: corner.defaultPoint.y, unit: ""),
+                ]
+            },
+            // Placement, not a filter: FrameRenderer warps the layer onto the quad in canvas space.
+            apply: { image, _, _ in image }
+        ),
+        EffectDescriptor(
             id: "distort.perspective", displayName: "Perspective", category: "Distort",
             params: [
                 EffectParamSpec(key: "tiltX", label: "Tilt X", range: -80...80, defaultValue: 0, unit: "°"),
@@ -458,7 +471,8 @@ enum EffectRegistry {
         "color.hueCurves", "color.lut", "detail.clarity", "key.chroma", "key.subject", "key.occlusion",
         "blur.gaussian", "blur.sharpen",
         "blur.noiseReduction", "blur.motion", "stylize.invert", "stylize.grain", "stylize.vignette",
-        "stylize.glow", "distort.warp", "distort.perspective", "mockup.iphone17", "mockup.macbook",
+        "stylize.glow", "distort.warp", "distort.perspective", CornerPin.effectType,
+        "mockup.iphone17", "mockup.macbook",
     ]
 
     static func insertIndex(_ effects: [Effect], for id: String) -> Int {

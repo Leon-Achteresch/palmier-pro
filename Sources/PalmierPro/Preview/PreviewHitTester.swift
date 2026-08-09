@@ -45,6 +45,10 @@ enum PreviewHitTester {
         videoRect: CGRect,
         crop: Crop?
     ) -> Bool {
+        if let quad = clip.cornerPinQuad(at: frame) {
+            return quad.contains(point, in: videoRect)
+        }
+
         let t = clip.transformAt(frame: frame)
         let rect = clipFrame(t, videoRect: videoRect)
         guard rect.width > 0, rect.height > 0 else { return false }

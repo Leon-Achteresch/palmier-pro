@@ -42,6 +42,8 @@ struct PreviewContainerView: View {
                         ChromaKeySamplerOverlayView()
                     } else if editor.cropEditingActive {
                         CropOverlayView()
+                    } else if editor.cornerPinnedClip != nil {
+                        CornerPinOverlayView()
                     } else {
                         TransformOverlayView()
                     }
