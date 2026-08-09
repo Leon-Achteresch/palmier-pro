@@ -33,7 +33,8 @@ extension ToolExecutor {
             width: args.int("width") ?? editor.timeline.width,
             height: args.int("height") ?? editor.timeline.height,
             fps: fps,
-            durationInFrames: args.int("durationInFrames") ?? Int((fps * 5).rounded())
+            durationInFrames: args.int("durationInFrames") ?? Int((fps * 5).rounded()),
+            runtime: try Self.runtime(from: args) ?? .web
         )
 
         let committedURL = try await stageRenderAndCommit(editor, scene: scene, filename: Self.filename(for: name))
@@ -68,7 +69,8 @@ extension ToolExecutor {
             width: args.int("width") ?? existing.width,
             height: args.int("height") ?? existing.height,
             fps: args.double("fps") ?? existing.fps,
-            durationInFrames: args.int("durationInFrames") ?? existing.durationInFrames
+            durationInFrames: args.int("durationInFrames") ?? existing.durationInFrames,
+            runtime: try Self.runtime(from: args) ?? existing.runtime
         )
         guard updated != existing else {
             return .ok(Self.receipt(mediaRef: asset.id, name: asset.name, scene: existing, created: false, unchanged: true))
@@ -119,12 +121,23 @@ extension ToolExecutor {
         return url
     }
 
+    private static func runtime(from args: [String: Any]) throws -> MotionSceneRuntime? {
+        guard let raw = args.string("runtime") else { return nil }
+        guard let runtime = MotionSceneRuntime(rawValue: raw) else {
+            throw ToolError(
+                "Unknown runtime '\(raw)'. Use \(MotionSceneRuntime.allCases.map(\.rawValue).joined(separator: " or "))."
+            )
+        }
+        return runtime
+    }
+
     private static func makeScene(
         source: String,
         width: Int,
         height: Int,
         fps: Double,
-        durationInFrames: Int
+        durationInFrames: Int,
+        runtime: MotionSceneRuntime
     ) throws -> MotionScene {
         do {
             return try MotionScene(
@@ -132,7 +145,8 @@ extension ToolExecutor {
                 height: height,
                 fps: fps,
                 durationInFrames: durationInFrames,
-                source: source
+                source: source,
+                runtime: runtime
             ).validated()
         } catch {
             throw ToolError(error.localizedDescription)

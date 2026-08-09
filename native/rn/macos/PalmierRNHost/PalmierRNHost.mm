@@ -92,6 +92,7 @@ static void clearHostBackgrounds(NSView *view) {
 
 - (void)startWithSceneSource:(NSString *)source
                          fps:(double)fps
+            durationInFrames:(NSInteger)durationInFrames
                   completion:(void (^)(NSError *_Nullable))completion {
   NSAssert(NSThread.isMainThread, @"React Native must be started on the main thread");
 
@@ -111,7 +112,13 @@ static void clearHostBackgrounds(NSView *view) {
     _factory = [[RCTReactNativeFactory alloc] initWithDelegate:_delegate];
     [_factory startReactNativeWithModuleName:@"PalmierScene"
                                     inWindow:_window
-                           initialProperties:@{@"source": source, @"fps": @(fps)}
+                           initialProperties:@{
+                             @"source": source,
+                             @"fps": @(fps),
+                             @"width": @(_size.width),
+                             @"height": @(_size.height),
+                             @"durationInFrames": @(durationInFrames)
+                           }
                                launchOptions:nil];
   } @catch (NSException *exception) {
     completion([NSError errorWithDomain:@"PalmierRNHost"

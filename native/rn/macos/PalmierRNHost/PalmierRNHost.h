@@ -20,6 +20,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)startWithSceneSource:(NSString *)source
                          fps:(double)fps
+            durationInFrames:(NSInteger)durationInFrames
                   completion:(void (^)(NSError *_Nullable error))completion;
 - (void)seekToMilliseconds:(double)milliseconds;
 

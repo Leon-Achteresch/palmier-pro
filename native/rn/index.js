@@ -4,6 +4,8 @@ import { AppRegistry, View } from "react-native"
 import registerCallableModule from "react-native/Libraries/Core/registerCallableModule"
 import { transform } from "sucrase"
 
+import * as Palmier from "../../runtime/palmier"
+
 const timeListeners = new Set()
 let currentTimeMs = 0
 let fps = 30
@@ -27,12 +29,17 @@ function useSceneFrame() {
   return Math.round(useSceneTime() * fps)
 }
 
-const PalmierMotion = { useSceneTime, useSceneFrame }
+function AbsoluteFill({ style, children, ...rest }) {
+  return React.createElement(View, { style: [Palmier.ABSOLUTE_FILL_STYLE, style], ...rest }, children)
+}
+
+const PalmierMotion = { ...Palmier, AbsoluteFill, useSceneTime, useSceneFrame }
 
 const MODULES = {
   react: React,
   React,
   "react-native": ReactNative,
+  palmier: PalmierMotion,
 }
 
 let sceneError = null
@@ -97,12 +104,27 @@ function Root(props) {
 
   if (props.fps > 0) fps = props.fps
 
+  const frame = useSceneFrame()
+  const config = React.useMemo(
+    () => ({
+      fps,
+      width: props.width ?? 0,
+      height: props.height ?? 0,
+      durationInFrames: props.durationInFrames ?? 0,
+    }),
+    [props.width, props.height, props.durationInFrames],
+  )
+
   return (
     <View style={{ flex: 1 }}>
       {Scene ? (
-        <SceneBoundary>
-          <Scene />
-        </SceneBoundary>
+        <Palmier.PalmierInternals.ConfigContext.Provider value={config}>
+          <Palmier.PalmierInternals.TimelineContext.Provider value={{ frame }}>
+            <SceneBoundary>
+              <Scene />
+            </SceneBoundary>
+          </Palmier.PalmierInternals.TimelineContext.Provider>
+        </Palmier.PalmierInternals.ConfigContext.Provider>
       ) : null}
     </View>
   )
@@ -123,6 +145,14 @@ global.__motion = {
   status() {
     return { ok: sceneError === null, error: sceneError }
   },
+}
+
+// The native animation driver runs off CADisplayLink, which an offscreen surface never receives —
+// those animations would freeze. Forcing the JS driver puts every Animated value on the virtual clock.
+const nativeDriverProps = ["timing", "spring", "decay"]
+for (const name of nativeDriverProps) {
+  const original = ReactNative.Animated[name]
+  ReactNative.Animated[name] = (value, config) => original(value, { ...config, useNativeDriver: false })
 }
 
 // The bake driver reaches the timeline through this; there is no display link offscreen.

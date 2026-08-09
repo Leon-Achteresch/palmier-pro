@@ -118,8 +118,14 @@ final class MotionSceneRenderer: NSObject, WKNavigationDelegate {
     func load(scene: MotionScene) async throws {
         try await waitForPageLoad()
         let result = try await callJS(
-            "return await window.__motion.load(source, { fps })",
-            arguments: ["source": scene.source, "fps": scene.fps]
+            "return await window.__motion.load(source, { fps, width, height, durationInFrames })",
+            arguments: [
+                "source": scene.source,
+                "fps": scene.fps,
+                "width": scene.width,
+                "height": scene.height,
+                "durationInFrames": scene.durationInFrames,
+            ]
         )
         guard let payload = result as? [String: Any] else {
             throw MotionSceneError.sceneFailed("the motion runtime returned no result")

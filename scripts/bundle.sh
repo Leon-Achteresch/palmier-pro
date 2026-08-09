@@ -97,6 +97,14 @@ inject_plist PalmierConvexHttpURL "${CONVEX_HTTP_URL:-}"
 cp "$RESOURCES/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 cp -R "$SPARKLE_FW" "$APP/Contents/Frameworks/Sparkle.framework"
 
+# Hermes ships as a dylib, so a React Native build only launches if it is embedded and signed.
+HERMES_FW="$ROOT/native/rn/build/hermes.framework"
+if otool -L "$BIN" | grep -q "hermes.framework"; then
+  [ -d "$HERMES_FW" ] || { echo "binary links Hermes but $HERMES_FW is missing — run native/rn/build-host.sh"; exit 1; }
+  echo "==> Embedding hermes.framework"
+  cp -R "$HERMES_FW" "$APP/Contents/Frameworks/hermes.framework"
+fi
+
 # Flatten SwiftPM's resource bundle into the app's Resources tree.
 RES_BUNDLE="$(dirname "$BIN")/PalmierPro_PalmierPro.bundle"
 if [ -d "$RES_BUNDLE/Fonts" ]; then
@@ -232,6 +240,13 @@ echo "==> Codesigning Sparkle framework"
 codesign --force --options runtime --timestamp \
   --sign "$SIGNING_IDENTITY" \
   "$APP/Contents/Frameworks/Sparkle.framework"
+
+if [ -d "$APP/Contents/Frameworks/hermes.framework" ]; then
+  echo "==> Codesigning Hermes framework"
+  codesign --force --options runtime --timestamp \
+    --sign "$SIGNING_IDENTITY" \
+    "$APP/Contents/Frameworks/hermes.framework"
+fi
 
 echo "==> Embedding provisioning profile + keychain access group"
 if [ ! -f "$PROVISION_PROFILE" ]; then

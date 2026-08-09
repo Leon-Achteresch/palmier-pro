@@ -31,7 +31,11 @@ final class ReactNativeSceneRenderer: MotionSceneRendering {
 
     func load(scene: MotionScene) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-            surface.start(withSceneSource: scene.source, fps: scene.fps) { error in
+            surface.start(
+                withSceneSource: scene.source,
+                fps: scene.fps,
+                durationInFrames: scene.durationInFrames
+            ) { error in
                 if let error { continuation.resume(throwing: MotionSceneError.sceneFailed(error.localizedDescription)) }
                 else { continuation.resume() }
             }

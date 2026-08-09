@@ -1,5 +1,9 @@
 import AppKit
 
+if let sceneURL = MotionSceneBakeCommand.sceneURL(from: CommandLine.arguments) {
+    MotionSceneBakeCommand.run(sceneURL: sceneURL)
+}
+
 Log.bootstrap()
 Telemetry.start()
 Analytics.start()

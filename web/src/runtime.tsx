@@ -9,6 +9,8 @@ import { transform } from "sucrase"
 import { compile } from "tailwindcss"
 import { cn } from "@/lib/utils"
 
+import * as Palmier from "palmier-runtime"
+
 import twIndex from "tailwindcss/index.css?raw"
 import twPreflight from "tailwindcss/preflight.css?raw"
 import twTheme from "tailwindcss/theme.css?raw"
@@ -45,8 +47,19 @@ const uiModules = import.meta.glob("./components/ui/*.tsx", { eager: true }) as 
   Record<string, unknown>
 >
 
+function AbsoluteFill({ style, children, ...rest }: React.ComponentProps<"div">) {
+  return (
+    <div style={{ ...Palmier.ABSOLUTE_FILL_STYLE, ...style } as React.CSSProperties} {...rest}>
+      {children}
+    </div>
+  )
+}
+
+const PalmierAPI = { ...Palmier, AbsoluteFill }
+
 const UI: Record<string, unknown> = {}
 const MODULES: Record<string, unknown> = {
+  palmier: PalmierAPI,
   react: React,
   "react-dom": ReactDOM,
   "react-dom/client": { createRoot },
@@ -112,6 +125,21 @@ function recordError(error: unknown) {
 window.__recordError = recordError
 window.addEventListener("error", (event) => recordError(event.error ?? event.message))
 window.addEventListener("unhandledrejection", (event) => recordError(event.reason))
+
+let sceneConfig = { fps: 30, width: 0, height: 0, durationInFrames: 0 }
+
+function SceneHost({ Scene }: { Scene: React.ComponentType }) {
+  const frame = useSceneFrame()
+  return (
+    <Palmier.PalmierInternals.ConfigContext.Provider value={sceneConfig}>
+      <Palmier.PalmierInternals.TimelineContext.Provider value={{ frame }}>
+        <SceneBoundary>
+          <Scene />
+        </SceneBoundary>
+      </Palmier.PalmierInternals.TimelineContext.Provider>
+    </Palmier.PalmierInternals.ConfigContext.Provider>
+  )
+}
 
 class SceneBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
   state = { failed: false }
@@ -187,6 +215,7 @@ function evaluate(source: string) {
   }
   const factory = new Function("require", "exports", "module", "React", "UI", "PalmierMotion", code)
   factory(requireShim, moduleExports, { exports: moduleExports }, React, UI, {
+    ...PalmierAPI,
     useSceneTime,
     useSceneFrame,
   })
@@ -209,11 +238,26 @@ function fontsSettled() {
 }
 
 const api = {
-  async load(source: string, options: { fps?: number; seed?: number } = {}) {
+  async load(
+    source: string,
+    options: {
+      fps?: number
+      seed?: number
+      width?: number
+      height?: number
+      durationInFrames?: number
+    } = {},
+  ) {
     sceneError = null
     seenCandidates.clear()
     currentTimeMs = 0
     fps = options.fps && options.fps > 0 ? options.fps : 30
+    sceneConfig = {
+      fps,
+      width: options.width ?? 0,
+      height: options.height ?? 0,
+      durationInFrames: options.durationInFrames ?? 0,
+    }
     window.__clock.seedRandom(options.seed ?? 0x9e3779b9)
     window.__clock.set(0)
 
@@ -226,11 +270,7 @@ const api = {
       container.innerHTML = ""
       root = createRoot(container, { onUncaughtError: recordError, onCaughtError: recordError })
       flushSync(() => {
-        root!.render(
-          <SceneBoundary>
-            <Scene />
-          </SceneBoundary>,
-        )
+        root!.render(<SceneHost Scene={Scene} />)
       })
       flushStyles()
       await fontsSettled()

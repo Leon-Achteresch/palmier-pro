@@ -38,7 +38,13 @@ function classicScript(): Plugin {
 export default defineConfig({
   plugins: [react(), viteSingleFile(), classicScript()],
   resolve: {
-    alias: { "@": path.resolve(__dirname, "./src") },
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+      // Shared verbatim with the React Native runtime so both speak the same scene API.
+      "palmier-runtime": path.resolve(__dirname, "../runtime/palmier.js"),
+      // The shared file lives outside this root, so it cannot resolve React on its own.
+      react: path.resolve(__dirname, "node_modules/react"),
+    },
   },
   define: { "process.env.NODE_ENV": '"production"' },
   build: {

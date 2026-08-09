@@ -1030,6 +1030,11 @@ enum ToolDefinitions {
                     "name": ["type": "string", "description": "Display name in the media library, e.g. 'Pricing Table Reveal'."],
                     "folderId": ["type": "string", "description": "Optional media folder to file the new scene under."],
                     "source": ["type": "string", "description": "The TSX module. Must `export default` a React component. Required for 'create'; on 'update' omit it to keep the current source and only change timing or size."],
+                    "runtime": [
+                        "type": "string",
+                        "enum": ["web", "react-native"],
+                        "description": "Which renderer draws the scene. 'web' (default) is React + Motion + shadcn/ui + Tailwind in a browser engine — use it for titles, kinetic type, dashboards and anything that should look like a web UI. 'react-native' renders real React Native views through Yoga and Fabric: import from `react-native` (View, Text, Image, StyleSheet, Animated) instead of DOM elements, style with the `style` prop rather than Tailwind classes, and expect React Native's flexbox defaults (column direction, no CSS cascade). Use it when the scene must mirror a real iOS/Android app's layout and look. Tailwind, shadcn/ui and lucide-react are NOT available in 'react-native'; `PalmierMotion.useSceneTime()` and `useSceneFrame()` work in both.",
+                    ],
                     "width": ["type": "integer", "description": "Render width in pixels (16–4096). Defaults to the project width."],
                     "height": ["type": "integer", "description": "Render height in pixels (16–4096). Defaults to the project height."],
                     "fps": ["type": "number", "description": "Frames per second (1–120). Defaults to the project fps. Match the timeline unless the scene needs to be smoother."],
