@@ -5,21 +5,36 @@ extension ToolExecutor {
 
     private static let motionSceneAllowedKeys: Set<String> = [
         "action", "mediaRef", "name", "folderId", "source", "width", "height", "fps", "durationInFrames",
+        "runtime",
     ]
 
     func manageMotionScene(_ editor: EditorViewModel, _ args: [String: Any]) async throws -> ToolResult {
         if let unknown = args.keys.first(where: { !Self.motionSceneAllowedKeys.contains($0) }) {
             throw ToolError("Unknown parameter '\(unknown)'. Allowed: \(Self.motionSceneAllowedKeys.sorted().joined(separator: ", "))")
         }
+        let action = try args.requireString("action")
+        if action == "components" { return .ok(try await Self.componentCatalog()) }
+
         guard editor.projectURL != nil else {
             throw ToolError("No project is open; cannot author a motion scene")
         }
-        let action = try args.requireString("action")
         switch action {
         case "create": return try await createMotionScene(editor, args)
         case "update": return try await updateMotionScene(editor, args)
-        default: throw ToolError("Unknown action '\(action)'. Use 'create' or 'update'.")
+        default: throw ToolError("Unknown action '\(action)'. Use 'create', 'update' or 'components'.")
         }
+    }
+
+    /// The prebuilt component library the web runtime ships, as module path to exported components.
+    private static func componentCatalog() async throws -> String {
+        try await Task.detached(priority: .userInitiated) {
+            guard let url = BundledResource.url("MotionRuntime/components.json"),
+                  let catalog = try? String(contentsOf: url, encoding: .utf8)
+            else {
+                throw ToolError("The motion component catalog is missing from this build")
+            }
+            return catalog
+        }.value
     }
 
     // MARK: - Create

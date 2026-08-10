@@ -49,7 +49,7 @@ struct CornerPinModelTests {
         (CornerPin.Quad.canvas, true),
         (CornerPin.Quad(rect: CGRect(x: 0.2, y: 0.2, width: 0, height: 0.5)), false),
         (CornerPin.Quad(topLeft: .zero, topRight: CGPoint(x: 1, y: 0),
-                        bottomRight: CGPoint(x: 1, y: .nan), bottomLeft: CGPoint(x: 0, y: 1)), false),
+                        bottomRight: CGPoint(x: 1, y: CGFloat.nan), bottomLeft: CGPoint(x: 0, y: 1)), false),
     ])
     func collapsedOrNonFiniteQuadsAreNotRenderable(quad: CornerPin.Quad, renderable: Bool) {
         #expect(quad.isRenderable(in: CGSize(width: 320, height: 180)) == renderable)

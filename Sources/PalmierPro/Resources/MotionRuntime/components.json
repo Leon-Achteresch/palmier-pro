@@ -1,0 +1,800 @@
+{
+  "@/components/remocn/accordion": [
+    "Accordion"
+  ],
+  "@/components/remocn/ai-prompt-flow": [
+    "AiPromptFlow"
+  ],
+  "@/components/remocn/alert-dialog": [
+    "AlertDialog"
+  ],
+  "@/components/remocn/animated-bar-chart": [
+    "AnimatedBarChart"
+  ],
+  "@/components/remocn/animated-line-chart": [
+    "AnimatedLineChart"
+  ],
+  "@/components/remocn/backdrop": [
+    "Backdrop"
+  ],
+  "@/components/remocn/blur-in": [
+    "BlurIn"
+  ],
+  "@/components/remocn/blur-out-up": [
+    "BlurOutUp"
+  ],
+  "@/components/remocn/bottom-up-letters": [
+    "BottomUpLetters"
+  ],
+  "@/components/remocn/button": [
+    "Button"
+  ],
+  "@/components/remocn/caret": [
+    "Caret"
+  ],
+  "@/components/remocn/chat-flow": [
+    "ChatFlow"
+  ],
+  "@/components/remocn/chat-gpt": [
+    "THEMES",
+    "TYPING_START_FRAME",
+    "TYPING_CPS",
+    "ChatGpt"
+  ],
+  "@/components/remocn/chat-to-preview-layout": [
+    "ChatToPreviewLayout"
+  ],
+  "@/components/remocn/checkbox": [
+    "Checkbox"
+  ],
+  "@/components/remocn/checkout-flow": [
+    "CheckoutFlow"
+  ],
+  "@/components/remocn/claude-chat": [
+    "THEMES",
+    "TYPING_START_FRAME",
+    "TYPING_CPS",
+    "ClaudeChat"
+  ],
+  "@/components/remocn/claude-code": [
+    "THEMES",
+    "TYPING_START_FRAME",
+    "TYPING_CPS",
+    "WHATS_NEW",
+    "ClaudeCode"
+  ],
+  "@/components/remocn/combobox": [
+    "Combobox"
+  ],
+  "@/components/remocn/command-menu-item": [
+    "CommandMenuItemRow",
+    "CommandMenuItem"
+  ],
+  "@/components/remocn/command-menu": [
+    "CommandMenu"
+  ],
+  "@/components/remocn/confetti": [
+    "Confetti"
+  ],
+  "@/components/remocn/context-menu": [
+    "ContextMenu"
+  ],
+  "@/components/remocn/cursor": [
+    "Cursor"
+  ],
+  "@/components/remocn/data-flow-pipes": [
+    "DataFlowPipes"
+  ],
+  "@/components/remocn/dialog": [
+    "Dialog"
+  ],
+  "@/components/remocn/drawer": [
+    "Drawer"
+  ],
+  "@/components/remocn/drift": [
+    "Drift"
+  ],
+  "@/components/remocn/dropdown-menu-item": [
+    "DropdownMenuItemRow",
+    "DropdownMenuItem"
+  ],
+  "@/components/remocn/dropdown-menu": [
+    "DropdownMenu"
+  ],
+  "@/components/remocn/ecosystem-constellation": [
+    "EcosystemConstellation"
+  ],
+  "@/components/remocn/fade-through": [
+    "FadeThrough"
+  ],
+  "@/components/remocn/field": [
+    "FieldGroup",
+    "Field",
+    "FieldLabel",
+    "FieldDescription",
+    "FieldControl"
+  ],
+  "@/components/remocn/focus-blur-resolve": [
+    "FocusBlurResolve"
+  ],
+  "@/components/remocn/github-sponsors": [
+    "SAMPLE_SPONSORS",
+    "GitHubSponsors"
+  ],
+  "@/components/remocn/github-stars": [
+    "SAMPLE_STARGAZERS",
+    "GitHubStars"
+  ],
+  "@/components/remocn/glass-code-block": [
+    "Hero",
+    "GlassCodeBlock"
+  ],
+  "@/components/remocn/glass-code-walk": [
+    "Intro",
+    "GlassCodeWalk"
+  ],
+  "@/components/remocn/icon-activity": [
+    "ActivityIcon",
+    "ActivityIconStatic"
+  ],
+  "@/components/remocn/icon-alert-triangle": [
+    "AlertTriangleIcon",
+    "AlertTriangleIconStatic"
+  ],
+  "@/components/remocn/icon-arrow-down": [
+    "ArrowDownIcon",
+    "ArrowDownIconStatic"
+  ],
+  "@/components/remocn/icon-arrow-left": [
+    "ArrowLeftIcon",
+    "ArrowLeftIconStatic"
+  ],
+  "@/components/remocn/icon-arrow-right": [
+    "ArrowRightIcon",
+    "ArrowRightIconStatic"
+  ],
+  "@/components/remocn/icon-arrow-up": [
+    "ArrowUpIcon",
+    "ArrowUpIconStatic"
+  ],
+  "@/components/remocn/icon-at-sign": [
+    "AtSignIcon",
+    "AtSignIconStatic"
+  ],
+  "@/components/remocn/icon-award": [
+    "AwardIcon",
+    "AwardIconStatic"
+  ],
+  "@/components/remocn/icon-bar-chart-3": [
+    "BarChart3Icon",
+    "BarChart3IconStatic"
+  ],
+  "@/components/remocn/icon-bell": [
+    "BellIcon",
+    "BellIconStatic"
+  ],
+  "@/components/remocn/icon-bookmark": [
+    "BookmarkIcon",
+    "BookmarkIconStatic"
+  ],
+  "@/components/remocn/icon-calendar": [
+    "CalendarIcon",
+    "CalendarIconStatic"
+  ],
+  "@/components/remocn/icon-camera": [
+    "CameraIcon",
+    "CameraIconStatic"
+  ],
+  "@/components/remocn/icon-check-circle": [
+    "CheckCircleIcon",
+    "CheckCircleIconStatic"
+  ],
+  "@/components/remocn/icon-check": [
+    "CheckIcon",
+    "CheckIconStatic"
+  ],
+  "@/components/remocn/icon-chevron-down": [
+    "ChevronDownIcon",
+    "ChevronDownIconStatic"
+  ],
+  "@/components/remocn/icon-chevron-left": [
+    "ChevronLeftIcon",
+    "ChevronLeftIconStatic"
+  ],
+  "@/components/remocn/icon-chevron-right": [
+    "ChevronRightIcon",
+    "ChevronRightIconStatic"
+  ],
+  "@/components/remocn/icon-chevron-up": [
+    "ChevronUpIcon",
+    "ChevronUpIconStatic"
+  ],
+  "@/components/remocn/icon-clock": [
+    "ClockIcon",
+    "ClockIconStatic"
+  ],
+  "@/components/remocn/icon-cloud": [
+    "CloudIcon",
+    "CloudIconStatic"
+  ],
+  "@/components/remocn/icon-code": [
+    "CodeIcon",
+    "CodeIconStatic"
+  ],
+  "@/components/remocn/icon-copy": [
+    "CopyIcon",
+    "CopyIconStatic"
+  ],
+  "@/components/remocn/icon-credit-card": [
+    "CreditCardIcon",
+    "CreditCardIconStatic"
+  ],
+  "@/components/remocn/icon-crown": [
+    "CrownIcon",
+    "CrownIconStatic"
+  ],
+  "@/components/remocn/icon-database": [
+    "DatabaseIcon",
+    "DatabaseIconStatic"
+  ],
+  "@/components/remocn/icon-dollar-sign": [
+    "DollarSignIcon",
+    "DollarSignIconStatic"
+  ],
+  "@/components/remocn/icon-download": [
+    "DownloadIcon",
+    "DownloadIconStatic"
+  ],
+  "@/components/remocn/icon-external-link": [
+    "ExternalLinkIcon",
+    "ExternalLinkIconStatic"
+  ],
+  "@/components/remocn/icon-eye-off": [
+    "EyeOffIcon",
+    "EyeOffIconStatic"
+  ],
+  "@/components/remocn/icon-eye": [
+    "EyeIcon",
+    "EyeIconStatic"
+  ],
+  "@/components/remocn/icon-file-text": [
+    "FileTextIcon",
+    "FileTextIconStatic"
+  ],
+  "@/components/remocn/icon-filter": [
+    "FilterIcon",
+    "FilterIconStatic"
+  ],
+  "@/components/remocn/icon-flame": [
+    "FlameIcon",
+    "FlameIconStatic"
+  ],
+  "@/components/remocn/icon-folder": [
+    "FolderIcon",
+    "FolderIconStatic"
+  ],
+  "@/components/remocn/icon-gem": [
+    "GemIcon",
+    "GemIconStatic"
+  ],
+  "@/components/remocn/icon-gift": [
+    "GiftIcon",
+    "GiftIconStatic"
+  ],
+  "@/components/remocn/icon-globe": [
+    "GlobeIcon",
+    "GlobeIconStatic"
+  ],
+  "@/components/remocn/icon-heart": [
+    "HeartIcon",
+    "HeartIconStatic"
+  ],
+  "@/components/remocn/icon-help-circle": [
+    "HelpCircleIcon",
+    "HelpCircleIconStatic"
+  ],
+  "@/components/remocn/icon-home": [
+    "HomeIcon",
+    "HomeIconStatic"
+  ],
+  "@/components/remocn/icon-image": [
+    "ImageIcon",
+    "ImageIconStatic"
+  ],
+  "@/components/remocn/icon-inbox": [
+    "InboxIcon",
+    "InboxIconStatic"
+  ],
+  "@/components/remocn/icon-info": [
+    "InfoIcon",
+    "InfoIconStatic"
+  ],
+  "@/components/remocn/icon-key": [
+    "KeyIcon",
+    "KeyIconStatic"
+  ],
+  "@/components/remocn/icon-layout-grid": [
+    "LayoutGridIcon",
+    "LayoutGridIconStatic"
+  ],
+  "@/components/remocn/icon-link": [
+    "LinkIcon",
+    "LinkIconStatic"
+  ],
+  "@/components/remocn/icon-loader": [
+    "LoaderIcon",
+    "LoaderIconStatic"
+  ],
+  "@/components/remocn/icon-lock": [
+    "LockIcon",
+    "LockIconStatic"
+  ],
+  "@/components/remocn/icon-log-out": [
+    "LogOutIcon",
+    "LogOutIconStatic"
+  ],
+  "@/components/remocn/icon-mail": [
+    "MailIcon",
+    "MailIconStatic"
+  ],
+  "@/components/remocn/icon-maximize": [
+    "MaximizeIcon",
+    "MaximizeIconStatic"
+  ],
+  "@/components/remocn/icon-menu": [
+    "MenuIcon",
+    "MenuIconStatic"
+  ],
+  "@/components/remocn/icon-message-circle": [
+    "MessageCircleIcon",
+    "MessageCircleIconStatic"
+  ],
+  "@/components/remocn/icon-mic": [
+    "MicIcon",
+    "MicIconStatic"
+  ],
+  "@/components/remocn/icon-monitor": [
+    "MonitorIcon",
+    "MonitorIconStatic"
+  ],
+  "@/components/remocn/icon-moon": [
+    "MoonIcon",
+    "MoonIconStatic"
+  ],
+  "@/components/remocn/icon-more-horizontal": [
+    "MoreHorizontalIcon",
+    "MoreHorizontalIconStatic"
+  ],
+  "@/components/remocn/icon-package": [
+    "PackageIcon",
+    "PackageIconStatic"
+  ],
+  "@/components/remocn/icon-party-popper": [
+    "PartyPopperIcon",
+    "PartyPopperIconStatic"
+  ],
+  "@/components/remocn/icon-pause": [
+    "PauseIcon",
+    "PauseIconStatic"
+  ],
+  "@/components/remocn/icon-pencil": [
+    "PencilIcon",
+    "PencilIconStatic"
+  ],
+  "@/components/remocn/icon-phone": [
+    "PhoneIcon",
+    "PhoneIconStatic"
+  ],
+  "@/components/remocn/icon-play": [
+    "PlayIcon",
+    "PlayIconStatic"
+  ],
+  "@/components/remocn/icon-plus-circle": [
+    "PlusCircleIcon",
+    "PlusCircleIconStatic"
+  ],
+  "@/components/remocn/icon-plus": [
+    "PlusIcon",
+    "PlusIconStatic"
+  ],
+  "@/components/remocn/icon-refresh-cw": [
+    "RefreshCwIcon",
+    "RefreshCwIconStatic"
+  ],
+  "@/components/remocn/icon-rocket": [
+    "RocketIcon",
+    "RocketIconStatic"
+  ],
+  "@/components/remocn/icon-save": [
+    "SaveIcon",
+    "SaveIconStatic"
+  ],
+  "@/components/remocn/icon-search": [
+    "SearchIcon",
+    "SearchIconStatic"
+  ],
+  "@/components/remocn/icon-send": [
+    "SendIcon",
+    "SendIconStatic"
+  ],
+  "@/components/remocn/icon-settings": [
+    "SettingsIcon",
+    "SettingsIconStatic"
+  ],
+  "@/components/remocn/icon-share-2": [
+    "Share2Icon",
+    "Share2IconStatic"
+  ],
+  "@/components/remocn/icon-shield": [
+    "ShieldIcon",
+    "ShieldIconStatic"
+  ],
+  "@/components/remocn/icon-shopping-cart": [
+    "ShoppingCartIcon",
+    "ShoppingCartIconStatic"
+  ],
+  "@/components/remocn/icon-skip-forward": [
+    "SkipForwardIcon",
+    "SkipForwardIconStatic"
+  ],
+  "@/components/remocn/icon-smartphone": [
+    "SmartphoneIcon",
+    "SmartphoneIconStatic"
+  ],
+  "@/components/remocn/icon-sparkles": [
+    "SparklesIcon",
+    "SparklesIconStatic"
+  ],
+  "@/components/remocn/icon-star": [
+    "StarIcon",
+    "StarIconStatic"
+  ],
+  "@/components/remocn/icon-sun": [
+    "SunIcon",
+    "SunIconStatic"
+  ],
+  "@/components/remocn/icon-tag": [
+    "TagIcon",
+    "TagIconStatic"
+  ],
+  "@/components/remocn/icon-target": [
+    "TargetIcon",
+    "TargetIconStatic"
+  ],
+  "@/components/remocn/icon-terminal": [
+    "TerminalIcon",
+    "TerminalIconStatic"
+  ],
+  "@/components/remocn/icon-thumbs-up": [
+    "ThumbsUpIcon",
+    "ThumbsUpIconStatic"
+  ],
+  "@/components/remocn/icon-timer": [
+    "TimerIcon",
+    "TimerIconStatic"
+  ],
+  "@/components/remocn/icon-trash": [
+    "TrashIcon",
+    "TrashIconStatic"
+  ],
+  "@/components/remocn/icon-trending-down": [
+    "TrendingDownIcon",
+    "TrendingDownIconStatic"
+  ],
+  "@/components/remocn/icon-trending-up": [
+    "TrendingUpIcon",
+    "TrendingUpIconStatic"
+  ],
+  "@/components/remocn/icon-trophy": [
+    "TrophyIcon",
+    "TrophyIconStatic"
+  ],
+  "@/components/remocn/icon-upload": [
+    "UploadIcon",
+    "UploadIconStatic"
+  ],
+  "@/components/remocn/icon-user-plus": [
+    "UserPlusIcon",
+    "UserPlusIconStatic"
+  ],
+  "@/components/remocn/icon-user": [
+    "UserIcon",
+    "UserIconStatic"
+  ],
+  "@/components/remocn/icon-users": [
+    "UsersIcon",
+    "UsersIconStatic"
+  ],
+  "@/components/remocn/icon-video": [
+    "VideoIcon",
+    "VideoIconStatic"
+  ],
+  "@/components/remocn/icon-volume-2": [
+    "Volume2Icon",
+    "Volume2IconStatic"
+  ],
+  "@/components/remocn/icon-volume-x": [
+    "VolumeXIcon",
+    "VolumeXIconStatic"
+  ],
+  "@/components/remocn/icon-wallet": [
+    "WalletIcon",
+    "WalletIconStatic"
+  ],
+  "@/components/remocn/icon-x-circle": [
+    "XCircleIcon",
+    "XCircleIconStatic"
+  ],
+  "@/components/remocn/icon-x": [
+    "XIcon",
+    "XIconStatic"
+  ],
+  "@/components/remocn/icon-zap": [
+    "ZapIcon",
+    "ZapIconStatic"
+  ],
+  "@/components/remocn/imessage-chat-flow": [
+    "ImessageChatFlow"
+  ],
+  "@/components/remocn/infinite-bento-pan": [
+    "InfiniteBentoPan"
+  ],
+  "@/components/remocn/infinite-marquee": [
+    "InfiniteMarquee"
+  ],
+  "@/components/remocn/inline-highlight": [
+    "InlineHighlight"
+  ],
+  "@/components/remocn/input": [
+    "Input"
+  ],
+  "@/components/remocn/kinetic-center-build": [
+    "KineticCenterBuild"
+  ],
+  "@/components/remocn/line-by-line-slide": [
+    "LineByLineSlide"
+  ],
+  "@/components/remocn/live-code-compilation": [
+    "LiveCodeCompilation"
+  ],
+  "@/components/remocn/logo-enter": [
+    "SAMPLE_LOGOS",
+    "LogoEnter"
+  ],
+  "@/components/remocn/marker-highlight": [
+    "MarkerHighlight"
+  ],
+  "@/components/remocn/mask-reveal-up": [
+    "MaskRevealUp"
+  ],
+  "@/components/remocn/matrix-decode": [
+    "MatrixDecode"
+  ],
+  "@/components/remocn/message-bubble": [
+    "MessageBubble"
+  ],
+  "@/components/remocn/micro-scale-fade": [
+    "MicroScaleFade"
+  ],
+  "@/components/remocn/number-wheel": [
+    "Odometer",
+    "NumberWheel"
+  ],
+  "@/components/remocn/onboarding-stepper-flow": [
+    "OnboardingStepperFlow"
+  ],
+  "@/components/remocn/opencode": [
+    "THEMES",
+    "TYPING_START_FRAME",
+    "TYPING_CPS",
+    "OpenCode"
+  ],
+  "@/components/remocn/per-character-rise": [
+    "PerCharacterRise"
+  ],
+  "@/components/remocn/per-word-crossfade": [
+    "PerWordCrossfade"
+  ],
+  "@/components/remocn/perspective-marquee": [
+    "PerspectiveMarquee"
+  ],
+  "@/components/remocn/popover": [
+    "Popover"
+  ],
+  "@/components/remocn/progress-steps": [
+    "ProgressSteps"
+  ],
+  "@/components/remocn/progress": [
+    "Progress"
+  ],
+  "@/components/remocn/radio": [
+    "Radio"
+  ],
+  "@/components/remocn/resizable": [
+    "Resizable"
+  ],
+  "@/components/remocn/rgb-glitch-text": [
+    "RGBGlitchText"
+  ],
+  "@/components/remocn/rolling-number": [
+    "RollingNumber"
+  ],
+  "@/components/remocn/rolodex-flip": [
+    "RolodexFlip"
+  ],
+  "@/components/remocn/scale-down-fade": [
+    "ScaleDownFade"
+  ],
+  "@/components/remocn/select-item": [
+    "SelectItemRow",
+    "SelectItem"
+  ],
+  "@/components/remocn/select": [
+    "Select"
+  ],
+  "@/components/remocn/settings-toggle-flow": [
+    "SettingsToggleFlow"
+  ],
+  "@/components/remocn/shader-color-panels": [
+    "ShaderColorPanels"
+  ],
+  "@/components/remocn/shader-dithering": [
+    "ShaderDithering"
+  ],
+  "@/components/remocn/shader-dot-orbit": [
+    "ShaderDotOrbit"
+  ],
+  "@/components/remocn/shader-god-rays": [
+    "ShaderGodRays"
+  ],
+  "@/components/remocn/shader-grain-gradient": [
+    "ShaderGrainGradient"
+  ],
+  "@/components/remocn/shader-liquid-metal": [
+    "ShaderLiquidMetal"
+  ],
+  "@/components/remocn/shader-mesh-gradient": [
+    "ShaderMeshGradient"
+  ],
+  "@/components/remocn/shader-metaballs": [
+    "ShaderMetaballs"
+  ],
+  "@/components/remocn/shader-neuro-noise": [
+    "ShaderNeuroNoise"
+  ],
+  "@/components/remocn/shader-perlin-noise": [
+    "ShaderPerlinNoise"
+  ],
+  "@/components/remocn/shader-pulsing-border": [
+    "ShaderPulsingBorder"
+  ],
+  "@/components/remocn/shader-simplex-noise": [
+    "ShaderSimplexNoise"
+  ],
+  "@/components/remocn/shader-smoke-ring": [
+    "ShaderSmokeRing"
+  ],
+  "@/components/remocn/shader-spiral": [
+    "ShaderSpiral"
+  ],
+  "@/components/remocn/shader-swirl": [
+    "ShaderSwirl"
+  ],
+  "@/components/remocn/shader-voronoi": [
+    "ShaderVoronoi"
+  ],
+  "@/components/remocn/shader-warp": [
+    "ShaderWarp"
+  ],
+  "@/components/remocn/shader-water": [
+    "ShaderWater"
+  ],
+  "@/components/remocn/shared-axis-y": [
+    "SharedAxisY"
+  ],
+  "@/components/remocn/shared-axis-z": [
+    "SharedAxisZ"
+  ],
+  "@/components/remocn/sheet": [
+    "Sheet"
+  ],
+  "@/components/remocn/shimmer-sweep": [
+    "ShimmerSweep"
+  ],
+  "@/components/remocn/short-slide-down": [
+    "ShortSlideDown"
+  ],
+  "@/components/remocn/short-slide-right": [
+    "ShortSlideRight"
+  ],
+  "@/components/remocn/signup-flow": [
+    "SignupFlow"
+  ],
+  "@/components/remocn/simulated-cursor": [
+    "SimulatedCursor"
+  ],
+  "@/components/remocn/skeleton-block": [
+    "SkeletonBlock"
+  ],
+  "@/components/remocn/skeleton": [
+    "Skeleton"
+  ],
+  "@/components/remocn/slider": [
+    "Slider"
+  ],
+  "@/components/remocn/slot-machine-roll": [
+    "SlotMachineRoll"
+  ],
+  "@/components/remocn/soft-blur-in": [
+    "SoftBlurIn"
+  ],
+  "@/components/remocn/spinner": [
+    "Spinner"
+  ],
+  "@/components/remocn/spring-scale-in": [
+    "SpringScaleIn"
+  ],
+  "@/components/remocn/staggered-fade-up": [
+    "StaggeredFadeUp"
+  ],
+  "@/components/remocn/stepper": [
+    "Stepper"
+  ],
+  "@/components/remocn/strikethrough-replace": [
+    "StrikethroughReplace"
+  ],
+  "@/components/remocn/switch": [
+    "Switch"
+  ],
+  "@/components/remocn/tabs": [
+    "Tabs"
+  ],
+  "@/components/remocn/telegram-chat-flow": [
+    "TelegramChatFlow"
+  ],
+  "@/components/remocn/terminal-cursor-zoom": [
+    "TerminalCursorZoom"
+  ],
+  "@/components/remocn/terminal-simulator": [
+    "TerminalSimulator"
+  ],
+  "@/components/remocn/toast": [
+    "Toast"
+  ],
+  "@/components/remocn/toggle-group": [
+    "ToggleGroup"
+  ],
+  "@/components/remocn/tooltip": [
+    "Tooltip"
+  ],
+  "@/components/remocn/top-down-letters": [
+    "TopDownLetters"
+  ],
+  "@/components/remocn/tracking-in": [
+    "TrackingIn"
+  ],
+  "@/components/remocn/typewriter": [
+    "Typewriter"
+  ],
+  "@/components/remocn/typing-indicator": [
+    "TypingIndicator"
+  ],
+  "@/components/remocn/v0": [
+    "THEMES",
+    "TYPING_START_FRAME",
+    "TYPING_CPS",
+    "V0"
+  ],
+  "@/components/remocn/value-swap": [
+    "ValueSwap"
+  ],
+  "@/components/remocn/x-follow-card": [
+    "THEMES",
+    "CLICK_FRAME",
+    "XFollowCard"
+  ],
+  "@/components/remocn/x-followers-overview": [
+    "SAMPLE_FOLLOWERS",
+    "XFollowersOverview"
+  ]
+}

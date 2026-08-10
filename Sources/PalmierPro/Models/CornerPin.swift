@@ -88,13 +88,7 @@ enum CornerPin {
 
         /// Shoelace area in `size` pixels. Zero for a collapsed quad, negative when mirrored.
         func area(in size: CGSize) -> Double {
-            let p = points(in: CGRect(origin: .zero, size: size))
-            var sum = 0.0
-            for i in p.indices {
-                let a = p[i], b = p[(i + 1) % p.count]
-                sum += Double(a.x * b.y - b.x * a.y)
-            }
-            return sum / 2
+            PolygonMath.area(points(in: CGRect(origin: .zero, size: size)))
         }
 
         /// False when the quad collapsed to a line/point or carries non-finite values —
@@ -106,18 +100,32 @@ enum CornerPin {
 
         /// Crossing-number test in the same view space `points(in:)` maps to.
         func contains(_ point: CGPoint, in rect: CGRect) -> Bool {
-            let p = points(in: rect)
-            var inside = false
-            var j = p.count - 1
-            for i in p.indices {
-                if (p[i].y > point.y) != (p[j].y > point.y) {
-                    let t = (point.y - p[i].y) / (p[j].y - p[i].y)
-                    if point.x < p[i].x + t * (p[j].x - p[i].x) { inside.toggle() }
-                }
-                j = i
-            }
-            return inside
+            PolygonMath.contains(point, in: points(in: rect))
         }
+    }
+}
+
+enum PolygonMath {
+    static func area(_ p: [CGPoint]) -> Double {
+        var sum = 0.0
+        for i in p.indices {
+            let a = p[i], b = p[(i + 1) % p.count]
+            sum += Double(a.x * b.y - b.x * a.y)
+        }
+        return sum / 2
+    }
+
+    static func contains(_ point: CGPoint, in p: [CGPoint]) -> Bool {
+        var inside = false
+        var j = p.count - 1
+        for i in p.indices {
+            if (p[i].y > point.y) != (p[j].y > point.y) {
+                let t = (point.y - p[i].y) / (p[j].y - p[i].y)
+                if point.x < p[i].x + t * (p[j].x - p[i].x) { inside.toggle() }
+            }
+            j = i
+        }
+        return inside
     }
 }
 

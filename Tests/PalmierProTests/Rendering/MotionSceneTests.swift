@@ -260,6 +260,36 @@ struct MotionSceneRenderingTests {
         await #expect(throws: MotionSceneError.self) { try await bake(noExport) }
     }
 
+    @Test func rendersAPrebuiltRemocnComponentThroughTheRemotionAPI() async throws {
+        let scene = try MotionScene(
+            width: 160, height: 120, fps: 30, durationInFrames: 3,
+            source: """
+            import { Typewriter } from "@/components/remocn/typewriter"
+            import { AbsoluteFill, useCurrentFrame } from "remotion"
+
+            export default function Scene() {
+              const frame = useCurrentFrame()
+              return (
+                <AbsoluteFill style={{ opacity: frame === 0 ? 1 : 0.99 }}>
+                  <Typewriter text="remocn" />
+                </AbsoluteFill>
+              )
+            }
+            """
+        ).validated()
+        _ = try await bake(scene)
+    }
+
+    /// The catalog is what the agent authors against, so a build that drops it must fail loudly.
+    @Test func shipsTheRemocnComponentCatalog() async throws {
+        let url = try #require(BundledResource.url("MotionRuntime/components.json"))
+        let catalog = try #require(
+            try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: [String]]
+        )
+        #expect(catalog.count > 100)
+        #expect(catalog["@/components/remocn/typewriter"] == ["Typewriter"])
+    }
+
     @Test func rejectsAnUnknownImport() async throws {
         let badImport = try MotionScene(
             width: 160, height: 120, fps: 30, durationInFrames: 2,

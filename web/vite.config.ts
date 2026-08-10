@@ -4,6 +4,29 @@ import { viteSingleFile } from "vite-plugin-singlefile"
 import path from "node:path"
 import fs from "node:fs"
 
+/// The scene catalog the agent reads before authoring: module path to the components it exports.
+function remocnCatalog(): Plugin {
+  const source = path.resolve(__dirname, "./src/components/remocn")
+  const output = path.resolve(__dirname, "../Sources/PalmierPro/Resources/MotionRuntime/components.json")
+  return {
+    name: "palmier-remocn-catalog",
+    enforce: "post",
+    closeBundle() {
+      const catalog: Record<string, string[]> = {}
+      for (const file of fs.readdirSync(source).sort()) {
+        if (!file.endsWith(".tsx")) continue
+        const code = fs.readFileSync(path.join(source, file), "utf8")
+        const exports = [...code.matchAll(/^export (?:function|const) ([A-Z]\w*)/gm)].map((match) => match[1])
+        if (exports.length > 0) catalog[`@/components/remocn/${file.replace(/\.tsx$/, "")}`] = exports
+      }
+      if (Object.keys(catalog).length < 100) {
+        throw new Error(`remocn catalog looks incomplete (${Object.keys(catalog).length} modules)`)
+      }
+      fs.writeFileSync(output, JSON.stringify(catalog, null, 2))
+    },
+  }
+}
+
 /// WebKit refuses module scripts on an opaque origin, and the runtime is loaded via
 /// loadHTMLString(baseURL: nil). Rewrite to a classic script once everything is inlined.
 function classicScript(): Plugin {
@@ -36,12 +59,14 @@ function classicScript(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), viteSingleFile(), classicScript()],
+  plugins: [react(), viteSingleFile(), classicScript(), remocnCatalog()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
       // Shared verbatim with the React Native runtime so both speak the same scene API.
       "palmier-runtime": path.resolve(__dirname, "../runtime/palmier.js"),
+      // remocn components are authored against Remotion's API, which palmier.js already implements.
+      remotion: path.resolve(__dirname, "./src/lib/remotion.tsx"),
       // The shared file lives outside this root, so it cannot resolve React on its own.
       react: path.resolve(__dirname, "node_modules/react"),
     },

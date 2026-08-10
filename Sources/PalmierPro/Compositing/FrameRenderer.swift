@@ -88,6 +88,9 @@ enum FrameRenderer {
                 if let occlusion = layer.clip.effects?.first(where: { $0.type == "key.occlusion" && $0.enabled }) {
                     accum = occludedComposite(image, over: accum, effect: occlusion,
                                               offset: frame - layer.clip.startFrame)
+                } else if let reveal = layer.clip.effects?.first(where: { $0.type == "transition.subjectReveal" && $0.enabled }) {
+                    accum = subjectRevealComposite(image, over: accum, effect: reveal,
+                                                   offset: frame - layer.clip.startFrame)
                 } else {
                     accum = image.composited(over: accum)
                 }
@@ -119,6 +122,34 @@ enum FrameRenderer {
         return accum.applyingFilter("CIBlendWithMask", parameters: [
             kCIInputMaskImageKey: matte,
             kCIInputBackgroundImageKey: composed,
+        ]).cropped(to: accum.extent)
+    }
+
+    private static func subjectRevealComposite(
+        _ image: CIImage,
+        over accum: CIImage,
+        effect: Effect,
+        offset: Int
+    ) -> CIImage {
+        let composed = image.composited(over: accum)
+        guard let descriptor = EffectRegistry.descriptor(id: effect.type) else { return composed }
+        let p = descriptor.resolve(effect, atOffset: offset)
+        let progress = p.value("progress")
+        if progress <= 0 { return accum }
+        if progress >= 1 { return composed }
+        guard let matte = SubjectMask.revealMatte(
+            for: accum, extent: accum.extent,
+            quality: p.value("quality"), feather: p.value("feather"), progress: progress
+        ) else {
+            let f = CIFilter(name: "CIDissolveTransition")
+            f?.setValue(accum, forKey: kCIInputImageKey)
+            f?.setValue(composed, forKey: "inputTargetImage")
+            f?.setValue(progress, forKey: "inputTime")
+            return (f?.outputImage ?? composed).cropped(to: accum.extent)
+        }
+        return composed.applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputMaskImageKey: matte,
+            kCIInputBackgroundImageKey: accum,
         ]).cropped(to: accum.extent)
     }
 
@@ -301,13 +332,13 @@ enum FrameRenderer {
 
         if let quad = clip.cornerPinQuad(at: frame) {
             // Source rotation metadata still applies; the pin then places the upright frame.
-            if !layer.preferredTransform.isIdentity {
-                image = image.transformed(by: flipY(srcHeight)
-                    .concatenating(layer.preferredTransform)
-                    .concatenating(flipY(layer.natSize.height)))
-            }
+            image = uprightedSource(image, layer: layer, srcHeight: srcHeight)
             guard let pinned = cornerPinned(image, quad: quad, renderSize: renderSize) else { return nil }
             image = pinned
+        } else if let grid = clip.meshWarpGrid(at: frame) {
+            image = uprightedSource(image, layer: layer, srcHeight: srcHeight)
+            guard let warped = MeshWarpKernel.place(image, grid: grid, renderSize: renderSize) else { return nil }
+            image = warped
         } else {
             let t = clip.transformAt(frame: frame)
             let av = layer.preferredTransform.concatenating(
@@ -326,6 +357,13 @@ enum FrameRenderer {
             ])
         }
         return image
+    }
+
+    private static func uprightedSource(_ image: CIImage, layer: LayerPlan, srcHeight: CGFloat) -> CIImage {
+        guard !layer.preferredTransform.isIdentity else { return image }
+        return image.transformed(by: flipY(srcHeight)
+            .concatenating(layer.preferredTransform)
+            .concatenating(flipY(layer.natSize.height)))
     }
 
     /// Warps the layer onto its pin quad in canvas space, replacing the affine placement.
@@ -373,6 +411,9 @@ enum FrameRenderer {
         if let quad = clip.cornerPinQuad(at: frame) {
             guard let pinned = cornerPinned(image, quad: quad, renderSize: renderSize) else { return nil }
             image = pinned
+        } else if let grid = clip.meshWarpGrid(at: frame) {
+            guard let warped = MeshWarpKernel.place(image, grid: grid, renderSize: renderSize) else { return nil }
+            image = warped
         } else {
             image = rotatedTextImage(image, clip: clip, frame: frame, renderSize: renderSize)
         }

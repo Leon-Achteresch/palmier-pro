@@ -246,6 +246,11 @@ struct EffectRenderingTests {
             "blur.motion": ["radius": 20, "angle": 0],
             "distort.warp": ["bend": 60, "waveAmplitude": 30, "waveLength": 120],
             "distort.perspective": ["tiltX": 55],
+            CornerPin.effectType: [
+                "topLeftX": 0, "topLeftY": 0.1, "topRightX": 0.5, "topRightY": 0,
+                "bottomRightX": 0.5, "bottomRightY": 0.9, "bottomLeftX": 0, "bottomLeftY": 1,
+            ],
+            MeshWarp.effectType: ["centerX": 0.3, "centerY": 0.3],
             "mockup.iphone17": ["orbitYaw": 30, "orbitPitch": 15],
             "mockup.macbook": ["orbitYaw": 30, "orbitPitch": 15],
         ]
@@ -271,7 +276,7 @@ struct EffectRenderingTests {
         // color.curves / color.hueCurves carry JSON curves, not Double params — covered by their own tests.
         // key.subject and key.occlusion are passthroughs on footage with no subject, which this
         // synthetic pattern is — their masking is covered by SubjectMaskTests / compositor tests.
-        let excluded: Set<String> = ["color.curves", "color.hueCurves", "key.subject", "key.occlusion"]
+        let excluded: Set<String> = ["color.curves", "color.hueCurves", "key.subject", "key.occlusion", "transition.subjectReveal"]
         let base = try await frame(nil)
         for descriptor in EffectRegistry.all where descriptor.resourceKey == nil && !excluded.contains(descriptor.id) {
             let params = nonDefault[descriptor.id]

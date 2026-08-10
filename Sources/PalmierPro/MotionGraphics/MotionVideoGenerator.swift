@@ -19,20 +19,73 @@ enum MotionVideoGenerator {
         try MotionScene.decoded(from: try Data(contentsOf: url))
     }
 
+    static func cacheFilename(for scene: MotionScene) -> String {
+        let target = scene.encodedSize
+        return "\(scene.contentHash.prefix(32))_\(Int(target.width))x\(Int(target.height)).mov"
+    }
+
+    /// Pre-registers every unbaked scene a timeline needs, so the progress indicator
+    /// knows the full queue and can estimate completion before the serial bakes start.
+    @concurrent
+    static func registerPendingBakes(
+        timeline: Timeline,
+        resolveURL: @Sendable (String) -> URL?,
+        resolveTimeline: @Sendable (String) -> Timeline?
+    ) async {
+        var refs: Set<String> = []
+        var visited: Set<String> = []
+        collectMotionRefs(in: timeline, resolveTimeline: resolveTimeline, refs: &refs, visited: &visited)
+        var pending: [(id: String, totalFrames: Int)] = []
+        for ref in refs {
+            guard let url = resolveURL(ref),
+                  let data = try? Data(contentsOf: url),
+                  let scene = try? MotionScene.decoded(from: data) else { continue }
+            let filename = cacheFilename(for: scene)
+            guard !FileManager.default.fileExists(atPath: cacheDirectory.appendingPathComponent(filename).path) else { continue }
+            pending.append((filename, scene.durationInFrames + 1))
+        }
+        let jobs = pending
+        await MainActor.run { MotionBakeProgress.shared.setPending(jobs) }
+    }
+
+    private static func collectMotionRefs(
+        in timeline: Timeline,
+        resolveTimeline: @Sendable (String) -> Timeline?,
+        refs: inout Set<String>,
+        visited: inout Set<String>
+    ) {
+        for track in timeline.tracks where track.type == .video {
+            for clip in track.clips {
+                switch clip.mediaType {
+                case .motion:
+                    refs.insert(clip.mediaRef)
+                case .sequence:
+                    guard visited.insert(clip.mediaRef).inserted,
+                          let child = resolveTimeline(clip.mediaRef) else { continue }
+                    collectMotionRefs(in: child, resolveTimeline: resolveTimeline, refs: &refs, visited: &visited)
+                default:
+                    break
+                }
+            }
+        }
+    }
+
     /// The scene declares its own size and timing, so no caller-supplied size is accepted here.
     @MainActor
     static func motionVideo(for url: URL, mediaRef: String) async throws -> URL {
         let scene = try await loadScene(at: url)
         let target = scene.encodedSize
-        let filename = "\(scene.contentHash.prefix(32))_\(Int(target.width))x\(Int(target.height)).mov"
+        let filename = cacheFilename(for: scene)
         let outputURL = cacheDirectory.appendingPathComponent(filename)
         if FileManager.default.fileExists(atPath: outputURL.path) { return outputURL }
 
         if let existing = inFlight[filename] { return try await existing.value }
         let task = Task { @MainActor () throws -> URL in
             defer { inFlight[filename] = nil }
+            MotionBakeProgress.shared.begin(id: filename, totalFrames: scene.durationInFrames + 1)
+            defer { MotionBakeProgress.shared.end(id: filename) }
             do {
-                try await render(scene: scene, target: target, to: outputURL)
+                try await render(scene: scene, target: target, to: outputURL, progressId: filename)
                 return outputURL
             } catch {
                 Log.preview.error("motionVideo failed mediaRef=\(mediaRef) size=\(Int(target.width))x\(Int(target.height)): \(Log.detail(error))")
@@ -49,7 +102,7 @@ enum MotionVideoGenerator {
     // holds up the UI exactly like the Lottie path does. Move the web view into an XPC helper if
     // that ever becomes the bottleneck.
     @MainActor
-    private static func render(scene: MotionScene, target: CGSize, to outputURL: URL) async throws {
+    private static func render(scene: MotionScene, target: CGSize, to outputURL: URL, progressId: String) async throws {
         let renderer = try await MotionSceneRendererFactory.renderer(for: scene)
         defer { renderer.tearDown() }
         try await renderer.load(scene: scene)
@@ -106,6 +159,7 @@ enum MotionVideoGenerator {
             guard adaptor.append(buffer, withPresentationTime: CMTimeMakeWithSeconds(seconds, preferredTimescale: 600)) else {
                 throw writer.error ?? MotionSceneError.appendFailed(frame: frame)
             }
+            MotionBakeProgress.shared.advance(id: progressId)
         }
 
         // A scene that threw mid-animation would otherwise ship as a silently blank clip.

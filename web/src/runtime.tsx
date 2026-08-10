@@ -10,6 +10,9 @@ import { compile } from "tailwindcss"
 import { cn } from "@/lib/utils"
 
 import * as Palmier from "palmier-runtime"
+import { AbsoluteFill, Img } from "@/lib/remotion"
+import * as RemocnUI from "@/lib/remocn-ui"
+import * as RemocnIcons from "@/lib/remocn-icons"
 
 import twIndex from "tailwindcss/index.css?raw"
 import twPreflight from "tailwindcss/preflight.css?raw"
@@ -47,19 +50,17 @@ const uiModules = import.meta.glob("./components/ui/*.tsx", { eager: true }) as 
   Record<string, unknown>
 >
 
-function AbsoluteFill({ style, children, ...rest }: React.ComponentProps<"div">) {
-  return (
-    <div style={{ ...Palmier.ABSOLUTE_FILL_STYLE, ...style } as React.CSSProperties} {...rest}>
-      {children}
-    </div>
-  )
-}
+const remocnModules = import.meta.glob("./components/remocn/*.{tsx,ts}", { eager: true }) as Record<
+  string,
+  Record<string, unknown>
+>
 
-const PalmierAPI = { ...Palmier, AbsoluteFill }
+const PalmierAPI = { ...Palmier, AbsoluteFill, Img }
 
 const UI: Record<string, unknown> = {}
 const MODULES: Record<string, unknown> = {
   palmier: PalmierAPI,
+  remotion: PalmierAPI,
   react: React,
   "react-dom": ReactDOM,
   "react-dom/client": { createRoot },
@@ -68,6 +69,20 @@ const MODULES: Record<string, unknown> = {
   "framer-motion": MotionReact,
   "lucide-react": Lucide,
   "@/lib/utils": { cn },
+  "@/lib/remocn-ui": RemocnUI,
+  "@/lib/remocn-icons": RemocnIcons,
+}
+
+const REMOCN: Record<string, unknown> = {}
+
+for (const [path, mod] of Object.entries(remocnModules)) {
+  const name = path.replace("./components/remocn/", "").replace(/\.(tsx|ts)$/, "")
+  for (const alias of [`@/components/remocn/${name}`, `./components/remocn/${name}`, `components/remocn/${name}`]) {
+    MODULES[alias] = mod
+  }
+  for (const [key, value] of Object.entries(mod)) {
+    if (!(key in REMOCN)) REMOCN[key] = value
+  }
 }
 
 for (const [path, mod] of Object.entries(uiModules)) {
@@ -113,7 +128,10 @@ export function useSceneFrame() {
 let sceneError: string | null = null
 
 function describe(error: unknown): string {
-  if (error instanceof Error) return error.stack || `${error.name}: ${error.message}`
+  if (error instanceof Error) {
+    // Safari stacks carry no message line, so prepend it rather than reporting bare frames.
+    return error.stack ? `${error.name}: ${error.message}\n${error.stack}` : `${error.name}: ${error.message}`
+  }
   return String(error)
 }
 
@@ -208,13 +226,13 @@ function evaluate(source: string) {
     const mod = MODULES[normalized]
     if (mod === undefined) {
       throw new Error(
-        `Cannot import "${name}". Available: react, motion/react, lucide-react, @/lib/utils, @/components/ui/<component>.`,
+        `Cannot import "${name}". Available: react, remotion, motion/react, lucide-react, @/lib/utils, @/lib/remocn-ui, @/lib/remocn-icons, @/components/ui/<component>, @/components/remocn/<component>.`,
       )
     }
     return mod
   }
-  const factory = new Function("require", "exports", "module", "React", "UI", "PalmierMotion", code)
-  factory(requireShim, moduleExports, { exports: moduleExports }, React, UI, {
+  const factory = new Function("require", "exports", "module", "React", "UI", "Remocn", "PalmierMotion", code)
+  factory(requireShim, moduleExports, { exports: moduleExports }, React, UI, REMOCN, {
     ...PalmierAPI,
     useSceneTime,
     useSceneFrame,

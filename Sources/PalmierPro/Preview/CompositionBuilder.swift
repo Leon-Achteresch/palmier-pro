@@ -48,6 +48,9 @@ enum CompositionBuilder {
             Log.preview.fault("build: invalid timeline fps=\(timeline.fps) size=\(timeline.width)x\(timeline.height)")
             throw InvalidTimelineError(reason: "fps=\(timeline.fps) size=\(timeline.width)x\(timeline.height)")
         }
+        await MotionVideoGenerator.registerPendingBakes(
+            timeline: timeline, resolveURL: resolveURL, resolveTimeline: resolveTimeline
+        )
         let ctx = BuildContext(
             composition: AVMutableComposition(),
             timescale: CMTimeScale(timeline.fps),

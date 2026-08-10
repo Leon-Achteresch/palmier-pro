@@ -254,12 +254,30 @@ extension ToolExecutor {
                 var flat: [String: Any] = [:]
                 for (k, v) in params {
                     guard let p = v as? [String: Any] else { flat[k] = v; continue }
-                    flat[k] = p["value"] ?? p["string"] ?? (p["track"] != nil ? "animated" : nil) ?? v
+                    // An animated param reads back as its rows, not the stale static value it also carries.
+                    if let track = p["track"] as? [String: Any], let rows = keyframeRows(track) {
+                        flat[k] = rows
+                        continue
+                    }
+                    flat[k] = p["value"] ?? p["string"] ?? v
                 }
                 if !flat.isEmpty { out["params"] = flat }
             }
             if let enabled = e["enabled"] as? Bool, !enabled { out["enabled"] = false }
             return out
+        }
+    }
+
+    /// Keyframe rows in apply_effect's own [[frame, value, interp?]] shape; the ease is
+    /// carried only when it deviates from the default, so writes round-trip unchanged.
+    private static func keyframeRows(_ track: [String: Any]) -> [[Any]]? {
+        guard let keyframes = track["keyframes"] as? [[String: Any]], !keyframes.isEmpty else { return nil }
+        return keyframes.map { kf in
+            var row: [Any] = [intValue(kf["frame"]), kf["value"] ?? 0]
+            if let interp = kf["interpolationOut"] as? String, interp != Interpolation.smooth.rawValue {
+                row.append(interp)
+            }
+            return row
         }
     }
 

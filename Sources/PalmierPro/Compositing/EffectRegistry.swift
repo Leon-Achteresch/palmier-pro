@@ -77,7 +77,7 @@ struct EffectDescriptor: Identifiable, Sendable {
 
 enum EffectRegistry {
 
-    static let all: [EffectDescriptor] = color + wheels + hueCurves + lut + curves + detail + blur + stylize + distort + key + mockup
+    static let all: [EffectDescriptor] = color + wheels + hueCurves + lut + curves + detail + blur + stylize + distort + key + transition + mockup
 
     private static let color: [EffectDescriptor] = [
         EffectDescriptor(
@@ -357,6 +357,19 @@ enum EffectRegistry {
             apply: { image, _, _ in image }
         ),
         EffectDescriptor(
+            id: MeshWarp.effectType, displayName: "Mesh Warp", category: "Distort",
+            params: MeshWarp.Point.allCases.flatMap { point in
+                [
+                    EffectParamSpec(key: point.xKey, label: "\(point.displayName) X",
+                                    range: MeshWarp.range, defaultValue: point.defaultPoint.x, unit: ""),
+                    EffectParamSpec(key: point.yKey, label: "\(point.displayName) Y",
+                                    range: MeshWarp.range, defaultValue: point.defaultPoint.y, unit: ""),
+                ]
+            },
+            // Placement, not a filter: FrameRenderer warps the layer onto the grid in canvas space.
+            apply: { image, _, _ in image }
+        ),
+        EffectDescriptor(
             id: "distort.perspective", displayName: "Perspective", category: "Distort",
             params: [
                 EffectParamSpec(key: "tiltX", label: "Tilt X", range: -80...80, defaultValue: 0, unit: "°"),
@@ -429,6 +442,18 @@ enum EffectRegistry {
         ),
     ]
 
+    private static let transition: [EffectDescriptor] = [
+        EffectDescriptor(
+            id: "transition.subjectReveal", displayName: "Subject Reveal", category: "Transition",
+            params: [
+                EffectParamSpec(key: "progress", label: "Progress", range: 0...1, defaultValue: 0, unit: ""),
+                EffectParamSpec(key: "feather", label: "Feather", range: 0...1, defaultValue: 0.15, unit: ""),
+                EffectParamSpec(key: "quality", label: "Quality", range: 0...2, defaultValue: 1, unit: ""),
+            ],
+            apply: { image, _, _ in image }
+        ),
+    ]
+
     private static let mockup: [EffectDescriptor] = [
         mockupDescriptor(id: "mockup.iphone17", displayName: "iPhone 17 Mockup", device: .iPhone17Pro),
         mockupDescriptor(id: "mockup.macbook", displayName: "MacBook Mockup", device: .macBookUltra),
@@ -468,10 +493,10 @@ enum EffectRegistry {
     static let canonicalOrder: [String] = [
         "color.exposure", "color.contrast", "color.highlightsShadows", "color.blacksWhites",
         "color.temperature", "color.vibrance", "color.saturation", "color.wheels", "color.curves",
-        "color.hueCurves", "color.lut", "detail.clarity", "key.chroma", "key.subject", "key.occlusion",
+        "color.hueCurves", "color.lut", "detail.clarity", "key.chroma", "key.subject", "key.occlusion", "transition.subjectReveal",
         "blur.gaussian", "blur.sharpen",
         "blur.noiseReduction", "blur.motion", "stylize.invert", "stylize.grain", "stylize.vignette",
-        "stylize.glow", "distort.warp", "distort.perspective", CornerPin.effectType,
+        "stylize.glow", "distort.warp", "distort.perspective", CornerPin.effectType, MeshWarp.effectType,
         "mockup.iphone17", "mockup.macbook",
     ]
 

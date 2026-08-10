@@ -76,15 +76,15 @@ extension EditorViewModel {
     }
 
     /// Tracking keyframes interpolate linearly; eased corners read as a wobble against the plate.
-    private static func write(_ quad: CornerPin.Quad, into effect: inout Effect, keyframeAt offset: Int?) {
+    static func write(_ quad: CornerPin.Quad, into effect: inout Effect, keyframeAt offset: Int?) {
         for corner in CornerPin.Corner.allCases {
             let point = quad[corner]
-            write(point.x, key: corner.xKey, into: &effect, keyframeAt: offset)
-            write(point.y, key: corner.yKey, into: &effect, keyframeAt: offset)
+            writeWarpParam(point.x, key: corner.xKey, into: &effect, keyframeAt: offset)
+            writeWarpParam(point.y, key: corner.yKey, into: &effect, keyframeAt: offset)
         }
     }
 
-    private static func write(_ value: CGFloat, key: String, into effect: inout Effect, keyframeAt offset: Int?) {
+    static func writeWarpParam(_ value: CGFloat, key: String, into effect: inout Effect, keyframeAt offset: Int?) {
         let clamped = min(CornerPin.range.upperBound, max(CornerPin.range.lowerBound, Double(value)))
         guard let offset else {
             effect.params[key] = EffectParam(value: clamped, track: effect.params[key]?.track)

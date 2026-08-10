@@ -44,6 +44,8 @@ struct PreviewContainerView: View {
                         CropOverlayView()
                     } else if editor.cornerPinnedClip != nil {
                         CornerPinOverlayView()
+                    } else if editor.meshWarpedClip != nil {
+                        MeshWarpOverlayView()
                     } else {
                         TransformOverlayView()
                     }
@@ -74,6 +76,10 @@ struct PreviewContainerView: View {
                 .offset(x: editor.canvasOffset.width, y: editor.canvasOffset.height)
             }
             .clipped()
+            .overlay(alignment: .bottom) {
+                MotionBakeStatusView()
+                    .padding(.bottom, AppTheme.Spacing.md)
+            }
             if !isImage {
                 scrubBar
                 transportBar

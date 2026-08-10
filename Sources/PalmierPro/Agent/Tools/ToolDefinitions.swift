@@ -1022,10 +1022,10 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .manageMotionScene,
-            description: "Author animated motion graphics as React code and render them into the media library as an alpha video clip. Use this for animated titles, lower thirds, kinetic typography, logo reveals, UI/product demos, dashboards, chart animations, and anything that should look like a real app interface moving — especially when combined with a device mockup via apply_layout. Do NOT use it for plain static captions or simple text overlays; add_texts is cheaper and editable in the Inspector.\n\nThe scene is a single TSX module that must `export default` a React component. Animate with Motion (`import { motion } from \"motion/react\"`) — its declarative props (initial/animate/transition, variants, stagger) all render frame-accurately because rendering drives a virtual clock rather than wall time. The full shadcn/ui set is importable (`import { Button } from \"@/components/ui/button\"`, also card, dialog, table, chart, badge, tabs, progress, sidebar, …) plus `lucide-react` icons and any Tailwind utility class including arbitrary values like `w-[347px]`. `PalmierMotion.useSceneTime()` returns seconds and `PalmierMotion.useSceneFrame()` the frame index, for values you must compute per frame such as counters. Give the root element a transparent or explicit background: the render preserves alpha, so anything you do not paint stays see-through over the clips beneath.\n\nThe scene is rendered before it is saved, so a syntax error, a bad import or a component that throws comes back as a tool error and nothing is added to the project. Rendering is deterministic — Math.random and Date are seeded — so the same source always yields the same frames. action='create' returns a mediaRef to place with add_clips; action='update' re-renders in place and every clip already on the timeline picks up the new version. Read a scene back (source plus sampled frames) with inspect_media.",
+            description: "Author animated motion graphics as React code and render them into the media library as an alpha video clip. Use this for animated titles, lower thirds, kinetic typography, logo reveals, UI/product demos, dashboards, chart animations, and anything that should look like a real app interface moving — especially when combined with a device mockup via apply_layout. Do NOT use it for plain static captions or simple text overlays; add_texts is cheaper and editable in the Inspector.\n\nThe scene is a single TSX module that must `export default` a React component. Animate with Motion (`import { motion } from \"motion/react\"`) — its declarative props (initial/animate/transition, variants, stagger) all render frame-accurately because rendering drives a virtual clock rather than wall time. The full shadcn/ui set is importable (`import { Button } from \"@/components/ui/button\"`, also card, dialog, table, chart, badge, tabs, progress, sidebar, …) plus `lucide-react` icons and any Tailwind utility class including arbitrary values like `w-[347px]`. `PalmierMotion.useSceneTime()` returns seconds and `PalmierMotion.useSceneFrame()` the frame index, for values you must compute per frame such as counters. Give the root element a transparent or explicit background: the render preserves alpha, so anything you do not paint stays see-through over the clips beneath.\n\nThe scene is rendered before it is saved, so a syntax error, a bad import or a component that throws comes back as a tool error and nothing is added to the project. Rendering is deterministic — Math.random and Date are seeded — so the same source always yields the same frames. action='create' returns a mediaRef to place with add_clips; action='update' re-renders in place and every clip already on the timeline picks up the new version. Read a scene back (source plus sampled frames) with inspect_media.\n\nThe 'web' runtime also ships a large prebuilt animation library (remocn): typewriters and kinetic type, animated line-drawn icons, cursors and carets, animated UI (dialogs, menus, toasts, sliders, charts), chat/terminal/product mock flows, WebGL shader backdrops, and film-style transitions. Import them by module, e.g. `import { Typewriter } from \"@/components/remocn/typewriter\"`. Call action='components' FIRST when you plan to use one — it returns the full catalog as module path → exported component names; guessing names fails the render. These components are authored against the Remotion API, which this runtime implements: `import { useCurrentFrame, useVideoConfig, interpolate, spring, Easing, AbsoluteFill, Sequence } from \"remotion\"` works, and `@/lib/remocn-ui` (useTypewriter, easings, springs, color helpers) is importable too. Google-font imports resolve to the system stack instead of downloading.",
             inputSchema: objectSchema(
                 properties: [
-                    "action": ["type": "string", "enum": ["create", "update"], "description": "'create' adds a new scene to the media library. 'update' replaces an existing one in place and re-renders it."],
+                    "action": ["type": "string", "enum": ["create", "update", "components"], "description": "'create' adds a new scene to the media library. 'update' replaces an existing one in place and re-renders it. 'components' takes no other parameters and returns the prebuilt remocn animation catalog for the 'web' runtime."],
                     "mediaRef": ["type": "string", "description": "Required for action='update'. The scene asset to replace."],
                     "name": ["type": "string", "description": "Display name in the media library, e.g. 'Pricing Table Reveal'."],
                     "folderId": ["type": "string", "description": "Optional media folder to file the new scene under."],
@@ -1142,6 +1142,15 @@ enum ToolDefinitions {
             key.occlusion works on any overlay (text, image, video); frames with no detected person \
             composite normally. feather/expand tune the occlusion edge like key.subject.
 
+            SUBJECT TRANSITION (transition.subjectReveal): a modern person-portal cut between two \
+            shots. Overlap the incoming clip on a track ABOVE the outgoing one, apply this effect to \
+            the incoming clip, and keyframe progress [[0,0],[N,1,'linear']] across the overlap: the \
+            new shot opens up from inside the outgoing subject's silhouette and grows until it fills \
+            the frame. The matte comes from on-device segmentation of the frame below (quality like \
+            key.subject: 0 fast / 1 balanced / 2 any-object), feather softens the reveal edge. Frames \
+            where no subject is found fall back to a plain dissolve at the same progress, so the \
+            transition always completes. progress 0 shows only the outgoing shot, 1 only the incoming.
+
             SCREEN REPLACEMENT (distort.cornerPin): pins the clip's four corners to four points \
             in CANVAS coordinates (0–1, top-left origin — the same space as set_keyframes position), \
             like After Effects' Corner Pin. This is how you paste an image, video, or nested \
@@ -1157,6 +1166,17 @@ enum ToolDefinitions {
             keyframes — eased corners read as a wobble against the plate. Add key.occlusion to the \
             pinned clip when a hand or person passes in front of the surface, and blur.gaussian or \
             color.* (via apply_color) to match the plate's softness and grade.
+
+            MESH WARP (distort.meshWarp): the bendable version of the corner pin — a 3×3 grid of \
+            points (corners, edge midpoints, center) in the same canvas coordinates, and the layer \
+            bends smoothly through all nine instead of staying a flat perspective plane. Use it to \
+            wrap a label or overlay onto a curved surface (bottle, curved monitor, arm), bulge or \
+            pinch a layer, or bend text along a shape. It also REPLACES the clip's transform. With \
+            every point at its default the mapping is the identity; corners place the layer, moving \
+            midpoints/center is what bends it. Params: {topLeft,topCenter,topRight,midLeft,center,\
+            midRight,bottomLeft,bottomCenter,bottomRight}{X,Y} (defaults are the point's canvas \
+            position, e.g. topCenter 0.5/0, center 0.5/0.5). Keyframe like the corner pin. Corner \
+            pin wins when both are on one clip — use one per clip.
 
             Available effects — type: param (range, default):
             \(Self.effectCatalog())

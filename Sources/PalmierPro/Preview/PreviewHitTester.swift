@@ -48,6 +48,9 @@ enum PreviewHitTester {
         if let quad = clip.cornerPinQuad(at: frame) {
             return quad.contains(point, in: videoRect)
         }
+        if let grid = clip.meshWarpGrid(at: frame) {
+            return grid.contains(point, in: videoRect)
+        }
 
         let t = clip.transformAt(frame: frame)
         let rect = clipFrame(t, videoRect: videoRect)

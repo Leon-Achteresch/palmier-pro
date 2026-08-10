@@ -167,6 +167,41 @@ enum SubjectMask {
             .cropped(to: extent)
     }
 
+    static func revealMatte(
+        for image: CIImage,
+        extent: CGRect,
+        quality: Double,
+        feather: Double,
+        progress: Double
+    ) -> CIImage? {
+        guard let base = matte(for: image, extent: extent, quality: quality,
+                               feather: 0, expand: 0, invert: 0) else { return nil }
+        let shortEdge = min(extent.width, extent.height)
+        // Blurs run on a downscaled mask; the full-res grow radius is too slow for the render loop.
+        let workScale = min(1, 256 / shortEdge)
+        var mask = base.transformed(by: CGAffineTransform(scaleX: workScale, y: workScale))
+        let growRadius = progress * shortEdge * 0.45 * workScale
+        if growRadius >= 1 {
+            mask = mask.clampedToExtent()
+                .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: growRadius])
+                .applyingFilter("CIColorThreshold", parameters: ["inputThreshold": 0.03])
+        }
+        let featherRadius = feather * shortEdge * 0.03 * workScale
+        if featherRadius >= 0.5 {
+            mask = mask.clampedToExtent()
+                .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: featherRadius])
+        }
+        mask = mask.transformed(by: CGAffineTransform(scaleX: 1 / workScale, y: 1 / workScale))
+        let floor = max(0, (progress - 0.55) / 0.45)
+        if floor > 0 {
+            let plate = CIImage(color: CIColor(red: floor, green: floor, blue: floor))
+                .cropped(to: extent)
+            mask = mask.cropped(to: extent)
+                .applyingFilter("CIMaximumCompositing", parameters: [kCIInputBackgroundImageKey: plate])
+        }
+        return mask.cropped(to: extent)
+    }
+
     /// The processed subject matte alone (white = subject), or nil when Vision finds nothing.
     static func matte(
         for image: CIImage,

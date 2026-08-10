@@ -132,6 +132,14 @@ extension InspectorView {
         ]
     }
 
+    private var subjectRevealControls: [EffectControl] {
+        [
+            EffectControl(effectId: "transition.subjectReveal", paramKey: "progress", label: "Progress"),
+            EffectControl(effectId: "transition.subjectReveal", paramKey: "feather", label: "Feather"),
+            EffectControl(effectId: "transition.subjectReveal", paramKey: "quality", label: "Quality"),
+        ]
+    }
+
     private var grainControls: [EffectControl] {
         [
             EffectControl(effectId: "stylize.grain", paramKey: "amount", label: "Amount"),
@@ -164,8 +172,8 @@ extension InspectorView {
     }
 
     private var effectsEffectIds: Set<String> {
-        Set((detailControls + blurControls + motionBlurControls + vignetteControls + grainControls + glowControls + warpControls + perspectiveControls + chromaKeyControls + subjectKeyControls + occlusionControls).map(\.effectId))
-            .union(["stylize.invert", CornerPin.effectType])
+        Set((detailControls + blurControls + motionBlurControls + vignetteControls + grainControls + glowControls + warpControls + perspectiveControls + chromaKeyControls + subjectKeyControls + occlusionControls + subjectRevealControls).map(\.effectId))
+            .union(["stylize.invert", CornerPin.effectType, MeshWarp.effectType])
     }
 
     @ViewBuilder
@@ -201,9 +209,11 @@ extension InspectorView {
                 adjustSubgroup(title: "Warp", controls: warpControls, clips: clips)
                 adjustSubgroup(title: "Perspective", controls: perspectiveControls, clips: clips)
                 cornerPinRow(clips: clips)
+                meshWarpRow(clips: clips)
                 adjustSubgroup(title: "Chroma Key", controls: chromaKeyControls, clips: clips)
                 adjustSubgroup(title: "Subject Key", controls: subjectKeyControls, clips: clips)
                 adjustSubgroup(title: "Behind Subject", controls: occlusionControls, clips: clips)
+                adjustSubgroup(title: "Subject Reveal", controls: subjectRevealControls, clips: clips)
                 adjustToggleRow(
                     title: "Invert Colors",
                     isOn: Binding(
@@ -357,40 +367,76 @@ extension InspectorView {
         .padding(.leading, adjustSubgroupInset)
     }
 
-    // MARK: Corner Pin
+    // MARK: Corner Pin & Mesh Warp
 
-    /// Corners are dragged on the canvas, so the inspector only arms the pin and stamps
-    /// keyframes — numeric rows here would overwrite the animation with a static value.
-    @ViewBuilder
     private func cornerPinRow(clips: [Clip]) -> some View {
+        canvasWarpRow(
+            title: "Corner Pin", clips: clips,
+            hasEffect: { $0.cornerPinEffect != nil }, isAnimated: { $0.isCornerPinAnimated },
+            keyframeHelp: "Keyframe the corners at the playhead",
+            noSelectionHelp: "Select a single clip to pin its corners",
+            enableHelp: "Pin the clip's corners onto the canvas",
+            stamp: { editor.stampCornerPinKeyframe(clipId: $0) },
+            add: { editor.addCornerPin(clipId: $0) },
+            remove: { editor.removeCornerPin(clipId: $0) }
+        )
+    }
+
+    private func meshWarpRow(clips: [Clip]) -> some View {
+        canvasWarpRow(
+            title: "Mesh Warp", clips: clips,
+            hasEffect: { $0.meshWarpEffect != nil }, isAnimated: { $0.isMeshWarpAnimated },
+            keyframeHelp: "Keyframe the mesh points at the playhead",
+            noSelectionHelp: "Select a single clip to warp it on a mesh",
+            enableHelp: "Bend the clip on a nine-point mesh",
+            stamp: { editor.stampMeshWarpKeyframe(clipId: $0) },
+            add: { editor.addMeshWarp(clipId: $0) },
+            remove: { editor.removeMeshWarp(clipId: $0) }
+        )
+    }
+
+    /// Points are dragged on the canvas, so the inspector only arms the warp and stamps
+    /// keyframes — numeric rows here would overwrite the animation with a static value.
+    private func canvasWarpRow(
+        title: String,
+        clips: [Clip],
+        hasEffect: @escaping (Clip) -> Bool,
+        isAnimated: @escaping (Clip) -> Bool,
+        keyframeHelp: String,
+        noSelectionHelp: String,
+        enableHelp: String,
+        stamp: @escaping (String) -> Void,
+        add: @escaping (String) -> Void,
+        remove: @escaping (String) -> Void
+    ) -> some View {
         let clip = clips.count == 1 ? clips.first.flatMap { editor.clipFor(id: $0.id) } : nil
-        HStack(spacing: AppTheme.Spacing.xs) {
+        return HStack(spacing: AppTheme.Spacing.xs) {
             Color.clear
                 .frame(width: AppTheme.IconSize.xxs, height: AppTheme.IconSize.xxs)
-            adjustSubgroupTitleLabel(title: "Corner Pin")
+            adjustSubgroupTitleLabel(title: title)
             Spacer(minLength: 0)
-            if let clip, clip.cornerPinEffect != nil {
-                Button { editor.stampCornerPinKeyframe(clipId: clip.id) } label: {
-                    Image(systemName: clip.isCornerPinAnimated ? "stopwatch.fill" : "stopwatch")
-                        .foregroundStyle(clip.isCornerPinAnimated ? AppTheme.Accent.primary : AppTheme.Text.secondaryColor)
+            if let clip, hasEffect(clip) {
+                Button { stamp(clip.id) } label: {
+                    Image(systemName: isAnimated(clip) ? "stopwatch.fill" : "stopwatch")
+                        .foregroundStyle(isAnimated(clip) ? AppTheme.Accent.primary : AppTheme.Text.secondaryColor)
                 }
                 .buttonStyle(.plain)
                 .disabled(!clip.contains(timelineFrame: editor.activeFrame))
-                .help("Keyframe the corners at the playhead")
-                .accessibilityLabel("Keyframe Corner Pin")
+                .help(keyframeHelp)
+                .accessibilityLabel("Keyframe \(title)")
             }
             Toggle("", isOn: Binding(
-                get: { clip?.cornerPinEffect != nil },
+                get: { clip.map(hasEffect) ?? false },
                 set: { on in
                     guard let clip else { return }
-                    if on { editor.addCornerPin(clipId: clip.id) } else { editor.removeCornerPin(clipId: clip.id) }
+                    if on { add(clip.id) } else { remove(clip.id) }
                 }
             ))
             .toggleStyle(.checkbox)
             .labelsHidden()
             .disabled(clip == nil)
-            .help(clip == nil ? "Select a single clip to pin its corners" : "Pin the clip's corners onto the canvas")
-            .accessibilityLabel("Corner Pin")
+            .help(clip == nil ? noSelectionHelp : enableHelp)
+            .accessibilityLabel(title)
         }
         .padding(.leading, adjustSubgroupInset)
     }

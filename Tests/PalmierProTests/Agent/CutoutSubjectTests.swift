@@ -168,6 +168,52 @@ struct SubjectMaskTests {
         #expect(SubjectMask.Quality(param: param) == expected)
     }
 
+    private static func discFrame(extent: CGRect) -> CIImage {
+        let background = CIImage(color: CIColor(red: 0.95, green: 0.95, blue: 0.95)).cropped(to: extent)
+        let subject = CIImage(color: CIColor(red: 0.9, green: 0.1, blue: 0.1)).cropped(to: extent)
+        let discMask = CIFilter(name: "CIRadialGradient", parameters: [
+            "inputCenter": CIVector(x: extent.midX, y: extent.midY),
+            "inputRadius0": extent.width * 0.29, "inputRadius1": extent.width * 0.3,
+            "inputColor0": CIColor.white, "inputColor1": CIColor.black,
+        ])!.outputImage!.cropped(to: extent)
+        return subject.applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputMaskImageKey: discMask, kCIInputBackgroundImageKey: background,
+        ]).cropped(to: extent)
+    }
+
+    private static func luma(_ image: CIImage, x: CGFloat, y: CGFloat) -> UInt8 {
+        let context = CIContext()
+        var pixel = [UInt8](repeating: 0, count: 4)
+        context.render(
+            image, toBitmap: &pixel, rowBytes: 4,
+            bounds: CGRect(x: x, y: y, width: 1, height: 1),
+            format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB()
+        )
+        return pixel[0]
+    }
+
+    @Test func revealMatteStartsAtTheSubjectAndCoversTheFrameNearCompletion() throws {
+        let extent = CGRect(x: 0, y: 0, width: 512, height: 512)
+        let frame = Self.discFrame(extent: extent)
+
+        let early = try #require(SubjectMask.revealMatte(
+            for: frame, extent: extent, quality: 2, feather: 0, progress: 0.05
+        ))
+        #expect(Self.luma(early, x: 256, y: 256) > 200)
+        #expect(Self.luma(early, x: 5, y: 5) < 50)
+
+        let late = try #require(SubjectMask.revealMatte(
+            for: frame, extent: extent, quality: 2, feather: 0, progress: 0.99
+        ))
+        #expect(Self.luma(late, x: 5, y: 5) > 200)
+    }
+
+    @Test func revealMatteIsNilWithoutASubjectSoTheCompositorCanDissolve() {
+        let extent = CGRect(x: 0, y: 0, width: 64, height: 64)
+        let flat = CIImage(color: .gray).cropped(to: extent)
+        #expect(SubjectMask.revealMatte(for: flat, extent: extent, quality: 0, feather: 0, progress: 0.5) == nil)
+    }
+
     @Test func identicalInputReusesTheCachedMaskWithoutRerunningVision() {
         let extent = CGRect(x: 0, y: 0, width: 96, height: 96)
         let image = CIFilter(name: "CILinearGradient", parameters: [
