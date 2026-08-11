@@ -48,11 +48,8 @@ final class ScrubAudioEngine {
     nonisolated private static let fillStride = cacheFrameCount - grainFrameCount
     nonisolated private static let mixInvalidationDebounce = Duration.milliseconds(250)
 
-    nonisolated private static let readerTeardownQueue = DispatchQueue(
-        label: "io.palmier.pro.scrub-reader-teardown",
-        qos: .userInitiated
-    )
-
+    // AVAssetReaderAudioMixOutput builds an offline AudioQueue pipeline; creating one while another stops
+    // reenters the AudioQueue XPC bridge and traps. Every reader lifecycle call stays on this one queue.
     nonisolated private static let decodeQueue = DispatchQueue(
         label: "io.palmier.pro.scrub-decode",
         qos: .userInitiated
@@ -111,7 +108,7 @@ final class ScrubAudioEngine {
 
     nonisolated private static func finishReading(_ reader: AVAssetReader) {
         let box = ReaderBox(reader: reader)
-        readerTeardownQueue.async { box.reader.cancelReading() }
+        decodeQueue.async { box.reader.cancelReading() }
     }
 
     private let meter: AudioMeterHub
