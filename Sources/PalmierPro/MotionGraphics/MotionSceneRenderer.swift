@@ -152,6 +152,9 @@ final class MotionSceneRenderer: NSObject, WKNavigationDelegate {
         let configuration = WKSnapshotConfiguration()
         configuration.rect = CGRect(origin: .zero, size: size)
         configuration.afterScreenUpdates = true
+        // snapshotWidth is in points; WebKit returns points x scale pixels. Without it every frame
+        // rasterises at 2x and pays a 4x downsample in draw() (measured 5-6x slower per frame).
+        configuration.snapshotWidth = NSNumber(value: Double(size.width) / window.backingScaleFactor)
         let image = try await webView.takeSnapshot(configuration: configuration)
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             throw MotionSceneError.snapshotFailed
