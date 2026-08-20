@@ -334,9 +334,11 @@ final class TimelineView: NSView {
         let moveTrackDelta = moveDrag?.trackDelta ?? 0
         let movePinnedIds = moveDrag.map(inputController.pinnedCompanionIds(for:)) ?? []
 
-        let trimPartnerIds: Set<String> = {
-            guard let (drag, _) = trimDrag, drag.propagateToLinked else { return [] }
-            return Set(editor.linkedPartnerIds(of: drag.clipId))
+        let trimTargetIds: Set<String> = {
+            guard let (drag, _) = trimDrag else { return [] }
+            return editor.trimTargetIds(
+                clipId: drag.clipId, scope: drag.scope, propagateToLinked: drag.propagateToLinked
+            )
         }()
 
         let slipDrag: DragState.SlipDrag? = {
@@ -450,7 +452,7 @@ final class TimelineView: NSView {
                 }
 
                 if let (drag, isLeft) = trimDrag,
-                   clip.id == drag.clipId || trimPartnerIds.contains(clip.id) || rippleResizeByClip[clip.id] != nil,
+                   trimTargetIds.contains(clip.id) || rippleResizeByClip[clip.id] != nil,
                    // Ripple drags with no resize preview at rest.
                    !(drag.isRipple && rippleResizeByClip[clip.id] == nil) {
                     var previewClip = clip

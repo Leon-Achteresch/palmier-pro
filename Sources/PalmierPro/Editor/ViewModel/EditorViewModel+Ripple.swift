@@ -20,10 +20,10 @@ extension EditorViewModel {
     // MARK: - Public API
 
     /// Trim clips as a batch, keeping linked clips trimmed together.
-    func trimClips(_ edits: [(clipId: String, trimStartFrame: Int, trimEndFrame: Int)]) {
+    func trimClips(_ edits: [(clipId: String, trimStartFrame: Int, trimEndFrame: Int)], actionName: String? = nil) {
         guard !edits.isEmpty else { return }
         let batchIds = Set(edits.map(\.clipId))
-        undo.perform(edits.count == 1 ? "Trim Clip" : "Trim Clips") {
+        undo.perform(actionName ?? (edits.count == 1 ? "Trim Clip" : "Trim Clips")) {
             for e in edits {
                 trimClipInternal(clipId: e.clipId, trimStartFrame: e.trimStartFrame, trimEndFrame: e.trimEndFrame, protecting: batchIds)
             }

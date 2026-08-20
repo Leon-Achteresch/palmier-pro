@@ -38,6 +38,9 @@ struct PreviewContainerView: View {
                     if let overlay = offlineOverlay(timelineState: timelineState) {
                         offlinePreview(assetId: overlay.assetId, path: overlay.path, isUnprocessable: overlay.isUnprocessable)
                     }
+                    if editor.safeAreaGuidesVisible {
+                        SafeAreaOverlayView()
+                    }
                     if editor.chromaKeySamplingClipId != nil {
                         ChromaKeySamplerOverlayView()
                     } else if editor.cropEditingActive {

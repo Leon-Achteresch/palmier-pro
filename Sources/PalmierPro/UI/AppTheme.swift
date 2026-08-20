@@ -33,6 +33,7 @@ enum AppTheme {
 
         static var primaryColor: Color { Color(primary) }
         static var subtleColor: Color { Color(subtle) }
+        static var dividerColor: Color { Color(divider) }
     }
 
     // MARK: - Border widths

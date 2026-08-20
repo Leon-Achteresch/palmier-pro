@@ -30,12 +30,12 @@ enum ToolName: String, CaseIterable, Sendable {
     case moveClips = "move_clips"
     case removeClips = "remove_clips"
     case splitClips = "split_clips"
+    case trimClips = "trim_clips"
     case rippleDeleteRanges = "ripple_delete_ranges"
     case setClipProperties = "set_clip_properties"
     case setKeyframes = "set_keyframes"
     case applyLayout = "apply_layout"
     case syncClips = "sync_clips"
-    case trimClips = "trim_clips"
     case duplicateClips = "duplicate_clips"
     case copyAttributes = "copy_attributes"
     case linkClips = "link_clips"
@@ -656,7 +656,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .trimClips,
-            description: "Trim one clip by dragging an edge or sliding its source range — the three edits a timeline offers that set_clip_properties' absolute trims can't express.\n\nmode:\n• normal (default) — moves the edge and leaves the surrounding clips alone, so trimming a right edge shorter opens a gap.\n• ripple — moves the edge and shifts everything after it on that track and on sync-locked tracks, so the cut closes up with no gap. This is how you tighten or extend a scene without re-positioning every later clip by hand.\n• slip — keeps the clip's position and length and slides WHICH part of the source plays (needs unused head/tail material). Use it to re-frame a take that's timed right but starts on the wrong moment. Don't pass 'edge' for a slip.\n\ndeltaFrames is in timeline frames and always signed by direction: positive moves the edge (or the source window) to the RIGHT, negative to the LEFT. So a right edge with +30 makes the clip 30 frames longer; a left edge with +30 makes it start 30 frames later (30 frames shorter).\n\nEdits are clamped to available source material, to a 1-frame minimum length, and to room on sync-locked tracks; the receipt says exactly how many frames were applied and notes any clamping. Linked audio follows by default (propagateToLinked). Multicam clips are refused — their timing is owned by the group. Nothing to change returns a no-op receipt instead of a fake success.",
+            description: "Trim one clip by dragging an edge or sliding its source range — the three edits a timeline offers that set_clip_properties' absolute trims can't express.\n\nmode:\n• normal (default) — moves the edge and leaves the surrounding clips alone, so trimming a right edge shorter opens a gap.\n• ripple — moves the edge and shifts everything after it on that track and on sync-locked tracks, so the cut closes up with no gap. This is how you tighten or extend a scene without re-positioning every later clip by hand.\n• slip — keeps the clip's position and length and slides WHICH part of the source plays (needs unused head/tail material). Use it to re-frame a take that's timed right but starts on the wrong moment. Don't pass 'edge' for a slip.\n\ndeltaFrames is in timeline frames and always signed by direction: positive moves the edge (or the source window) to the RIGHT, negative to the LEFT. So a right edge with +30 makes the clip 30 frames longer; a left edge with +30 makes it start 30 frames later (30 frames shorter).\n\nEdits are clamped to available source material, to a 1-frame minimum length, and to room on sync-locked tracks; the receipt says exactly how many frames were applied and notes any clamping. Linked audio follows by default (propagateToLinked). Multicam clips are refused — their timing is owned by the group. Nothing to change returns a no-op receipt instead of a fake success.\n\nscope makes the J/L cut on a normal trim: 'both' (default) trims picture and linked audio together; 'audioOnly' rolls only the audio side of the link group, 'videoOnly' only the picture side — the link is preserved either way, so the pair still moves and selects as one. Pass the picture clip id with scope 'audioOnly' to slide the sound edit off the cut (J-cut when the audio starts early, L-cut when it runs long). A scoped trim that lacks source handle, addresses a lane no linked clip occupies, or targets ripple/slip mode is refused whole.",
             inputSchema: objectSchema(
                 properties: [
                     "clipId": ["type": "string", "description": "The clip to trim (from get_timeline)."],
@@ -672,6 +672,7 @@ enum ToolDefinitions {
                     ],
                     "deltaFrames": ["type": "integer", "description": "Signed timeline frames; positive moves right, negative left. Must not be 0."],
                     "propagateToLinked": ["type": "boolean", "description": "Default true — linked audio/video trim together, as in the timeline UI."],
+                    "scope": ["type": "string", "enum": ["both", "videoOnly", "audioOnly"], "description": "Normal mode only. Which lane of the link group the trim applies to. Default 'both' keeps A/V in sync; 'audioOnly'/'videoOnly' create a J- or L-cut without unlinking."],
                 ],
                 required: ["clipId", "deltaFrames"]
             )

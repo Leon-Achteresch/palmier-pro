@@ -6,7 +6,8 @@ fileprivate struct TrimClipsInput: DecodableToolArgs {
     let edge: String?
     let deltaFrames: Int
     let propagateToLinked: Bool?
-    static let allowedKeys: Set<String> = ["clipId", "mode", "edge", "deltaFrames", "propagateToLinked"]
+    let scope: String?
+    static let allowedKeys: Set<String> = ["clipId", "mode", "edge", "deltaFrames", "propagateToLinked", "scope"]
 }
 
 extension ToolExecutor {
@@ -26,6 +27,10 @@ extension ToolExecutor {
             throw ToolError("Clip not found: \(input.clipId)")
         }
         let propagate = input.propagateToLinked ?? true
+        let scopeRaw = input.scope ?? EditorViewModel.TrimScope.both.rawValue
+        guard let scope = EditorViewModel.TrimScope(rawValue: scopeRaw) else {
+            throw ToolError("scope must be 'both', 'videoOnly', or 'audioOnly' (got '\(scopeRaw)')")
+        }
 
         var edge: EditorViewModel.TrimEdge = .right
         if mode == "slip" {
@@ -51,7 +56,19 @@ extension ToolExecutor {
             }
         }
 
-        let before = Self.trimState(editor, clipId: input.clipId)
+        if scope != .both {
+            guard mode == "normal" else {
+                throw ToolError("scope '\(scopeRaw)' applies only to a normal trim — ripple and slip always move both lanes.")
+            }
+            if let refusal = editor.trimRefusal(clipId: input.clipId, edge: edge, deltaFrames: input.deltaFrames, scope: scope) {
+                throw ToolError(refusal)
+            }
+        }
+
+        let targetIds: [String] = scope == .both
+            ? [input.clipId]
+            : editor.trimTargets(clipId: input.clipId, scope: scope, propagateToLinked: true).map(\.id)
+        let before = targetIds.map { Self.trimState(editor, clipId: $0) }
         let snapshot = timelineSnapshot(editor)
         let actionName = "Trim Clip (Agent)"
         editor.undo.perform(actionName) {
@@ -61,10 +78,10 @@ extension ToolExecutor {
             case "slip":
                 editor.commitSlip(clipId: input.clipId, deltaFrames: input.deltaFrames, propagateToLinked: propagate)
             default:
-                editor.commitTrim(clipId: input.clipId, edge: edge, deltaFrames: input.deltaFrames, propagateToLinked: propagate)
+                editor.commitTrim(clipId: input.clipId, edge: edge, deltaFrames: input.deltaFrames, propagateToLinked: propagate, scope: scope)
             }
         }
-        let after = Self.trimState(editor, clipId: input.clipId)
+        let after = targetIds.map { Self.trimState(editor, clipId: $0) }
 
         guard before != after else {
             return .ok(Self.jsonString([
@@ -75,16 +92,21 @@ extension ToolExecutor {
         }
 
         var notes: [String] = []
+        let leadBefore = before[0]
+        let leadAfter = after[0]
         let appliedDelta = mode == "slip"
-            ? before.trimStart - after.trimStart
-            : (edge == .right ? after.duration - before.duration : before.duration - after.duration)
-        if mode != "slip", abs(after.duration - before.duration) != abs(input.deltaFrames) {
+            ? leadBefore.trimStart - leadAfter.trimStart
+            : (edge == .right ? leadAfter.duration - leadBefore.duration : leadBefore.duration - leadAfter.duration)
+        if mode != "slip", abs(leadAfter.duration - leadBefore.duration) != abs(input.deltaFrames) {
             notes.append("Clamped: asked for \(input.deltaFrames) frames, applied \(appliedDelta) — limited by source material, clip length, or a sync-locked track.")
         }
         if mode == "slip", appliedDelta != input.deltaFrames {
             notes.append("Clamped: asked to slip \(input.deltaFrames) frames, applied \(appliedDelta) — limited by the remaining head/tail material.")
         }
-        return mutationResult(editor, since: snapshot, touched: [input.clipId], notes: notes)
+        if scope != .both {
+            notes.append("Scoped trim: only the \(scope.lane) side moved; the link stays intact.")
+        }
+        return mutationResult(editor, since: snapshot, touched: targetIds, notes: notes)
     }
 
     private struct TrimState: Equatable {

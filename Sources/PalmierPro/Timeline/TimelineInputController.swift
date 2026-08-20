@@ -70,30 +70,19 @@ final class TimelineInputController {
     // MARK: - Mouse down
 
 
-    private func trimHeadroom(for clip: Clip, edge: EditorViewModel.TrimEdge, linked: Bool, ripple: Bool) -> (left: Int, right: Int) {
-        let clips: [Clip]
-        if ripple {
-            clips = editor.rippleTrimTargets(clipId: clip.id, edge: edge, propagateToLinked: linked)
-        } else {
-            var resolved = [clip]
-            if linked {
-                resolved += editor.linkedPartnerIds(of: clip.id).compactMap { editor.clipFor(id: $0) }
-            }
-            clips = resolved
-        }
-        var left = Int.max
-        var right = Int.max
-        for c in clips {
-            if !ripple, let bounds = editor.multicamTrimBounds(for: c) {
-                left = min(left, bounds.left)
-                right = min(right, bounds.right)
-            } else {
-                left = min(left, c.trimStartFrame)
-                right = min(right, editor.effectiveTrimEnd(for: c))
-            }
-        }
-        return (left == .max ? clip.trimStartFrame : left,
-                right == .max ? editor.effectiveTrimEnd(for: clip) : right)
+    private func trimHeadroom(
+        for clip: Clip,
+        edge: EditorViewModel.TrimEdge,
+        linked: Bool,
+        ripple: Bool,
+        scope: EditorViewModel.TrimScope
+    ) -> (left: Int, right: Int) {
+        let clips = ripple
+            ? editor.rippleTrimTargets(clipId: clip.id, edge: edge, propagateToLinked: linked)
+            : editor.trimTargets(clipId: clip.id, scope: scope, propagateToLinked: linked)
+        let handles = editor.trimHandles(for: clips, respectingMulticam: !ripple)
+        return (handles.left == .max ? clip.trimStartFrame : handles.left,
+                handles.right == .max ? editor.effectiveTrimEnd(for: clip) : handles.right)
     }
 
     /// Timeline-frame slip caps: the tightest source headroom across the clip
@@ -211,9 +200,17 @@ final class TimelineInputController {
             let linkedOn = !isOption
 
             let localX = point.x - rect.minX
-            let trimEdge = isOption ? nil : Self.trimEdge(localX: localX, clipWidth: rect.width)
+            let edgeUnderCursor = Self.trimEdge(localX: localX, clipWidth: rect.width)
+            let trimScope: EditorViewModel.TrimScope = isOption && edgeUnderCursor != nil
+                ? editor.asymmetricTrimScope(forDragOn: clip)
+                : .both
+            let scopedTargets = trimScope == .both
+                ? []
+                : editor.trimTargets(clipId: clip.id, scope: trimScope, propagateToLinked: true)
+            let isAsymmetricTrim = trimScope != .both && !scopedTargets.isEmpty
+            let trimEdge = (isOption && !isAsymmetricTrim) ? nil : edgeUnderCursor
             let onTrimHandle = trimEdge != nil
-            let rippleTrim = isShift && onTrimHandle
+            let rippleTrim = isShift && onTrimHandle && !isAsymmetricTrim
 
             if rippleTrim {
                 if !editor.selectedClipIds.contains(clip.id) {
@@ -268,16 +265,21 @@ final class TimelineInputController {
             } else if let edge = trimEdge {
                 Self.trimCursor(for: edge).set()
                 let modelEdge: EditorViewModel.TrimEdge = edge == .left ? .left : .right
-                let headroom = trimHeadroom(for: clip, edge: modelEdge, linked: linkedOn, ripple: rippleTrim)
+                let linkedForTrim = isAsymmetricTrim || linkedOn
+                let headroom = trimHeadroom(
+                    for: clip, edge: modelEdge, linked: linkedForTrim, ripple: rippleTrim, scope: trimScope
+                )
+                let resized = isAsymmetricTrim ? scopedTargets : [clip]
                 let drag = DragState.TrimDrag(
                     clipId: clip.id,
                     trackIndex: hit.trackIndex,
                     originalTrimStart: headroom.left,
                     originalTrimEnd: headroom.right,
                     originalStartFrame: clip.startFrame,
-                    originalDuration: clip.durationFrames,
-                    hasNoSourceMedia: clip.mediaType == .image || clip.mediaType == .text,
-                    propagateToLinked: linkedOn,
+                    originalDuration: resized.map(\.durationFrames).min() ?? clip.durationFrames,
+                    hasNoSourceMedia: resized.allSatisfy { $0.mediaType == .image || $0.mediaType == .text },
+                    propagateToLinked: linkedForTrim,
+                    scope: trimScope,
                     isRipple: rippleTrim
                 )
                 dragState = edge == .left ? .trimLeft(drag) : .trimRight(drag)
@@ -625,7 +627,8 @@ final class TimelineInputController {
                         clipId: drag.clipId,
                         edge: .left,
                         deltaFrames: drag.deltaFrames,
-                        propagateToLinked: drag.propagateToLinked
+                        propagateToLinked: drag.propagateToLinked,
+                        scope: drag.scope
                     )
                 }
             }
@@ -639,7 +642,8 @@ final class TimelineInputController {
                         clipId: drag.clipId,
                         edge: .right,
                         deltaFrames: drag.deltaFrames,
-                        propagateToLinked: drag.propagateToLinked
+                        propagateToLinked: drag.propagateToLinked,
+                        scope: drag.scope
                     )
                 }
             }

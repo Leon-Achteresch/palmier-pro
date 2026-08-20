@@ -324,6 +324,7 @@ extension EditorWindowController: EditorActions {
     @objc func toggleInspectorPanel(_ sender: Any?) { editorViewModel.inspectorPanelVisible.toggle() }
     @objc func toggleAgentPanel(_ sender: Any?) { editorViewModel.agentPanelVisible.toggle() }
     @objc func toggleMaximizePanel(_ sender: Any?) { toggleMaximizePanelAction() }
+    @objc func toggleSafeAreaGuides(_ sender: Any?) { editorViewModel.safeAreaGuidesVisible.toggle() }
     @objc func setLayoutDefault(_ sender: Any?) { editorViewModel.layoutPreset = .default }
     @objc func setLayoutMedia(_ sender: Any?) { editorViewModel.layoutPreset = .media }
     @objc func setLayoutVertical(_ sender: Any?) { editorViewModel.layoutPreset = .vertical }
@@ -346,6 +347,9 @@ extension EditorWindowController: EditorActions {
             return true
         case #selector(toggleAgentPanel(_:)):
             menuItem.state = editorViewModel.agentPanelVisible ? .on : .off
+            return true
+        case #selector(toggleSafeAreaGuides(_:)):
+            menuItem.state = editorViewModel.safeAreaGuidesVisible ? .on : .off
             return true
         case #selector(toggleMaximizePanel(_:)):
             menuItem.state = editorViewModel.maximizedPanel != nil ? .on : .off

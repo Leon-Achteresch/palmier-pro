@@ -155,6 +155,11 @@ final class EditorViewModel {
     }
     var canvasOffset: CGSize = .zero
     var rotationSnapGuidesVisible: Bool = false
+    var safeAreaGuidesVisible: Bool = {
+        UserDefaults.standard.object(forKey: "safeAreaGuidesVisible") as? Bool ?? false
+    }() {
+        didSet { UserDefaults.standard.set(safeAreaGuidesVisible, forKey: "safeAreaGuidesVisible") }
+    }
     var timelineVisibleWidth: Double = 0
     var timelineRenderRevision: Int = 0
     /// Live horizontal scroll of the timeline panel, mirrored from AppKit for view-state stash.

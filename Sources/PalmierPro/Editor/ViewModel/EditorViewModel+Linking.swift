@@ -164,15 +164,9 @@ extension EditorViewModel {
     }
 
     /// Apply a trim-drag commit. Expands the edit set to linked partners when `propagateToLinked` is on and hands off to `trimClips`.
-    func commitTrim(clipId: String, edge: TrimEdge, deltaFrames: Int, propagateToLinked: Bool) {
-        guard let loc = findClip(id: clipId) else { return }
-        let leadClip = timeline.tracks[loc.trackIndex].clips[loc.clipIndex]
-        var targets = [leadClip]
-        if propagateToLinked {
-            targets += linkedPartnerIds(of: clipId).compactMap { pid in
-                findClip(id: pid).map { timeline.tracks[$0.trackIndex].clips[$0.clipIndex] }
-            }
-        }
+    func commitTrim(clipId: String, edge: TrimEdge, deltaFrames: Int, propagateToLinked: Bool, scope: TrimScope = .both) {
+        let targets = trimTargets(clipId: clipId, scope: scope, propagateToLinked: propagateToLinked)
+        guard !targets.isEmpty else { return }
         var deltaFrames = deltaFrames
         for target in targets {
             guard let bounds = multicamTrimBounds(for: target) else { continue }
@@ -182,7 +176,7 @@ extension EditorViewModel {
             let v = trimValues(for: clip, edge: edge, delta: deltaFrames)
             return (clip.id, v.trimStart, v.trimEnd)
         }
-        trimClips(edits)
+        trimClips(edits, actionName: scope == .both ? nil : "Trim \(scope.lane.capitalized) Only")
     }
 
     /// Nest trim limits come from the child's live length, not creation time.

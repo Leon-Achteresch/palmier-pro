@@ -24,6 +24,7 @@ struct ShortcutsPane: View {
             ("Shift + Drag Edge", "Ripple Trim"),
             ("Cmd + Drag Media", "Ripple Insert"),
             ("Opt + Drag", "Duplicate Clip"),
+            ("Opt + Drag Edge", "J/L Cut (Roll Other Lane)"),
         ]),
         ShortcutGroup(title: "Timeline", shortcuts: [
             ("Shift + Drag Ruler", "Select Range"),
@@ -53,6 +54,7 @@ struct ShortcutsPane: View {
         ]),
         ShortcutGroup(title: "View", shortcuts: [
             ("Cmd + F", "Full Screen"),
+            ("Cmd + '", "Safe Areas"),
             ("`", "Maximize Focused Panel"),
             ("Cmd + Scroll", "Zoom Preview to Cursor"),
             ("Esc", "Deselect & Reset Tool"),

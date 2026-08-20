@@ -134,6 +134,12 @@ enum MainMenuBuilder {
 
         menu.addItem(.separator())
 
+        let safeAreasItem = NSMenuItem(title: "Safe Areas", action: #selector(EditorActions.toggleSafeAreaGuides(_:)), keyEquivalent: "'")
+        safeAreasItem.keyEquivalentModifierMask = [.command]
+        menu.addItem(safeAreasItem)
+
+        menu.addItem(.separator())
+
         let maximizeItem = NSMenuItem(title: "Maximize Focused Panel", action: #selector(EditorActions.toggleMaximizePanel(_:)), keyEquivalent: "`")
         maximizeItem.keyEquivalentModifierMask = []
         menu.addItem(maximizeItem)
@@ -198,6 +204,7 @@ enum MainMenuBuilder {
     func toggleInspectorPanel(_ sender: Any?)
     func toggleAgentPanel(_ sender: Any?)
     func toggleMaximizePanel(_ sender: Any?)
+    func toggleSafeAreaGuides(_ sender: Any?)
     func setLayoutDefault(_ sender: Any?)
     func setLayoutMedia(_ sender: Any?)
     func setLayoutVertical(_ sender: Any?)
