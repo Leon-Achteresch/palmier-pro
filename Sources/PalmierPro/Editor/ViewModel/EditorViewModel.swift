@@ -139,6 +139,9 @@ final class EditorViewModel {
     var isMarqueeSelecting: Bool = false
     var selectedGap: GapSelection?
     var selectedTimelineRange: TimelineRangeSelection?
+    var selectedMarkerId: String?
+    /// Bumped when the user asks to edit the selected marker (double-click in the ruler).
+    var markerEditRequestTick: Int = 0
     var selectedMediaAssetIds: Set<String> = []
     var selectedFolderIds: Set<String> = []
     var selectedTimelineIds: Set<String> = []
@@ -499,6 +502,11 @@ final class EditorViewModel {
             videoEngine?.refreshVisuals()
         }
         videoEngine?.rebuild()
+    }
+
+    /// Repaint the timeline without touching the render graph — for annotations that don't affect output.
+    func refreshTimelineDisplay() {
+        mediaVisualCache.timelineView?.needsDisplay = true
     }
 
     /// Coalesce rapid rebuilds. An immediate `notifyTimelineChanged` cancels any pending debounced one.

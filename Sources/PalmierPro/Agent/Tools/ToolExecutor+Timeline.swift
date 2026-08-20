@@ -19,6 +19,11 @@ extension ToolExecutor {
         if let window {
             dict["window"] = [window.lowerBound, min(window.upperBound, editor.timeline.totalFrames)]
         }
+        if editor.timeline.markers.isEmpty {
+            dict.removeValue(forKey: "markers")
+        } else {
+            dict["markers"] = Self.markerPayloads(editor.timeline.markers)
+        }
         dict["currentFrame"] = editor.currentFrame
         dict["canGenerate"] = Self.canGenerate
         if let linked = editor.linkedContextPath, !linked.isEmpty {

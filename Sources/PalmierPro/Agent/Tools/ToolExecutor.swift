@@ -257,6 +257,7 @@ final class ToolExecutor {
         case .removeWords:   return try await removeWords(editor, args)
         case .removeSilence: return try removeSilence(editor, args)
         case .syncClips:     return try await syncClips(editor, args)
+        case .manageMarkers: return try manageMarkers(editor, args)
         case .manageMulticam: return try await manageMulticam(editor, args)
         case .changeCam:     return try changeCam(editor, args)
         case .getMulticam:   return try getMulticam(editor, args)

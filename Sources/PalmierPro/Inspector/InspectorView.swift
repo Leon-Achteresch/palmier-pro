@@ -100,6 +100,8 @@ struct InspectorView: View {
         )
         if selection.clipCount > 0 {
             clipInspectorContent(selection: selection)
+        } else if let marker = editor.selectedMarker {
+            MarkerTab(marker: marker).id(marker.id)
         } else if let asset = selectedMediaAsset {
             mediaAssetInspectorContent(asset)
         } else {

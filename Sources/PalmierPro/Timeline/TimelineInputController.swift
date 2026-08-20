@@ -169,6 +169,14 @@ final class TimelineInputController {
         if point.y >= scrollOffsetY && point.y < scrollOffsetY + geometry.rulerHeight {
             view.setHoveredClipId(nil)
             let frame = geometry.frameAt(x: point.x)
+            if let markerId = markerHit(at: point, geometry: geometry) {
+                editor.selectMarker(id: markerId)
+                if event.clickCount == 2 { editor.markerEditRequestTick &+= 1 }
+                dragState = .idle
+                view.needsDisplay = true
+                return
+            }
+            editor.selectMarker(id: nil)
             if let edge = timelineRangeEdgeHit(at: point, geometry: geometry) {
                 beginTimelineRangeEdgeDrag(edge)
             } else if event.modifierFlags.contains(.shift) {
@@ -180,6 +188,7 @@ final class TimelineInputController {
         }
 
         let trackIndex = geometry.trackAt(y: point.y)
+        editor.selectMarker(id: nil)
         editor.selectedGap = nil // re-selected below if this lands in a gap
 
         if editor.toolMode == .razor {
@@ -703,6 +712,12 @@ final class TimelineInputController {
 
         if point.y >= scrollOffsetY && point.y < scrollOffsetY + geometry.rulerHeight {
             view.setHoveredClipId(nil)
+            if markerHit(at: point, geometry: geometry) != nil {
+                NSCursor.pointingHand.set()
+                razorPreviewFrame = nil
+                razorSnapState = SnapEngine.SnapState()
+                return
+            }
             if timelineRangeEdgeHit(at: point, geometry: geometry) != nil {
                 NSCursor.resizeLeftRight.set()
             } else if event.modifierFlags.contains(.shift) {
@@ -769,6 +784,16 @@ final class TimelineInputController {
             view.setHoveredClipId(nil)
         }
         NSCursor.arrow.set()
+    }
+
+    private func markerHit(at point: NSPoint, geometry: TimelineGeometry) -> String? {
+        TimelineMarkerRibbon.hitTest(
+            markers: editor.timeline.markers,
+            at: point,
+            in: view.currentRulerRect,
+            pixelsPerFrame: geometry.pixelsPerFrame,
+            scrollOffsetX: view.enclosingScrollView?.contentView.bounds.origin.x ?? 0
+        )
     }
 
     private static func trimEdge(localX: CGFloat, clipWidth: CGFloat) -> TrimEdge? {

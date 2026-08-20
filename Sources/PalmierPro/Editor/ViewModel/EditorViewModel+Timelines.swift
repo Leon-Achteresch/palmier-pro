@@ -114,6 +114,7 @@ extension EditorViewModel {
 
     private func clearTimelineScopedState() {
         selectedClipIds = []
+        selectedMarkerId = nil
         selectedGap = nil
         selectedTimelineRange = nil
         pendingSwapClipId = nil
@@ -284,6 +285,7 @@ extension Timeline {
     /// Fresh track/clip/group ids for a duplicated timeline so ids stay unique project-wide.
     mutating func regenerateIds() {
         var groups: [String: String] = [:]
+        regenerateMarkerIds()
         for ti in tracks.indices {
             tracks[ti].id = UUID().uuidString
             for ci in tracks[ti].clips.indices {

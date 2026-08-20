@@ -43,6 +43,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case swapClipMedia = "swap_clip_media"
     case relinkMedia = "relink_media"
     case cutoutSubject = "cutout_subject"
+    case manageMarkers = "manage_markers"
     case undo = "undo"
 
     // Multicam
@@ -98,7 +99,7 @@ enum ToolDefinitions {
     static let all: [AgentTool] = [
         AgentTool(
             name: .getTimeline,
-            description: "Always call at the start of a session. Returns project settings (fps, resolution, totalFrames, durationSeconds), tracks with a stable trackId, their current index (what every trackIndex parameter takes), type, and clips, plus canGenerate (if false, generation/upscale tools will fail — tell the user to sign in to Palmier and subscribe, or to add their own OpenRouter/ElevenLabs API key in Settings, before attempting them). When the project has a linked source/brand folder, linkedContext reports its path — explore it with read_project_context. Clip ids are accepted by clip mutation tools; trackId is accepted by manage_tracks.\n\nEvery clip occupies frames: [start, end) — timeline frames, end exclusive, duration = end − start. gaps on a track lists its empty [start, end) spans; no gaps key means contiguous. A video clip's linked audio partner is folded into it as audio: {id, track, …} carrying only what deviates (volumeDb, effects, differing trims); the partner is not repeated on its own track, which instead reports linkedClips (its folded count). Address the audio side by its nested id.\n\nFields equal to their defaults are omitted: mediaType 'video', sourceClipType = mediaType, speed 1, volumeDb 0, opacity 1, edgeRounding 0, edgeSoftness 0, trims/fades 0, identity transform/crop, default textStyle, track muted/hidden false. Text clips never report trims. Keyframe tracks that animate nothing are shown as what they are: identity tracks are dropped, constant ones appear as the static field (e.g. crop: {left: 0.31}). A graded clip carries `color` — its grade in apply_color's own vocabulary, pasteable to other clips via apply_color's color parameter. Other effects appear as effects: [{type, params}], the exact shape apply_effect accepts.\n\nCaption clips (sharing a captionGroupId) come back per track as captionGroups summaries: clipCount, frameRange, shared style, and a textPreview — individual caption clips and their ids are NOT listed. That summary is all you need to restyle (update_text with captionGroupId) or judge coverage; the spoken words live in get_transcript. Only when you must touch individual caption clips (retime one, delete one, fix one word's style), re-read with captionDetail:true — ideally windowed — to get [clipId, startFrame, endFrame, text] rows, capped at 200 per group. Caption clips whose properties deviate from the group always appear individually in clips.",
+            description: "Always call at the start of a session. Returns project settings (fps, resolution, totalFrames, durationSeconds), tracks with a stable trackId, their current index (what every trackIndex parameter takes), type, and clips, plus canGenerate (if false, generation/upscale tools will fail — tell the user to sign in to Palmier and subscribe, or to add their own OpenRouter/ElevenLabs API key in Settings, before attempting them). When the project has a linked source/brand folder, linkedContext reports its path — explore it with read_project_context. Clip ids are accepted by clip mutation tools; trackId is accepted by manage_tracks. A timeline with markers also reports markers: [{markerId, frame, kind, color, name?, note?, done?}] — the notes pinned to a frame, edited with manage_markers.\n\nEvery clip occupies frames: [start, end) — timeline frames, end exclusive, duration = end − start. gaps on a track lists its empty [start, end) spans; no gaps key means contiguous. A video clip's linked audio partner is folded into it as audio: {id, track, …} carrying only what deviates (volumeDb, effects, differing trims); the partner is not repeated on its own track, which instead reports linkedClips (its folded count). Address the audio side by its nested id.\n\nFields equal to their defaults are omitted: mediaType 'video', sourceClipType = mediaType, speed 1, volumeDb 0, opacity 1, edgeRounding 0, edgeSoftness 0, trims/fades 0, identity transform/crop, default textStyle, track muted/hidden false. Text clips never report trims. Keyframe tracks that animate nothing are shown as what they are: identity tracks are dropped, constant ones appear as the static field (e.g. crop: {left: 0.31}). A graded clip carries `color` — its grade in apply_color's own vocabulary, pasteable to other clips via apply_color's color parameter. Other effects appear as effects: [{type, params}], the exact shape apply_effect accepts.\n\nCaption clips (sharing a captionGroupId) come back per track as captionGroups summaries: clipCount, frameRange, shared style, and a textPreview — individual caption clips and their ids are NOT listed. That summary is all you need to restyle (update_text with captionGroupId) or judge coverage; the spoken words live in get_transcript. Only when you must touch individual caption clips (retime one, delete one, fix one word's style), re-read with captionDetail:true — ideally windowed — to get [clipId, startFrame, endFrame, text] rows, capped at 200 per group. Caption clips whose properties deviate from the group always appear individually in clips.",
             inputSchema: objectSchema(
                 properties: [
                     "startFrame": ["type": "integer", "description": "Optional. Window start (inclusive); only clips intersecting [startFrame, endFrame) are returned. Tracks report totalClips when the window hides some."],
@@ -460,6 +461,50 @@ enum ToolDefinitions {
                         "type": "array",
                         "description": "Tracks to remove with all their clips. Prefer {trackId}; bare integers are legacy current indexes.",
                         "items": ["type": ["integer", "object"], "properties": ["trackId": ["type": "string"]]],
+                    ],
+                ]
+            )
+        ),
+        AgentTool(
+            name: .manageMarkers,
+            description: "Reads and edits the active timeline's markers — the notes a filmmaker pins to a frame: standard markers for review notes, chapter markers for the export chapter list, todo markers for open work (done tracks whether it's handled). Markers annotate the timeline; they never change the cut, so no clip moves.\n\nCall with no arguments to list every marker with its stable markerId. add/update/remove run in that order as ONE undoable action, and one call is the whole change: pass every marker at once rather than one call per marker. frame is a project frame within [0, totalFrames]; an out-of-range frame, an unknown markerId, or an unknown kind/color rejects the whole call and changes nothing. name is what a chapter list or review note shows; note carries the longer text.\n\nChapter markers drive a YouTube-style '<timestamp> <name>' sidecar written next to a video export, so building a chapter list means adding chapter markers before export_project — name them, and start at frame 0 for a valid list. Returns the resulting marker set plus per-request receipts; an update that matches the marker's current state is reported as unchanged instead of as an edit.",
+            inputSchema: objectSchema(
+                properties: [
+                    "add": [
+                        "type": "array",
+                        "description": "Markers to create at project frames.",
+                        "items": objectSchema(
+                            properties: [
+                                "frame": ["type": "integer", "description": "Project frame, 0…totalFrames."],
+                                "name": ["type": "string", "description": "Short label, e.g. a chapter title."],
+                                "note": ["type": "string", "description": "Longer text for the marker."],
+                                "kind": ["type": "string", "enum": MarkerKind.allCases.map(\.rawValue), "description": "Default standard. chapter feeds the export chapters sidecar."],
+                                "color": ["type": "string", "enum": MarkerColor.allCases.map(\.rawValue), "description": "Default blue."],
+                                "done": ["type": "boolean", "description": "todo markers only — whether the task is handled."],
+                            ],
+                            required: ["frame"]
+                        ),
+                    ],
+                    "update": [
+                        "type": "array",
+                        "description": "Changes to existing markers. Only the fields passed change.",
+                        "items": objectSchema(
+                            properties: [
+                                "markerId": ["type": "string", "description": "Stable marker id from get_timeline or this tool."],
+                                "frame": ["type": "integer", "description": "New project frame, 0…totalFrames."],
+                                "name": ["type": "string"],
+                                "note": ["type": "string"],
+                                "kind": ["type": "string", "enum": MarkerKind.allCases.map(\.rawValue)],
+                                "color": ["type": "string", "enum": MarkerColor.allCases.map(\.rawValue)],
+                                "done": ["type": "boolean", "description": "todo markers only."],
+                            ],
+                            required: ["markerId"]
+                        ),
+                    ],
+                    "remove": [
+                        "type": "array",
+                        "description": "Marker ids to delete.",
+                        "items": ["type": "string"],
                     ],
                 ]
             )

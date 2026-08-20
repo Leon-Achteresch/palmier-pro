@@ -271,7 +271,7 @@ final class TimelineView: NSView {
         }
 
         TimelineRuler.draw(
-            in: NSRect(x: scrollOffset.x, y: scrollOffset.y, width: visibleWidth, height: Double(geo.rulerHeight)),
+            in: rulerRect(scrollOffset: scrollOffset, visibleWidth: visibleWidth, geometry: geo),
             fps: editor.timeline.fps,
             pixelsPerFrame: geo.pixelsPerFrame,
             scrollOffsetX: scrollOffset.x,
@@ -279,6 +279,25 @@ final class TimelineView: NSView {
         )
         drawTimelineRangeSelectionRulerFill(geometry: geo, scrollOffset: scrollOffset, context: ctx)
         drawTimelineRangeSelectionEdges(geometry: geo, scrollOffset: scrollOffset, context: ctx)
+        TimelineMarkerRibbon.draw(
+            markers: editor.timeline.markers,
+            in: rulerRect(scrollOffset: scrollOffset, visibleWidth: visibleWidth, geometry: geo),
+            pixelsPerFrame: geo.pixelsPerFrame,
+            scrollOffsetX: scrollOffset.x,
+            selectedId: editor.selectedMarkerId,
+            context: ctx
+        )
+    }
+
+    /// Ruler band in document coordinates; markers hit-test and draw against it.
+    func rulerRect(scrollOffset: NSPoint, visibleWidth: CGFloat, geometry geo: TimelineGeometry) -> NSRect {
+        NSRect(x: scrollOffset.x, y: scrollOffset.y, width: visibleWidth, height: Double(geo.rulerHeight))
+    }
+
+    var currentRulerRect: NSRect {
+        let scrollOffset = enclosingScrollView?.contentView.bounds.origin ?? .zero
+        let visibleWidth = enclosingScrollView?.contentView.bounds.width ?? bounds.width
+        return rulerRect(scrollOffset: scrollOffset, visibleWidth: visibleWidth, geometry: geometry)
     }
 
     func updatePlayheadLayer() { playheadOverlay.update() }

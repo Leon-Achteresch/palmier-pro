@@ -246,11 +246,27 @@ extension EditorViewModel {
         registerTimelineSwap(undoState: before, redoState: after, actionName: "Change Speed")
     }
 
-    func registerTimelineSwap(undoState: Timeline, redoState: Timeline, actionName: String) {
+    /// What a timeline swap has to refresh: `.redraw` is for changes the render graph doesn't see.
+    enum TimelineSwapRefresh {
+        case rebuild
+        case redraw
+    }
+
+    func registerTimelineSwap(
+        undoState: Timeline,
+        redoState: Timeline,
+        actionName: String,
+        refresh: TimelineSwapRefresh = .rebuild
+    ) {
         registerTimelineUndo(actionName) { vm in
             vm.timeline = undoState
-            vm.notifyTimelineChanged()
-            vm.registerTimelineSwap(undoState: redoState, redoState: undoState, actionName: actionName)
+            switch refresh {
+            case .rebuild: vm.notifyTimelineChanged()
+            case .redraw: vm.refreshTimelineDisplay()
+            }
+            vm.registerTimelineSwap(
+                undoState: redoState, redoState: undoState, actionName: actionName, refresh: refresh
+            )
         }
     }
 

@@ -142,6 +142,13 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             }
             return false
 
+        case 46: // M key
+            if mods.intersection([.command, .option, .control, .shift]).isEmpty {
+                editorViewModel.addMarkerAtPlayhead()
+                return true
+            }
+            return false
+
         case 34: // I key
             if rangeMarkShortcut {
                 editorViewModel.markTimelineRangeStart()

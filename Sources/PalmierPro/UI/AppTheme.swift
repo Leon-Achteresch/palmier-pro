@@ -192,6 +192,31 @@ enum AppTheme {
         static let multicam = NSColor.systemRed
     }
 
+    // MARK: - Timeline markers
+
+    enum Marker {
+        static let tagWidth: CGFloat = 9
+        static let tagHeight: CGFloat = 11
+        static let tipHeight: CGFloat = 4
+        static let hitPadding: CGFloat = 4
+        static let doneOpacity: CGFloat = 0.4
+
+        static func nsColor(_ color: MarkerColor) -> NSColor {
+            switch color {
+            case .red: NSColor(red: 0xE5/255.0, green: 0x4F/255.0, blue: 0x4F/255.0, alpha: 1)
+            case .orange: NSColor(red: 0xE8/255.0, green: 0x8B/255.0, blue: 0x2E/255.0, alpha: 1)
+            case .yellow: NSColor(red: 0xE7/255.0, green: 0xC5/255.0, blue: 0x3E/255.0, alpha: 1)
+            case .green: NSColor(red: 0x4F/255.0, green: 0xB8/255.0, blue: 0x5F/255.0, alpha: 1)
+            case .teal: NSColor(red: 0x2E/255.0, green: 0xAD/255.0, blue: 0xA6/255.0, alpha: 1)
+            case .blue: NSColor(red: 0x45/255.0, green: 0x8B/255.0, blue: 0xD8/255.0, alpha: 1)
+            case .purple: NSColor(red: 0x8C/255.0, green: 0x6A/255.0, blue: 0xC8/255.0, alpha: 1)
+            case .white: NSColor(white: 0.92, alpha: 1)
+            }
+        }
+
+        static func color(_ color: MarkerColor) -> Color { Color(nsColor(color)) }
+    }
+
     // MARK: - Corner radii
 
     enum Radius {

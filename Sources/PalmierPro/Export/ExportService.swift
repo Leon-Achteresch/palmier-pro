@@ -263,6 +263,7 @@ final class ExportService {
                 unprocessableMediaRefs: prepared.result.unprocessableMediaRefs
             )
             setProgress(1)
+            await writeChapterSidecar(timeline: timeline, outputURL: outputURL)
             Log.export.notice(
                 "export ok",
                 telemetry: "Export finished",
@@ -442,6 +443,7 @@ final class ExportService {
                 unprocessableMediaRefs: result.unprocessableMediaRefs
             )
             setProgress(1)
+            await writeChapterSidecar(timeline: timeline, outputURL: outputURL)
             Log.export.notice("hdr export ok")
             analytics.finish()
         } catch {
@@ -453,6 +455,21 @@ final class ExportService {
                 Log.export.error("hdr export failed: \(Log.detail(error))")
                 analytics.fail()
             }
+        }
+    }
+
+    /// Best-effort chapters list beside a rendered video. A failure here never fails the export.
+    private func writeChapterSidecar(timeline: Timeline, outputURL: URL) async {
+        guard let text = ChapterSidecar.text(markers: timeline.markers, fps: timeline.fps) else { return }
+        do {
+            let url = try await ChapterSidecar.write(text, nextTo: outputURL)
+            Log.export.notice("chapters sidecar written file=\(url.lastPathComponent)")
+        } catch {
+            Log.export.warning(
+                "chapters sidecar failed: \(Log.detail(error))",
+                telemetry: "Export chapters sidecar failed",
+                data: ["error": Log.detail(error)]
+            )
         }
     }
 

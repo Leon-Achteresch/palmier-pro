@@ -13,6 +13,72 @@ struct TimelineViewState: Codable, Sendable, Equatable {
     var scrollOffsetX: Double = 0
 }
 
+enum MarkerKind: String, Codable, Sendable, CaseIterable {
+    case standard, chapter, todo
+
+    var label: String {
+        switch self {
+        case .standard: "Marker"
+        case .chapter: "Chapter"
+        case .todo: "To-do"
+        }
+    }
+}
+
+enum MarkerColor: String, Codable, Sendable, CaseIterable {
+    case red, orange, yellow, green, teal, blue, purple, white
+
+    var label: String { rawValue.capitalized }
+}
+
+/// Timeline-level annotation at a frame position. Chapter markers also drive the export chapters sidecar.
+struct TimelineMarker: Codable, Sendable, Equatable, Identifiable {
+    var id: String = UUID().uuidString
+    var frame: Int
+    var name: String = ""
+    var note: String = ""
+    var color: MarkerColor = .blue
+    var kind: MarkerKind = .standard
+    var done: Bool = false
+
+    var displayName: String { name.isEmpty ? kind.label : name }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, frame, name, note, color, kind, done
+    }
+
+    init(
+        id: String = UUID().uuidString,
+        frame: Int,
+        name: String = "",
+        note: String = "",
+        color: MarkerColor = .blue,
+        kind: MarkerKind = .standard,
+        done: Bool = false
+    ) {
+        self.id = id
+        self.frame = frame
+        self.name = name
+        self.note = note
+        self.color = color
+        self.kind = kind
+        self.done = done
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: (try? c.decode(String.self, forKey: .id)) ?? UUID().uuidString,
+            frame: max(0, try c.decode(Int.self, forKey: .frame)),
+            name: (try? c.decode(String.self, forKey: .name)) ?? "",
+            note: (try? c.decode(String.self, forKey: .note)) ?? "",
+            color: (try? c.decode(MarkerColor.self, forKey: .color)) ?? .blue,
+            kind: (try? c.decode(MarkerKind.self, forKey: .kind)) ?? .standard,
+            done: (try? c.decode(Bool.self, forKey: .done)) ?? false
+        )
+    }
+}
+
 struct Timeline: Codable, Sendable, Equatable, Identifiable {
     var id: String = UUID().uuidString
     var name: String = "Timeline 1"
@@ -22,6 +88,31 @@ struct Timeline: Codable, Sendable, Equatable, Identifiable {
     var settingsConfigured: Bool = false
     var folderId: String?
     var tracks: [Track] = []
+    /// Always ordered by frame; mutate through the marker helpers to preserve that.
+    private(set) var markers: [TimelineMarker] = []
+
+    init(
+        id: String = UUID().uuidString,
+        name: String = "Timeline 1",
+        fps: Int = 30,
+        width: Int = 1920,
+        height: Int = 1080,
+        settingsConfigured: Bool = false,
+        folderId: String? = nil,
+        tracks: [Track] = [],
+        markers: [TimelineMarker] = []
+    ) {
+        self.id = id
+        self.name = name
+        self.fps = fps
+        self.width = width
+        self.height = height
+        self.settingsConfigured = settingsConfigured
+        self.folderId = folderId
+        self.tracks = tracks
+        self.markers = markers
+        sortMarkers()
+    }
 
     var totalFrames: Int {
         var maxFrame = 0
@@ -60,7 +151,7 @@ struct Timeline: Codable, Sendable, Equatable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, fps, width, height, settingsConfigured, folderId, tracks
+        case id, name, fps, width, height, settingsConfigured, folderId, tracks, markers
     }
 }
 
@@ -75,8 +166,51 @@ extension Timeline {
             height: try c.decode(Int.self, forKey: .height),
             settingsConfigured: (try? c.decode(Bool.self, forKey: .settingsConfigured)) ?? false,
             folderId: try? c.decode(String.self, forKey: .folderId),
-            tracks: try c.decode([Track].self, forKey: .tracks)
+            tracks: try c.decode([Track].self, forKey: .tracks),
+            markers: (try? c.decode([TimelineMarker].self, forKey: .markers)) ?? []
         )
+    }
+}
+
+// MARK: - Markers
+
+extension Timeline {
+    var chapterMarkers: [TimelineMarker] { markers.filter { $0.kind == .chapter } }
+
+    func marker(id: String) -> TimelineMarker? { markers.first { $0.id == id } }
+
+    /// Inserts or replaces `marker` and restores frame order.
+    mutating func upsertMarker(_ marker: TimelineMarker) {
+        if let i = markers.firstIndex(where: { $0.id == marker.id }) {
+            markers[i] = marker
+        } else {
+            markers.append(marker)
+        }
+        sortMarkers()
+    }
+
+    @discardableResult
+    mutating func removeMarker(id: String) -> TimelineMarker? {
+        guard let i = markers.firstIndex(where: { $0.id == id }) else { return nil }
+        return markers.remove(at: i)
+    }
+
+    mutating func rescaleMarkerFrames(by scale: Double) {
+        guard scale.isFinite, scale > 0 else { return }
+        for i in markers.indices {
+            markers[i].frame = max(0, Int((Double(markers[i].frame) * scale).rounded()))
+        }
+        sortMarkers()
+    }
+
+    mutating func regenerateMarkerIds() {
+        for i in markers.indices {
+            markers[i].id = UUID().uuidString
+        }
+    }
+
+    private mutating func sortMarkers() {
+        markers.sort { ($0.frame, $0.id) < ($1.frame, $1.id) }
     }
 }
 

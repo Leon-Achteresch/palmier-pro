@@ -10,10 +10,10 @@ extension ToolExecutor {
         "mediaRef", "startFrameMediaRef", "endFrameMediaRef",
         "sourceVideoMediaRef", "videoSourceMediaRef", "sourceMediaRef",
         "captionGroupId", "timelineId", "trackId", "item", "from", "reference",
-        "groupId", "memberId",
+        "groupId", "memberId", "markerId",
     ]
     private static let arrayIdKeys: Set<String> = [
-        "clipIds", "targetClipIds", "toClipIds", "items", "ids", "deletes",
+        "clipIds", "targetClipIds", "toClipIds", "items", "ids", "deletes", "remove",
         "referenceMediaRefs", "referenceImageMediaRefs",
         "referenceVideoMediaRefs", "referenceAudioMediaRefs",
     ]
@@ -22,6 +22,7 @@ extension ToolExecutor {
     func currentIdUniverse(_ editor: EditorViewModel) -> Set<String> {
         var ids = Set<String>()
         for timeline in editor.timelines { ids.insert(timeline.id) }
+        for marker in editor.timeline.markers { ids.insert(marker.id) }
         for track in editor.timeline.tracks {
             ids.insert(track.id)
             for clip in track.clips {
@@ -103,7 +104,11 @@ extension ToolExecutor {
                 if scalarIdKeys.contains(key), let s = v as? String {
                     out[key] = try expandOne(s, universe: universe)
                 } else if arrayIdKeys.contains(key), let arr = v as? [Any] {
-                    out[key] = try arr.map { try ($0 as? String).map { try expandOne($0, universe: universe) } ?? $0 }
+                    // Entries may be bare ids or selector objects; both still get expanded.
+                    out[key] = try arr.map { element in
+                        guard let s = element as? String else { return try expand(element, universe: universe) }
+                        return try expandOne(s, universe: universe)
+                    }
                 } else {
                     out[key] = try expand(v, universe: universe)
                 }
