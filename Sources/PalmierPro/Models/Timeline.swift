@@ -310,6 +310,8 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
     /// How this clip composites over the tracks below it. nil = normal (source-over).
     var blendMode: BlendMode?
 
+    var audioMix: ClipAudioMix?
+
     private enum CodingKeys: String, CodingKey {
         case id, mediaRef, mediaType, sourceClipType, startFrame, durationFrames
         case trimStartFrame, trimEndFrame, speed, volume
@@ -318,7 +320,7 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
         case linkGroupId, captionGroupId, multicamGroupId, textContent, textStyle, textAnimation, wordTimings
         case textFillMode
         case opacityTrack, positionTrack, scaleTrack, rotationTrack, cropTrack, volumeTrack
-        case effects, blendMode
+        case effects, blendMode, audioMix
     }
 
     /// Frame where this clip ends on the timeline
@@ -618,7 +620,8 @@ extension Clip {
             cropTrack: try? c.decode(KeyframeTrack<Crop>.self, forKey: .cropTrack),
             volumeTrack: try? c.decode(KeyframeTrack<Double>.self, forKey: .volumeTrack),
             effects: try? c.decode([Effect].self, forKey: .effects),
-            blendMode: try? c.decode(BlendMode.self, forKey: .blendMode)
+            blendMode: try? c.decode(BlendMode.self, forKey: .blendMode),
+            audioMix: (try? c.decode(ClipAudioMix.self, forKey: .audioMix))?.normalized
         )
     }
 }

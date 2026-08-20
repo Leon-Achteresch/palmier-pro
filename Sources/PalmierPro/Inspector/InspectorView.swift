@@ -62,6 +62,7 @@ struct InspectorView: View {
     @State private var imageAdjustmentExpanded = true
     @State var audioLevelsExpanded = true
     @State private var fileSizeText: String?
+    @State var audioMixExpanded = false
     @State var collapsedAdjustSections: Set<String> = ["Curves", "Color Wheels", "Hue Curves", "LUTs", "Effects"]
     @State var collapsedAdjustSubgroups: Set<String> = [
         "Detail", "Blur", "Motion Blur", "Vignette", "Film Grain", "Glow", "Warp", "Chroma Key",

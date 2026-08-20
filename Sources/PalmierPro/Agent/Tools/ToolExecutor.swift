@@ -180,7 +180,7 @@ final class ToolExecutor {
     private static func canReadInactiveProject(_ tool: ToolName) -> Bool {
         switch tool {
         case .getTimeline, .inspectTimeline, .getMedia, .inspectMedia, .searchMedia,
-             .getMulticam, .getTranscript, .detectBeats, .inspectColor, .listModels, .sendFeedback,
+             .getMulticam, .getTranscript, .detectBeats, .measureLoudness, .inspectColor, .listModels, .sendFeedback,
              .readProjectContext, .reviewTimeline, .manageReferences:
             true
         default:
@@ -229,6 +229,7 @@ final class ToolExecutor {
         case .captureFrame:  return try await captureFrame(editor, args)
         case .getTranscript: return try await getTranscript(editor, args)
         case .detectBeats:   return try await detectBeats(editor, args)
+        case .measureLoudness: return try await measureLoudness(editor, args)
         case .inspectTimeline: return try await inspectTimeline(editor, args)
         case .searchMedia:   return try await searchMedia(editor, args)
         case .searchStockMedia: return try await searchStockMedia(editor, args)

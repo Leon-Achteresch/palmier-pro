@@ -6,6 +6,7 @@ extension InspectorView {
     func audioTabContent(audioClips: [Clip], hasNonTextVisualClips: Bool) -> some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.zero) {
             levelsSection(audios: audioClips)
+            mixSection(audios: audioClips)
             EditorPanelGroup("Enhance", contentSpacing: AppTheme.Spacing.smMd) {
                 denoiseRow(audios: audioClips)
                 studioVoiceRow(audios: audioClips)

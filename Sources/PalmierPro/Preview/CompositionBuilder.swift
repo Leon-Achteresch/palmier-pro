@@ -544,6 +544,7 @@ enum CompositionBuilder {
                 for clip in clips {
                     emitVolumeEnvelope(params: params, clip: clip, timescale: timescale, carrier: liveCarrier)
                 }
+                attachClipAudioMixTap(to: params, clips: clips, fps: timeline.fps)
                 return params
             case .timeline(let trackIndex, let clipIds):
                 guard timeline.tracks.indices.contains(trackIndex) else { return nil }
@@ -554,6 +555,7 @@ enum CompositionBuilder {
                     return params
                 }
                 var prevEndFrame = Int.min
+                var tappedClips: [Clip] = []
                 for clip in track.clips.sorted(by: { $0.startFrame < $1.startFrame }) {
                     if let clipIds, !clipIds.contains(clip.id) { continue }
                     guard clip.durationFrames > 0, clip.startFrame >= prevEndFrame else { continue }
@@ -564,8 +566,10 @@ enum CompositionBuilder {
                         ? strength
                         : (mapping.blendedClipIds.contains(clip.id) ? 1 - strength : 1)
                     emitVolumeEnvelope(params: params, clip: clip, timescale: timescale, gain: gain)
+                    tappedClips.append(clip)
                     prevEndFrame = clip.startFrame + clip.durationFrames
                 }
+                attachClipAudioMixTap(to: params, clips: tappedClips, fps: timeline.fps)
                 return params
             }
         }
@@ -792,6 +796,14 @@ enum CompositionBuilder {
         let span = Double(b - a)
         let raw = (1..<smoothSegments).map { a + Int((span * Double($0) / Double(smoothSegments)).rounded()) }
         return Array(Set(raw)).sorted()
+    }
+
+    private static func attachClipAudioMixTap(
+        to params: AVMutableAudioMixInputParameters, clips: [Clip], fps: Int
+    ) {
+        let segments = ClipAudioMixTap.segments(for: clips, fps: fps)
+        guard !segments.isEmpty, let tap = ClipAudioMixTap.make(segments: segments) else { return }
+        params.audioTapProcessor = tap
     }
 
     /// Linear-ramp volume envelope; a nest `carrier` multiplies its envelope in.

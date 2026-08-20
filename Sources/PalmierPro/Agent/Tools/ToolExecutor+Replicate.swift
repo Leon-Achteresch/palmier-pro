@@ -15,7 +15,7 @@ fileprivate struct DuplicateClipsInput: DecodableToolArgs {
 }
 
 /// Attribute groups copy_attributes understands, shared with its tool schema.
-let copyableClipAttributes = ["transform", "crop", "opacity", "volume", "fades", "edges", "effects", "color", "keyframes", "blendMode", "textStyle"]
+let copyableClipAttributes = ["transform", "crop", "opacity", "volume", "fades", "edges", "effects", "color", "keyframes", "blendMode", "textStyle", "audioMix"]
 
 fileprivate struct CopyAttributesInput: DecodableToolArgs {
     let fromClipId: String
@@ -98,7 +98,7 @@ extension ToolExecutor {
 
     // MARK: copy_attributes
 
-    private static let defaultCopiedAttributes = ["transform", "crop", "opacity", "volume", "fades", "edges", "effects", "color", "keyframes", "blendMode"]
+    private static let defaultCopiedAttributes = ["transform", "crop", "opacity", "volume", "fades", "edges", "effects", "color", "keyframes", "blendMode", "audioMix"]
 
     func copyAttributes(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
         let input: CopyAttributesInput = try decodeToolArgs(args, path: "copy_attributes")
@@ -165,6 +165,7 @@ extension ToolExecutor {
                     clip.effects = stack.isEmpty ? nil : stack
                 }
                 if selected.contains("blendMode") { clip.blendMode = source.blendMode }
+                if selected.contains("audioMix") { clip.audioMix = source.audioMix }
                 if selected.contains("keyframes") {
                     clip.opacityTrack = source.opacityTrack
                     clip.positionTrack = source.positionTrack

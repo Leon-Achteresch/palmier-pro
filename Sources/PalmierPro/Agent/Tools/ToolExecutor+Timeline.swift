@@ -239,7 +239,7 @@ extension ToolExecutor {
             }
         }
         let stripped = strippingDefaults(compactClipKeyframes(partner), clipDefaults)
-        for key in ["volumeDb", "fadeInFrames", "fadeOutFrames", "fadeInInterpolation", "fadeOutInterpolation", "keyframes"] {
+        for key in ["volumeDb", "fadeInFrames", "fadeOutFrames", "fadeInInterpolation", "fadeOutInterpolation", "keyframes", "audioMix"] {
             if let v = stripped[key] { out[key] = v }
         }
         if let fx = stripped["effects"] as? [[String: Any]] {

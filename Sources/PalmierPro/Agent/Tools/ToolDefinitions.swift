@@ -56,6 +56,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case removeWords = "remove_words"
     case removeSilence = "remove_silence"
     case detectBeats = "detect_beats"
+    case measureLoudness = "measure_loudness"
 
     // Text & captions
     case addTexts = "add_texts"
@@ -559,7 +560,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .setClipProperties,
-            description: "Apply the same generic clip property values to one or more clips in a single undoable action. Pass any combination of durationFrames, trimStartFrame, trimEndFrame, speed, volumeDb, opacity, fades, edgeRounding, edgeSoftness, transform, or blendMode (video/image clips only). For text content, typography, captions, and text animation, use update_text.\n\nNOT for preview layout — split screen, picture-in-picture, grid, sidebar, and any multi-clip canvas arrangement belong to apply_layout, which sets transform and crop together. Do not use transform here (or set_keyframes position/scale/crop) to build those layouts.\n\nAll values apply to every clip in clipIds; for per-clip differences, make separate calls. trimStartFrame/trimEndFrame are offsets from the source media, not the timeline. speed 1.0 is normal, <1.0 slows (clip gets longer on the timeline), >1.0 speeds up. volumeDb is −60 through +15 dB; 0 dB keeps source level and −60 dB is mute. opacity is 0.0–1.0. fadeInFrames/fadeOutFrames are clip-relative lengths; 0 clears that fade, and their sum must fit within the resulting clip duration. Fades multiply existing opacity or volume keyframes instead of replacing them: visual/text clips fade opacity, while audio clips fade gain. Fades are per-clip and don't propagate to linked media — include both the visual clip id and its nested audio.id from get_timeline to fade picture and sound together. edgeRounding and edgeSoftness are 0.0–1.0, where 1 reaches half the shorter visible edge. transform is for rare single-clip tweaks only — 0–1 normalized canvas coords, partial merge; rotation is clockwise degrees; flipHorizontal/flipVertical mirror across the axis.\n\nFor moves and start-frame changes, use move_clips. For animated values (keyframes), use set_keyframes — setting volumeDb, opacity, or transform.rotation here clears any existing keyframe track on that property.\n\nTiming changes (durationFrames, trimStartFrame, trimEndFrame, speed) on a linked clip carry over to its linked partner so audio/video stay in sync — same as the timeline UI. Per-clip fields (volumeDb, opacity, fades, edgeRounding, edgeSoftness, transform, blendMode) don't propagate. trim and speed are skipped for text partners.\n\nTiming fields (trims, durationFrames, speed) are refused on multicam clips — they would slip the clip out of sync; property fields stay editable, and angle changes go through change_cam.",
+            description: "Apply the same generic clip property values to one or more clips in a single undoable action. Pass any combination of durationFrames, trimStartFrame, trimEndFrame, speed, volumeDb, opacity, fades, edgeRounding, edgeSoftness, transform, blendMode (video/image clips only), or audioMix (audio clips only). For text content, typography, captions, and text animation, use update_text.\n\nNOT for preview layout — split screen, picture-in-picture, grid, sidebar, and any multi-clip canvas arrangement belong to apply_layout, which sets transform and crop together. Do not use transform here (or set_keyframes position/scale/crop) to build those layouts.\n\nAll values apply to every clip in clipIds; for per-clip differences, make separate calls. trimStartFrame/trimEndFrame are offsets from the source media, not the timeline. speed 1.0 is normal, <1.0 slows (clip gets longer on the timeline), >1.0 speeds up. volumeDb is −60 through +15 dB; 0 dB keeps source level and −60 dB is mute. opacity is 0.0–1.0. fadeInFrames/fadeOutFrames are clip-relative lengths; 0 clears that fade, and their sum must fit within the resulting clip duration. Fades multiply existing opacity or volume keyframes instead of replacing them: visual/text clips fade opacity, while audio clips fade gain. Fades are per-clip and don't propagate to linked media — include both the visual clip id and its nested audio.id from get_timeline to fade picture and sound together. edgeRounding and edgeSoftness are 0.0–1.0, where 1 reaches half the shorter visible edge. transform is for rare single-clip tweaks only — 0–1 normalized canvas coords, partial merge; rotation is clockwise degrees; flipHorizontal/flipVertical mirror across the axis.\n\nFor moves and start-frame changes, use move_clips. For animated values (keyframes), use set_keyframes — setting volumeDb, opacity, or transform.rotation here clears any existing keyframe track on that property.\n\nTiming changes (durationFrames, trimStartFrame, trimEndFrame, speed) on a linked clip carry over to its linked partner so audio/video stay in sync — same as the timeline UI. Per-clip fields (volumeDb, opacity, fades, edgeRounding, edgeSoftness, transform, blendMode) don't propagate. trim and speed are skipped for text partners.\n\naudioMix is audio-clip-only per-clip processing — pan, 3-band EQ, and a compressor — applied BEFORE the clip's volume and fades, in preview and export alike. It merges into whatever the clip already carries, so you can tweak one band without restating the rest; audioMix.reset:true clears it. Address a video clip's sound through its nested audio.id from get_timeline. Use measure_loudness to check the result against a delivery target.\n\nTiming fields (trims, durationFrames, speed) are refused on multicam clips — they would slip the clip out of sync; property fields stay editable, and angle changes go through change_cam.",
             inputSchema: objectSchema(
                 properties: [
                     "clipIds": [
@@ -601,6 +602,41 @@ enum ToolDefinitions {
                         "type": "string",
                         "enum": BlendMode.allCases.map(\.rawValue),
                         "description": "Video/image clips only. How the clip composites over the tracks below it (Premiere/Photoshop blend modes). 'normal' is the default (source-over) and clears any blend. Rejected on text/audio clips.",
+                    ],
+                    "audioMix": [
+                        "type": "object",
+                        "description": "Audio clips only — pan, EQ, and compression applied BEFORE volume/fades. Partial merge: omitted fields keep their current values, and an all-neutral mix is dropped (the clip stops carrying audioMix). Pass reset:true to clear it in one call.",
+                        "properties": [
+                            "pan": [
+                                "type": "number",
+                                "minimum": ClipAudioMixLimits.pan.lowerBound,
+                                "maximum": ClipAudioMixLimits.pan.upperBound,
+                                "description": "Stereo position, −1 hard left to +1 hard right, 0 centered. Equal-power law with unity at center, so a hard-panned clip gains 3 dB in the surviving channel. Mono sources keep their level (nothing to pan).",
+                            ],
+                            "eq": [
+                                "type": "object",
+                                "description": "Three-band EQ: fixed 120 Hz low shelf, sweepable peaking mid, fixed 8 kHz high shelf. Set all three gains to 0 to remove the EQ.",
+                                "properties": [
+                                    "lowGainDb": ["type": "number", "minimum": ClipAudioMixLimits.eqGainDb.lowerBound, "maximum": ClipAudioMixLimits.eqGainDb.upperBound, "description": "Low-shelf gain in dB (−24…+24). Cut for rumble and boominess."],
+                                    "midGainDb": ["type": "number", "minimum": ClipAudioMixLimits.eqGainDb.lowerBound, "maximum": ClipAudioMixLimits.eqGainDb.upperBound, "description": "Peaking mid gain in dB (−24…+24) at midFrequency. Boost around 2–4 kHz for dialogue presence."],
+                                    "highGainDb": ["type": "number", "minimum": ClipAudioMixLimits.eqGainDb.lowerBound, "maximum": ClipAudioMixLimits.eqGainDb.upperBound, "description": "High-shelf gain in dB (−24…+24). Adds air or tames hiss."],
+                                    "midFrequency": ["type": "number", "minimum": ClipAudioMixLimits.midFrequency.lowerBound, "maximum": ClipAudioMixLimits.midFrequency.upperBound, "description": "Center frequency of the mid band in Hz (200–8000, default 1000)."],
+                                ],
+                            ],
+                            "compressor": [
+                                "type": "object",
+                                "description": "Peak compressor; high ratios act as a limiter. Passing any parameter enables it with defaults for the fields you omit. Pass enabled:false alone to remove it.",
+                                "properties": [
+                                    "enabled": ["type": "boolean", "description": "false removes compression from the clip. Call it on its own."],
+                                    "thresholdDb": ["type": "number", "minimum": ClipAudioMixLimits.thresholdDb.lowerBound, "maximum": ClipAudioMixLimits.thresholdDb.upperBound, "description": "Level where compression starts, −60…0 dBFS (default −18)."],
+                                    "ratio": ["type": "number", "minimum": ClipAudioMixLimits.ratio.lowerBound, "maximum": ClipAudioMixLimits.ratio.upperBound, "description": "Compression ratio 1–60 (default 4). 1 is no compression; 20 and above behaves as a limiter."],
+                                    "attackMs": ["type": "number", "minimum": ClipAudioMixLimits.attackMs.lowerBound, "maximum": ClipAudioMixLimits.attackMs.upperBound, "description": "Attack time in ms, 0.1–200 (default 10)."],
+                                    "releaseMs": ["type": "number", "minimum": ClipAudioMixLimits.releaseMs.lowerBound, "maximum": ClipAudioMixLimits.releaseMs.upperBound, "description": "Release time in ms, 5–2000 (default 120)."],
+                                    "makeupGainDb": ["type": "number", "minimum": ClipAudioMixLimits.makeupGainDb.lowerBound, "maximum": ClipAudioMixLimits.makeupGainDb.upperBound, "description": "Gain applied after compression, −24…+24 dB (default 0)."],
+                                ],
+                            ],
+                            "reset": ["type": "boolean", "description": "true clears pan, EQ, and compression. Cannot be combined with other fields."],
+                        ],
                     ],
                 ],
                 required: ["clipIds"]
@@ -701,7 +737,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .copyAttributes,
-            description: "Paste one clip's look onto other clips — the 'make these match' tool. Copies only the attributes you name; timing, media, track, and position are never touched.\n\nattributes defaults to the full look: transform, crop, opacity, volume, fades, edges, effects, color, keyframes, blendMode. Pass a subset to be surgical (e.g. ['color'] to spread a grade, ['keyframes'] to reuse an animation, ['transform','crop'] to repeat a framing). 'textStyle' is opt-in and needs text clips on both sides. Attribute groups: transform (position/scale/rotation/flip), crop, opacity (static), volume (static), fades (lengths + interpolation, clamped to each target's length), edges (rounding + softness), effects (non-color stack), color (the grade), keyframes (all six animation tracks, trimmed to each target's length), blendMode, textStyle (style + fill mode + text animation).\n\nUse this instead of re-sending the same apply_color/apply_effect/set_keyframes payload per clip: it's one undoable action and it can't drift between clips. The source clip is skipped if it appears in toClipIds.",
+            description: "Paste one clip's look onto other clips — the 'make these match' tool. Copies only the attributes you name; timing, media, track, and position are never touched.\n\nattributes defaults to the full look: transform, crop, opacity, volume, fades, edges, effects, color, keyframes, blendMode. Pass a subset to be surgical (e.g. ['color'] to spread a grade, ['keyframes'] to reuse an animation, ['transform','crop'] to repeat a framing). 'textStyle' is opt-in and needs text clips on both sides. Attribute groups: transform (position/scale/rotation/flip), crop, opacity (static), volume (static), fades (lengths + interpolation, clamped to each target's length), edges (rounding + softness), effects (non-color stack), color (the grade), keyframes (all six animation tracks, trimmed to each target's length), blendMode, textStyle (style + fill mode + text animation), audioMix (pan + EQ + compressor chain).\n\nUse this instead of re-sending the same apply_color/apply_effect/set_keyframes payload per clip: it's one undoable action and it can't drift between clips. The source clip is skipped if it appears in toClipIds.",
             inputSchema: objectSchema(
                 properties: [
                     "fromClipId": ["type": "string", "description": "The clip to copy from."],
@@ -985,6 +1021,27 @@ enum ToolDefinitions {
                     "endSeconds": ["type": "number", "description": "Optional. Return only beats at or before this source-media second."],
                 ],
                 required: ["mediaRef"]
+            )
+        ),
+        AgentTool(
+            name: .measureLoudness,
+            description: "Measure delivered loudness the way a platform will: ITU-R BS.1770-4 integrated LUFS and 4x-oversampled true peak (dBTP) over the real mix — every audio clip with its pan/EQ/compression, volume, fades, and track mutes applied, exactly what export writes.\n\nUse it before delivery, when the user asks whether a cut is loud enough (\"is this ready for YouTube?\"), or to compare a clip against the program. Pass a target to get the gain to apply: deltaDb is what to add, and it lands on the timeline through set_clip_properties volumeDb (or per clip audioMix.compressor.makeupGainDb). truePeakAfterTargetDbtp warns when that gain would push peaks past the platform ceiling — compress or lower peaks instead of pushing gain.\n\nScope 'timeline' measures the whole program (window it with startFrame/endFrame); scope 'clip' measures one audio clip alone, ignoring everything else on the timeline. Silence returns integratedLufs null. This decodes the audio, so a long timeline takes a while; it changes nothing and creates no undo step.",
+            inputSchema: objectSchema(
+                properties: [
+                    "scope": [
+                        "type": "string",
+                        "enum": ["timeline", "clip"],
+                        "description": "'timeline' (default) measures the mixed program; 'clip' measures one audio clip in isolation.",
+                    ],
+                    "clipId": ["type": "string", "description": "Required for scope 'clip'. Must be an audio clip id — a video clip's sound is its nested audio.id from get_timeline."],
+                    "startFrame": ["type": "integer", "description": "Optional window start (inclusive), timeline frames. scope 'timeline' only."],
+                    "endFrame": ["type": "integer", "description": "Optional window end (exclusive), timeline frames. scope 'timeline' only."],
+                    "target": [
+                        "type": "string",
+                        "enum": LoudnessTarget.allCases.map(\.rawValue),
+                        "description": "Optional delivery target to compare against: youtube (−14 LUFS), podcast (−16 LUFS), broadcast (−23 LUFS). Adds deltaDb and a true-peak check to the result.",
+                    ],
+                ]
             )
         ),
         AgentTool(

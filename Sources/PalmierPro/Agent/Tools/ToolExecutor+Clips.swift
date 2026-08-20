@@ -71,6 +71,7 @@ fileprivate struct SetClipPropertiesInput: DecodableToolArgs {
     let edgeSoftness: Double?
     let transform: ParsedTransform?
     let blendMode: String?
+    let audioMix: ParsedAudioMix?
 
     static let allowedKeys: Set<String> = Set([
         "clipIds",
@@ -80,6 +81,7 @@ fileprivate struct SetClipPropertiesInput: DecodableToolArgs {
         "edgeRounding", "edgeSoftness",
         "transform",
         "blendMode",
+        "audioMix",
     ])
 
     var hasAnyProperty: Bool {
@@ -90,6 +92,7 @@ fileprivate struct SetClipPropertiesInput: DecodableToolArgs {
             || edgeRounding != nil || edgeSoftness != nil
             || transform?.hasAnyField == true
             || blendMode != nil
+            || audioMix?.hasAnyField == true
     }
 }
 
@@ -500,6 +503,32 @@ extension ToolExecutor {
                 path: "set_clip_properties.transform"
             )
         }
+        if let rawAudioMix = args["audioMix"] {
+            guard let audioMix = rawAudioMix as? [String: Any] else {
+                throw ToolError("set_clip_properties.audioMix: expected object")
+            }
+            try validateUnknownKeys(
+                audioMix,
+                allowed: ParsedAudioMix.allowedKeys,
+                path: "set_clip_properties.audioMix"
+            )
+            if let eq = audioMix["eq"] {
+                guard let eq = eq as? [String: Any] else {
+                    throw ToolError("set_clip_properties.audioMix.eq: expected object")
+                }
+                try validateUnknownKeys(eq, allowed: ParsedAudioEQ.allowedKeys, path: "set_clip_properties.audioMix.eq")
+            }
+            if let compressor = audioMix["compressor"] {
+                guard let compressor = compressor as? [String: Any] else {
+                    throw ToolError("set_clip_properties.audioMix.compressor: expected object")
+                }
+                try validateUnknownKeys(
+                    compressor,
+                    allowed: ParsedAudioCompressor.allowedKeys,
+                    path: "set_clip_properties.audioMix.compressor"
+                )
+            }
+        }
         let input: SetClipPropertiesInput = try decodeToolArgs(args, path: "set_clip_properties")
         let clipIds = input.clipIds ?? []
         guard !clipIds.isEmpty else { throw ToolError("Provide a non-empty 'clipIds' array") }
@@ -540,6 +569,9 @@ extension ToolExecutor {
             guard value.isFinite, (0...1).contains(value) else {
                 throw ToolError("\(name) must be between 0 and 1 (got \(value))")
             }
+        }
+        if let audioMix = input.audioMix {
+            try audioMix.validated(path: "set_clip_properties.audioMix")
         }
         if let t = input.trimStartFrame, t < 0 {
             throw ToolError("trimStartFrame must be >= 0 (got \(t))")
@@ -599,6 +631,15 @@ extension ToolExecutor {
                 blendMode = m
             }
         }
+        if input.audioMix != nil {
+            let unsupported = targetClips.filter { $0.value.mediaType != .audio }.map(\.key).sorted()
+            if !unsupported.isEmpty {
+                throw ToolError(
+                    "audioMix only applies to audio clips: \(unsupported.joined(separator: ", ")). "
+                        + "A video clip's sound is its nested audio.id from get_timeline — pass that id instead."
+                )
+            }
+        }
         if input.edgeRounding != nil || input.edgeSoftness != nil {
             let unsupported = targetClips.filter {
                 $0.value.mediaType == .audio || $0.value.mediaType == .text
@@ -653,6 +694,7 @@ extension ToolExecutor {
                     transform: input.transform,
                     blendMode: blendMode,
                     setBlendMode: setBlendMode,
+                    audioMix: input.audioMix,
                     clipId: id,
                     editor: editor
                 )
@@ -670,7 +712,7 @@ extension ToolExecutor {
                     fadeInFrames: nil, fadeOutFrames: nil,
                     fadeInInterpolation: nil, fadeOutInterpolation: nil,
                     edgeRounding: nil, edgeSoftness: nil, transform: nil,
-                    blendMode: nil, setBlendMode: false,
+                    blendMode: nil, setBlendMode: false, audioMix: nil,
                     clipId: partnerId,
                     editor: editor
                 )
@@ -702,6 +744,7 @@ extension ToolExecutor {
         transform: ParsedTransform?,
         blendMode: BlendMode?,
         setBlendMode: Bool,
+        audioMix: ParsedAudioMix?,
         clipId: String,
         editor: EditorViewModel
     ) -> [String] {
@@ -734,6 +777,7 @@ extension ToolExecutor {
             if let v = edgeRounding { clip.edgeRounding = v; changed.append("edgeRounding") }
             if let v = edgeSoftness { clip.edgeSoftness = v; changed.append("edgeSoftness") }
             if setBlendMode           { clip.blendMode = blendMode; changed.append("blendMode") }
+            if let audioMix           { audioMix.apply(to: &clip); changed.append("audioMix") }
             if let t = transform {
                 t.apply(to: &clip)
                 changed.append("transform")
