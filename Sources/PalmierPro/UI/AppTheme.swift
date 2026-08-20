@@ -191,6 +191,7 @@ enum AppTheme {
         static let motion = NSColor(red: 0x3F/255.0, green: 0x3D/255.0, blue: 0x9E/255.0, alpha: 1)
         static let sequence = NSColor(red: 0xB9/255.0, green: 0xB2/255.0, blue: 0x9A/255.0, alpha: 1)
         static let multicam = NSColor.systemRed
+        static let transition = NSColor(red: 0x3C/255.0, green: 0x3A/255.0, blue: 0x52/255.0, alpha: 1)
     }
 
     // MARK: - Timeline markers

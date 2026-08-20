@@ -288,8 +288,20 @@ extension Timeline {
         regenerateMarkerIds()
         for ti in tracks.indices {
             tracks[ti].id = UUID().uuidString
+            var renamedClips: [String: String] = [:]
             for ci in tracks[ti].clips.indices {
+                let previousId = tracks[ti].clips[ci].id
                 tracks[ti].clips[ci].freshenIds(groups: &groups)
+                renamedClips[previousId] = tracks[ti].clips[ci].id
+            }
+            tracks[ti].transitions = tracks[ti].transitions.compactMap { transition in
+                guard let from = renamedClips[transition.fromClipId],
+                      let to = renamedClips[transition.toClipId] else { return nil }
+                var copy = transition
+                copy.id = UUID().uuidString
+                copy.fromClipId = from
+                copy.toClipId = to
+                return copy
             }
         }
     }

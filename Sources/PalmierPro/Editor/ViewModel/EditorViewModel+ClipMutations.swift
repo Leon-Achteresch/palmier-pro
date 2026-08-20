@@ -273,7 +273,10 @@ extension EditorViewModel {
     /// Run `work` as a single atomic mutation, registering one timeline-swap undo
     func withTimelineSwap(actionName: String, refreshVisuals: Bool = true, _ work: () -> Void) {
         let before = timeline
-        undo.withoutRegistration(work)
+        undo.withoutRegistration {
+            work()
+            timeline.pruneInvalidTransitions()
+        }
         let after = timeline
         guard before != after else { return }
         guard undo.isRegistrationEnabled else { return }
@@ -321,6 +324,7 @@ extension EditorViewModel {
     /// before snapshot for each and registers a bidirectional undo/redo swap
     func mutateClips(ids: Set<String>, actionName: String, _ modify: (inout Clip) -> Void) {
         var before: [(id: String, clip: Clip)] = []
+        let transitionsBefore = timeline.transitionsByTrackId
         for ti in timeline.tracks.indices {
             for ci in timeline.tracks[ti].clips.indices where ids.contains(timeline.tracks[ti].clips[ci].id) {
                 before.append((timeline.tracks[ti].clips[ci].id, timeline.tracks[ti].clips[ci]))
@@ -328,11 +332,18 @@ extension EditorViewModel {
             }
         }
         guard !before.isEmpty else { return }
+        let pruned = timeline.pruneInvalidTransitions()
         let after: [(id: String, clip: Clip)] = before.compactMap { entry in
             guard let loc = findClip(id: entry.id) else { return nil }
             return (entry.id, timeline.tracks[loc.trackIndex].clips[loc.clipIndex])
         }
-        registerClipStateSwap(undoTarget: before, redoTarget: after, actionName: actionName)
+        registerClipStateSwap(
+            undoTarget: before,
+            redoTarget: after,
+            undoTransitions: pruned.isEmpty ? nil : transitionsBefore,
+            redoTransitions: pruned.isEmpty ? nil : timeline.transitionsByTrackId,
+            actionName: actionName
+        )
         notifyTimelineChanged()
     }
 
@@ -341,6 +352,8 @@ extension EditorViewModel {
     fileprivate func registerClipStateSwap(
         undoTarget: [(id: String, clip: Clip)],
         redoTarget: [(id: String, clip: Clip)],
+        undoTransitions: [String: [ClipTransition]]? = nil,
+        redoTransitions: [String: [ClipTransition]]? = nil,
         actionName: String
     ) {
         registerTimelineUndo(actionName) { vm in
@@ -351,8 +364,15 @@ extension EditorViewModel {
                         timeline.tracks[loc.trackIndex].clips[loc.clipIndex] = entry.clip
                     }
                 }
+                if let undoTransitions { timeline.applyTransitions(byTrackId: undoTransitions) }
             }
-            vm.registerClipStateSwap(undoTarget: redoTarget, redoTarget: undoTarget, actionName: actionName)
+            vm.registerClipStateSwap(
+                undoTarget: redoTarget,
+                redoTarget: undoTarget,
+                undoTransitions: redoTransitions,
+                redoTransitions: undoTransitions,
+                actionName: actionName
+            )
             vm.notifyTimelineChanged()
         }
     }
@@ -748,6 +768,12 @@ extension EditorViewModel {
     }
 
     func deleteSelectedClips() {
+        if !selectedTransitionIds.isEmpty, selectedClipIds.isEmpty {
+            let ids = selectedTransitionIds
+            selectedTransitionIds.removeAll()
+            _ = removeTransitions(ids: ids)
+            return
+        }
         removeClips(ids: selectedClipIds)
     }
 

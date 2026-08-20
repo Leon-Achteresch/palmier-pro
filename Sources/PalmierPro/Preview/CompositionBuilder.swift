@@ -71,6 +71,10 @@ enum CompositionBuilder {
                 try await insertAudioLane(clips: sortedClips, parentTrackIndex: trackIdx, nest: nil, depth: 0, ctx: ctx)
             } else {
                 try await insertVideoLane(clips: sortedClips, parentTrackIndex: trackIdx, nestCarrier: nil, depth: 0, ctx: ctx)
+                let handles = TransitionExtension.extensionClips(for: track)
+                if !handles.isEmpty {
+                    try await insertVideoLane(clips: handles, parentTrackIndex: trackIdx, nestCarrier: nil, depth: 0, ctx: ctx)
+                }
             }
         }
 
@@ -683,10 +687,61 @@ enum CompositionBuilder {
             return frames.filter { $0 > carrier.startFrame && $0 < carrier.endFrame }
         }
 
+        func mediaLayer(_ slot: Slot, _ clip: Clip) -> LayerPlan {
+            LayerPlan(source: .track(slot.trackID), clip: clip, natSize: slot.natSize, preferredTransform: slot.transform)
+        }
+
+        func transitionEntries(_ resolved: ResolvedTransition) -> [Entry] {
+            guard let fromSlot = media[resolved.from.id], let toSlot = media[resolved.to.id] else { return [] }
+            let plan = TransitionPlan(
+                style: resolved.transition.style,
+                direction: resolved.transition.direction,
+                window: resolved.window
+            )
+            let carrier = TransitionExtension.renderClip(resolved.from)
+            var out: [Entry] = []
+            if resolved.window.headFrames > 0,
+               let headSlot = media[TransitionExtension.headClipId(resolved.id)] {
+                let source = LayerPlan.Source.transition(
+                    from: mediaLayer(fromSlot, resolved.from),
+                    to: mediaLayer(headSlot, TransitionExtension.renderClip(resolved.to)),
+                    plan: plan
+                )
+                out.append(Entry(
+                    start: cmTime(resolved.window.startFrame), end: cmTime(resolved.window.cutFrame),
+                    plan: LayerPlan(source: source, clip: carrier, natSize: fromSlot.natSize, preferredTransform: .identity)
+                ))
+            }
+            if resolved.window.tailFrames > 0,
+               let tailSlot = media[TransitionExtension.tailClipId(resolved.id)] {
+                let source = LayerPlan.Source.transition(
+                    from: mediaLayer(tailSlot, TransitionExtension.renderClip(resolved.from)),
+                    to: mediaLayer(toSlot, resolved.to),
+                    plan: plan
+                )
+                out.append(Entry(
+                    start: cmTime(resolved.window.cutFrame), end: cmTime(resolved.window.endFrame),
+                    plan: LayerPlan(source: source, clip: carrier, natSize: fromSlot.natSize, preferredTransform: .identity)
+                ))
+            }
+            return out
+        }
+
         // Walk tracks in reverse to produce bottom→top entries. Text layers follow track order.
         var entries: [Entry] = []
         for track in timeline.tracks.reversed() where !track.hidden {
             var prevEndFrame = Int.min
+            var incoming: [String: ResolvedTransition] = [:]
+            var outgoing: [String: ResolvedTransition] = [:]
+            for resolved in track.resolvedTransitions {
+                let hasHead = resolved.window.headFrames == 0
+                    || media[TransitionExtension.headClipId(resolved.id)] != nil
+                let hasTail = resolved.window.tailFrames == 0
+                    || media[TransitionExtension.tailClipId(resolved.id)] != nil
+                guard hasHead, hasTail, media[resolved.from.id] != nil, media[resolved.to.id] != nil else { continue }
+                incoming[resolved.to.id] = resolved
+                outgoing[resolved.from.id] = resolved
+            }
             for clip in track.clips.sorted(by: { $0.startFrame < $1.startFrame }) where clip.durationFrames > 0 {
                 let plan: LayerPlan
                 if clip.mediaType == .text {
@@ -709,8 +764,18 @@ enum CompositionBuilder {
                     continue
                 } else {
                     guard clip.startFrame >= prevEndFrame, let slot = media[clip.id] else { continue }
-                    plan = LayerPlan(source: .track(slot.trackID), clip: clip, natSize: slot.natSize, preferredTransform: slot.transform)
                     prevEndFrame = clip.endFrame
+                    let visibleStart = incoming[clip.id].map { max(clip.startFrame, $0.window.endFrame) } ?? clip.startFrame
+                    let visibleEnd = outgoing[clip.id].map { min(clip.endFrame, $0.window.startFrame) } ?? clip.endFrame
+                    if visibleEnd > visibleStart {
+                        entries.append(Entry(
+                            start: cmTime(visibleStart), end: cmTime(visibleEnd), plan: mediaLayer(slot, clip)
+                        ))
+                    }
+                    if let resolved = outgoing[clip.id] {
+                        entries.append(contentsOf: transitionEntries(resolved))
+                    }
+                    continue
                 }
                 entries.append(Entry(start: cmTime(clip.startFrame), end: cmTime(clip.endFrame), plan: plan))
             }

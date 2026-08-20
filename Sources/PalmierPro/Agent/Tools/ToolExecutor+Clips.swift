@@ -397,18 +397,43 @@ extension ToolExecutor {
     // MARK: remove_clips
 
     func removeClips(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
-        try validateUnknownKeys(args, allowed: ["clipIds"], path: "remove_clips")
+        try validateUnknownKeys(args, allowed: ["clipIds", "transitionIds"], path: "remove_clips")
         let clipIds = args.stringArray("clipIds")
-        guard !clipIds.isEmpty else { throw ToolError("Missing or empty 'clipIds' array") }
+        let transitionIds = args.stringArray("transitionIds")
+        guard !clipIds.isEmpty || !transitionIds.isEmpty else {
+            throw ToolError("Provide 'clipIds', 'transitionIds', or both — both were missing or empty.")
+        }
         for id in clipIds {
             guard editor.findClip(id: id) != nil else { throw ToolError("Clip not found: \(id)") }
         }
+        for id in transitionIds {
+            guard editor.timeline.trackIndexOfTransition(id: id) != nil else {
+                throw ToolError("Transition not found: \(id). get_timeline lists each track's transitions.")
+            }
+        }
         let expanded = editor.expandToLinkGroup(Set(clipIds))
         let snapshot = timelineSnapshot(editor)
-        editor.undo.perform(clipIds.count == 1 ? "Remove Clip (Agent)" : "Remove Clips (Agent)") {
-            editor.removeClips(ids: expanded)
+        var removedTransitions: [ClipTransition] = []
+        editor.undo.perform(Self.removeActionName(clipCount: clipIds.count, transitionCount: transitionIds.count)) {
+            if !transitionIds.isEmpty {
+                removedTransitions = editor.removeTransitions(ids: Set(transitionIds))
+            }
+            if !expanded.isEmpty {
+                editor.removeClips(ids: expanded)
+            }
         }
-        return mutationResult(editor, since: snapshot)
+        var extra: [String: Any] = [:]
+        if !removedTransitions.isEmpty {
+            extra["removedTransitionIds"] = removedTransitions.map(\.id).sorted()
+        }
+        return mutationResult(editor, since: snapshot, extra: extra)
+    }
+
+    private static func removeActionName(clipCount: Int, transitionCount: Int) -> String {
+        if clipCount == 0 {
+            return transitionCount == 1 ? "Remove Transition (Agent)" : "Remove Transitions (Agent)"
+        }
+        return clipCount == 1 && transitionCount == 0 ? "Remove Clip (Agent)" : "Remove Clips (Agent)"
     }
 
     // MARK: move_clips

@@ -221,6 +221,7 @@ struct Track: Codable, Sendable, Equatable, Identifiable {
     var hidden: Bool = false
     var syncLocked: Bool = true
     var clips: [Clip] = []
+    var transitions: [ClipTransition] = []
 
     var displayHeight: CGFloat = 50
 
@@ -245,7 +246,7 @@ struct Track: Codable, Sendable, Equatable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, type, muted, hidden, syncLocked, clips, displayHeight
+        case id, type, muted, hidden, syncLocked, clips, transitions, displayHeight
     }
 }
 
@@ -259,6 +260,7 @@ extension Track {
             hidden: (try? c.decode(Bool.self, forKey: .hidden)) ?? false,
             syncLocked: (try? c.decode(Bool.self, forKey: .syncLocked)) ?? true,
             clips: (try? c.decode([Clip].self, forKey: .clips)) ?? [],
+            transitions: (try? c.decode([ClipTransition].self, forKey: .transitions)) ?? [],
             displayHeight: (try? c.decode(CGFloat.self, forKey: .displayHeight))
                 .map { min(max($0, TrackSize.minHeight), TrackSize.maxHeight) } ?? 50
         )

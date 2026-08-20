@@ -136,6 +136,7 @@ final class EditorViewModel {
     var isPlaying: Bool = false
     private(set) var playbackRate: PreviewPlaybackRate = .normal
     var selectedClipIds: Set<String> = []
+    var selectedTransitionIds: Set<String> = []
     var isMarqueeSelecting: Bool = false
     var selectedGap: GapSelection?
     var selectedTimelineRange: TimelineRangeSelection?

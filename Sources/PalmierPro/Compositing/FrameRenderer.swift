@@ -16,11 +16,15 @@ enum FrameRenderer {
         let frame = Int((compositionTime.seconds * Double(instruction.fps)).rounded())
 
         let base = CIImage(color: .black).cropped(to: renderRect)
-        var tagSource: CVPixelBuffer?
         let accum = composite(
             layers: instruction.layers, over: base, frame: frame,
-            renderSize: instruction.renderSize, sourceFrame: sourceFrame, gateByClipRange: false,
-            tagSource: &tagSource
+            renderSize: instruction.renderSize, sourceFrame: sourceFrame, gateByClipRange: false
+        )
+        let tagSource = colorTagSource(
+            layers: instruction.layers,
+            frame: frame,
+            sourceFrame: sourceFrame,
+            gateByClipRange: false
         )
         let outputColorSpace = tagSource.flatMap(colorSpace(for:)) ?? fallbackVideoColorSpace
         context.render(accum, to: output, bounds: renderRect, colorSpace: outputColorSpace)
@@ -28,15 +32,13 @@ enum FrameRenderer {
     }
 
     /// Bottom→top layer stack; `gateByClipRange` skips group children outside `frame`.
-    /// `tagSource` ends as the topmost visible track buffer, used for output color tagging.
     private static func composite(
         layers: [LayerPlan],
         over background: CIImage,
         frame: Int,
         renderSize: CGSize,
         sourceFrame: (CMPersistentTrackID) -> CVPixelBuffer?,
-        gateByClipRange: Bool,
-        tagSource: inout CVPixelBuffer?
+        gateByClipRange: Bool
     ) -> CIImage {
         var accum = background
         for layer in layers {
@@ -68,21 +70,10 @@ enum FrameRenderer {
             // Source-over bakes opacity into alpha; blend modes apply it as a fade of
             // the blend RESULT (Photoshop/Premiere semantics), so don't bake it there.
             let isNormal = mode.ciFilterName == nil
-            let image: CIImage?
-            switch layer.source {
-            case .track(let id):
-                guard let buffer = sourceFrame(id) else { continue }
-                image = composedLayer(layer, buffer: buffer, frame: frame,
-                                      renderSize: renderSize, bakeOpacity: isNormal)
-                if image != nil { tagSource = buffer }
-            case .text:
-                image = composedTextLayer(layer, frame: frame, renderSize: renderSize,
-                                          bakeOpacity: isNormal)
-            case .group(let children, let canvas):
-                image = composedGroupLayer(layer, children: children, canvas: canvas, frame: frame,
-                                           renderSize: renderSize, sourceFrame: sourceFrame, bakeOpacity: isNormal,
-                                           tagSource: &tagSource)
-            }
+            let image = layerImage(
+                layer, frame: frame, renderSize: renderSize,
+                sourceFrame: sourceFrame, bakeOpacity: isNormal
+            )
             guard let image else { continue }
             if isNormal {
                 if let occlusion = layer.clip.effects?.first(where: { $0.type == "key.occlusion" && $0.enabled }) {
@@ -153,6 +144,52 @@ enum FrameRenderer {
         ]).cropped(to: accum.extent)
     }
 
+    private static func layerImage(
+        _ layer: LayerPlan,
+        frame: Int,
+        renderSize: CGSize,
+        sourceFrame: (CMPersistentTrackID) -> CVPixelBuffer?,
+        bakeOpacity: Bool
+    ) -> CIImage? {
+        switch layer.source {
+        case .track(let id):
+            guard let buffer = sourceFrame(id) else { return nil }
+            return composedLayer(layer, buffer: buffer, frame: frame,
+                                 renderSize: renderSize, bakeOpacity: bakeOpacity)
+        case .text:
+            return composedTextLayer(layer, frame: frame, renderSize: renderSize,
+                                     bakeOpacity: bakeOpacity)
+        case .group(let children, let canvas):
+            return composedGroupLayer(layer, children: children, canvas: canvas, frame: frame,
+                                      renderSize: renderSize, sourceFrame: sourceFrame, bakeOpacity: bakeOpacity)
+        case .transition(let from, let to, let plan):
+            return composedTransitionLayer(from: from, to: to, plan: plan, frame: frame,
+                                           renderSize: renderSize, sourceFrame: sourceFrame)
+        }
+    }
+
+    private static func composedTransitionLayer(
+        from: LayerPlan,
+        to: LayerPlan,
+        plan: TransitionPlan,
+        frame: Int,
+        renderSize: CGSize,
+        sourceFrame: (CMPersistentTrackID) -> CVPixelBuffer?
+    ) -> CIImage? {
+        let fromImage = layerImage(from, frame: frame, renderSize: renderSize,
+                                   sourceFrame: sourceFrame, bakeOpacity: true)
+        let toImage = layerImage(to, frame: frame, renderSize: renderSize,
+                                 sourceFrame: sourceFrame, bakeOpacity: true)
+        return TransitionCompositor.blend(
+            from: fromImage,
+            to: toImage,
+            style: plan.style,
+            direction: plan.direction,
+            progress: plan.window.progress(at: frame),
+            renderRect: CGRect(origin: .zero, size: renderSize)
+        )
+    }
+
     private static func textStencilMatte(
         _ layer: LayerPlan,
         frame: Int,
@@ -176,8 +213,7 @@ enum FrameRenderer {
         frame: Int,
         renderSize: CGSize,
         sourceFrame: (CMPersistentTrackID) -> CVPixelBuffer?,
-        bakeOpacity: Bool,
-        tagSource: inout CVPixelBuffer?
+        bakeOpacity: Bool
     ) -> CIImage? {
         let alpha = min(1.0, max(0.0, layer.clip.opacityAt(frame: frame)))
         guard alpha > 0, canvas.width > 0, canvas.height > 0 else { return nil }
@@ -185,8 +221,7 @@ enum FrameRenderer {
         let base = CIImage(color: .black).cropped(to: canvasRect)
         let intermediate = composite(
             layers: children, over: base, frame: frame,
-            renderSize: canvas, sourceFrame: sourceFrame, gateByClipRange: true,
-            tagSource: &tagSource
+            renderSize: canvas, sourceFrame: sourceFrame, gateByClipRange: true
         )
         return applyClipPipeline(
             image: intermediate, srcHeight: canvas.height, layer: layer, frame: frame,
@@ -218,6 +253,43 @@ enum FrameRenderer {
             tag709(output)
         }
         CVBufferSetAttachment(output, kCVImageBufferCGColorSpaceKey, colorSpace, .shouldPropagate)
+    }
+
+    private static func colorTagSource(
+        layers: [LayerPlan],
+        frame: Int,
+        sourceFrame: (CMPersistentTrackID) -> CVPixelBuffer?,
+        gateByClipRange: Bool
+    ) -> CVPixelBuffer? {
+        for layer in layers.reversed() {
+            if gateByClipRange, !layer.clip.contains(timelineFrame: frame) { continue }
+            guard layer.clip.opacityAt(frame: frame) > 0 else { continue }
+            switch layer.source {
+            case .track(let id):
+                if let buffer = sourceFrame(id) { return buffer }
+            case .text:
+                continue
+            case .group(let children, _):
+                if let buffer = colorTagSource(
+                    layers: children,
+                    frame: frame,
+                    sourceFrame: sourceFrame,
+                    gateByClipRange: true
+                ) {
+                    return buffer
+                }
+            case .transition(let from, let to, _):
+                if let buffer = colorTagSource(
+                    layers: [from, to],
+                    frame: frame,
+                    sourceFrame: sourceFrame,
+                    gateByClipRange: false
+                ) {
+                    return buffer
+                }
+            }
+        }
+        return nil
     }
 
     private static func copyColorTags(from source: CVPixelBuffer, to output: CVPixelBuffer) {

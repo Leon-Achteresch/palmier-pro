@@ -31,6 +31,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case removeClips = "remove_clips"
     case splitClips = "split_clips"
     case trimClips = "trim_clips"
+    case addTransition = "add_transition"
     case rippleDeleteRanges = "ripple_delete_ranges"
     case setClipProperties = "set_clip_properties"
     case setKeyframes = "set_keyframes"
@@ -100,7 +101,7 @@ enum ToolDefinitions {
     static let all: [AgentTool] = [
         AgentTool(
             name: .getTimeline,
-            description: "Always call at the start of a session. Returns project settings (fps, resolution, totalFrames, durationSeconds), tracks with a stable trackId, their current index (what every trackIndex parameter takes), type, and clips, plus canGenerate (if false, generation/upscale tools will fail — tell the user to sign in to Palmier and subscribe, or to add their own OpenRouter/ElevenLabs API key in Settings, before attempting them). When the project has a linked source/brand folder, linkedContext reports its path — explore it with read_project_context. Clip ids are accepted by clip mutation tools; trackId is accepted by manage_tracks. A timeline with markers also reports markers: [{markerId, frame, kind, color, name?, note?, done?}] — the notes pinned to a frame, edited with manage_markers.\n\nEvery clip occupies frames: [start, end) — timeline frames, end exclusive, duration = end − start. gaps on a track lists its empty [start, end) spans; no gaps key means contiguous. A video clip's linked audio partner is folded into it as audio: {id, track, …} carrying only what deviates (volumeDb, effects, differing trims); the partner is not repeated on its own track, which instead reports linkedClips (its folded count). Address the audio side by its nested id.\n\nFields equal to their defaults are omitted: mediaType 'video', sourceClipType = mediaType, speed 1, volumeDb 0, opacity 1, edgeRounding 0, edgeSoftness 0, trims/fades 0, identity transform/crop, default textStyle, track muted/hidden false. Text clips never report trims. Keyframe tracks that animate nothing are shown as what they are: identity tracks are dropped, constant ones appear as the static field (e.g. crop: {left: 0.31}). A graded clip carries `color` — its grade in apply_color's own vocabulary, pasteable to other clips via apply_color's color parameter. Other effects appear as effects: [{type, params}], the exact shape apply_effect accepts.\n\nCaption clips (sharing a captionGroupId) come back per track as captionGroups summaries: clipCount, frameRange, shared style, and a textPreview — individual caption clips and their ids are NOT listed. That summary is all you need to restyle (update_text with captionGroupId) or judge coverage; the spoken words live in get_transcript. Only when you must touch individual caption clips (retime one, delete one, fix one word's style), re-read with captionDetail:true — ideally windowed — to get [clipId, startFrame, endFrame, text] rows, capped at 200 per group. Caption clips whose properties deviate from the group always appear individually in clips.",
+            description: "Always call at the start of a session. Returns project settings (fps, resolution, totalFrames, durationSeconds), tracks with a stable trackId, their current index (what every trackIndex parameter takes), type, and clips, plus canGenerate (if false, generation/upscale tools will fail — tell the user to sign in to Palmier and subscribe, or to add their own OpenRouter/ElevenLabs API key in Settings, before attempting them). When the project has a linked source/brand folder, linkedContext reports its path — explore it with read_project_context. Clip ids are accepted by clip mutation tools; trackId is accepted by manage_tracks. A video track with cut transitions carries transitions: [{transitionId, style, direction, alignment, durationFrames, frames, cutFrame, fromClipId, toClipId}] — frames is the span the transition plays over, and the clips themselves keep their own start/end (add_transition, remove_clips). A timeline with markers also reports markers: [{markerId, frame, kind, color, name?, note?, done?}] — the notes pinned to a frame, edited with manage_markers.\n\nEvery clip occupies frames: [start, end) — timeline frames, end exclusive, duration = end − start. gaps on a track lists its empty [start, end) spans; no gaps key means contiguous. A video clip's linked audio partner is folded into it as audio: {id, track, …} carrying only what deviates (volumeDb, effects, differing trims); the partner is not repeated on its own track, which instead reports linkedClips (its folded count). Address the audio side by its nested id.\n\nFields equal to their defaults are omitted: mediaType 'video', sourceClipType = mediaType, speed 1, volumeDb 0, opacity 1, edgeRounding 0, edgeSoftness 0, trims/fades 0, identity transform/crop, default textStyle, track muted/hidden false. Text clips never report trims. Keyframe tracks that animate nothing are shown as what they are: identity tracks are dropped, constant ones appear as the static field (e.g. crop: {left: 0.31}). A graded clip carries `color` — its grade in apply_color's own vocabulary, pasteable to other clips via apply_color's color parameter. Other effects appear as effects: [{type, params}], the exact shape apply_effect accepts.\n\nCaption clips (sharing a captionGroupId) come back per track as captionGroups summaries: clipCount, frameRange, shared style, and a textPreview — individual caption clips and their ids are NOT listed. That summary is all you need to restyle (update_text with captionGroupId) or judge coverage; the spoken words live in get_transcript. Only when you must touch individual caption clips (retime one, delete one, fix one word's style), re-read with captionDetail:true — ideally windowed — to get [clipId, startFrame, endFrame, text] rows, capped at 200 per group. Caption clips whose properties deviate from the group always appear individually in clips.",
             inputSchema: objectSchema(
                 properties: [
                     "startFrame": ["type": "integer", "description": "Optional. Window start (inclusive); only clips intersecting [startFrame, endFrame) are returned. Tracks report totalClips when the window hides some."],
@@ -414,7 +415,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .removeClips,
-            description: "Removes one or more clips by ID as a single undoable action. Any clip that belongs to a link group (e.g. a video with its paired audio) takes its whole group with it, matching the UI's linked-delete behavior.",
+            description: "Removes clips and/or cut transitions by ID as a single undoable action. Any clip that belongs to a link group (e.g. a video with its paired audio) takes its whole group with it, matching the UI's linked-delete behavior. Pass transitionIds (from get_timeline's per-track transitions) to take a transition off a cut and leave the clips as a hard cut — removing either neighbouring clip drops its transitions anyway. At least one of clipIds or transitionIds must be non-empty.",
             inputSchema: objectSchema(
                 properties: [
                     "clipIds": [
@@ -422,8 +423,42 @@ enum ToolDefinitions {
                         "description": "Clip IDs to remove.",
                         "items": ["type": "string"],
                     ],
+                    "transitionIds": [
+                        "type": "array",
+                        "description": "Transition IDs to remove, turning each back into a hard cut.",
+                        "items": ["type": "string"],
+                    ],
+                ]
+            )
+        ),
+        AgentTool(
+            name: .addTransition,
+            description: "Puts a real transition on the cut between two clips that already sit back-to-back on the same video track — the outgoing clip's end frame must equal the incoming clip's start frame. One call, one undoable action, one transition.\n\nA transition never moves clips or changes their duration. It plays by borrowing handles: the outgoing clip keeps rolling past the cut and the incoming clip starts early, so both need unused source material (trimEndFrame on the outgoing clip, trimStartFrame on the incoming one, from get_timeline). Alignment decides how much of each: 'centered' (default) splits the duration across the cut and needs about half from each side, 'startAtCut' runs entirely into the incoming clip and needs only outgoing tail handle, 'endAtCut' runs entirely before the cut and needs only incoming head handle. Still images and Lottie have unlimited handles.\n\nWhen handles are too short the call fails and reports exactly how many source frames are missing — shorten the transition, change alignment, or trim the clips back first. It is never silently shortened. Also refused when: the cut already carries a transition, the span overlaps another transition on that track, either clip has a fade on that edge, or either clip uses a blend mode. Nested (sequence) and text clips are not supported.\n\nRemove one with remove_clips using transitionIds. get_timeline lists each track's transitions with their id, span, and cut frame.",
+            inputSchema: objectSchema(
+                properties: [
+                    "fromClipId": ["type": "string", "description": "The outgoing clip — the one that ends at the cut."],
+                    "toClipId": ["type": "string", "description": "The incoming clip — the one that starts at the cut."],
+                    "style": [
+                        "type": "string",
+                        "description": "crossDissolve blends the two shots; dipToBlack / dipToWhite fade through a colour field (a beat between scenes); wipe pushes a hard edge across the frame; slide brings the incoming shot in over the outgoing one; push moves both together like a filmstrip.",
+                        "enum": TransitionStyle.allCases.map(\.rawValue),
+                    ],
+                    "direction": [
+                        "type": "string",
+                        "description": "Direction of travel, required for wipe/slide/push and rejected for the others. 'right' means the motion runs left-to-right; 'up' means the incoming shot rises from the bottom.",
+                        "enum": TransitionDirection.allCases.map(\.rawValue),
+                    ],
+                    "durationFrames": [
+                        "type": "integer",
+                        "description": "Length of the transition in project frames (\(ClipTransition.minimumDurationFrames)–\(ClipTransition.maximumDurationFrames)). Around half a second reads as a normal dissolve.",
+                    ],
+                    "alignment": [
+                        "type": "string",
+                        "description": "Where the span sits relative to the cut. Default 'centered'.",
+                        "enum": TransitionAlignment.allCases.map(\.rawValue),
+                    ],
                 ],
-                required: ["clipIds"]
+                required: ["fromClipId", "toClipId", "style", "durationFrames"]
             )
         ),
         AgentTool(

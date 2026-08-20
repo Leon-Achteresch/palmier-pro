@@ -173,6 +173,9 @@ extension ToolExecutor {
             if let count = fold.foldedCountByTrack[i] { track["linkedClips"] = count }
             let gaps = trackGaps(editor.timeline.tracks[i])
             if !gaps.isEmpty { track["gaps"] = gaps }
+            track.removeValue(forKey: "transitions")
+            let transitions = editor.timeline.tracks[i].resolvedTransitions.map { transitionPayload($0) }
+            if !transitions.isEmpty { track["transitions"] = transitions }
             return track
         }
     }

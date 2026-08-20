@@ -179,6 +179,17 @@ final class TimelineInputController {
         let trackIndex = geometry.trackAt(y: point.y)
         editor.selectMarker(id: nil)
         editor.selectedGap = nil // re-selected below if this lands in a gap
+        editor.selectedTransitionIds.removeAll()
+
+        if editor.toolMode != .razor,
+           let resolved = hitTestTransition(at: point, trackIndex: trackIndex, geometry: geometry) {
+            editor.selectedClipIds.removeAll()
+            editor.selectedTransitionIds = [resolved.id]
+            view.setHoveredClipId(nil)
+            dragState = .idle
+            view.needsDisplay = true
+            return
+        }
 
         if editor.toolMode == .razor {
             if let hit = hitTestClip(at: point, trackIndex: trackIndex, geometry: geometry) {
@@ -1073,6 +1084,17 @@ final class TimelineInputController {
             }
         }
         return nil
+    }
+
+    func hitTestTransition(
+        at point: NSPoint,
+        trackIndex: Int,
+        geometry: TimelineGeometry
+    ) -> ResolvedTransition? {
+        guard editor.timeline.tracks.indices.contains(trackIndex) else { return nil }
+        return editor.timeline.tracks[trackIndex].resolvedTransitions.first {
+            TransitionRenderer.rect(for: $0, trackIndex: trackIndex, geometry: geometry).contains(point)
+        }
     }
 
     /// Empty track space bounded on the right by a clip: `[previousClipEnd, nextClipStart)`.

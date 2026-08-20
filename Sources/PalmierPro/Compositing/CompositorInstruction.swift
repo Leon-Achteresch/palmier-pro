@@ -1,12 +1,19 @@
 import AVFoundation
 
+struct TransitionPlan: Sendable {
+    let style: TransitionStyle
+    let direction: TransitionDirection?
+    let window: TransitionWindow
+}
+
 /// Immutable per-clip snapshot read on the render queue — never the live timeline.
 struct LayerPlan: Sendable {
-    enum Source: Sendable {
+    indirect enum Source: Sendable {
         case track(CMPersistentTrackID)
         case text
         /// Nested timeline: children composite into a `canvas`-sized unit, then the nest clip's pipeline applies.
         case group(children: [LayerPlan], canvas: CGSize)
+        case transition(from: LayerPlan, to: LayerPlan, plan: TransitionPlan)
     }
     let source: Source
     let clip: Clip
@@ -24,6 +31,9 @@ struct LayerPlan: Sendable {
         case .text: break
         case .group(let children, _):
             for child in children { child.collectTrackIDs(into: &ids) }
+        case .transition(let from, let to, _):
+            from.collectTrackIDs(into: &ids)
+            to.collectTrackIDs(into: &ids)
         }
     }
 }

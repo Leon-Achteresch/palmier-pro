@@ -556,6 +556,16 @@ final class TimelineView: NSView {
                                   multicamAngleLabel: angleLabel(clip),
                                   fps: editor.timeline.fps, isMissing: clipMissing, isGenerating: clipGenerating)
             }
+            for resolved in track.resolvedTransitions {
+                let transitionRect = TransitionRenderer.rect(for: resolved, trackIndex: ti, geometry: geo)
+                guard transitionRect.intersects(dirtyRect) else { continue }
+                TransitionRenderer.draw(
+                    resolved,
+                    in: transitionRect,
+                    isSelected: editor.selectedTransitionIds.contains(resolved.id),
+                    context: ctx
+                )
+            }
         }
         deferredDraws.forEach { $0() }
 
