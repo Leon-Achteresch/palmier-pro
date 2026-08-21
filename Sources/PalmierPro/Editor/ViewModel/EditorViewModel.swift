@@ -399,6 +399,8 @@ final class EditorViewModel {
     /// Preview playback bridge.
     var videoEngine: VideoEngine?
 
+    var renderCacheStatus = RenderCacheStatus()
+
     let audioMeter = AudioMeterHub()
 
     @ObservationIgnored

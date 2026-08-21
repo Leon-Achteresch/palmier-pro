@@ -27,6 +27,7 @@ struct CompositionResult {
     let clipTransforms: [String: CGAffineTransform]
     let offlineMediaRefs: Set<String>
     let unprocessableMediaRefs: Set<String>
+    let mediaFingerprints: [String: String]
 }
 
 /// Builds an AVFoundation composition from a Timeline.
@@ -113,7 +114,8 @@ enum CompositionBuilder {
             clipTransforms: ctx.clipTransforms,
             resolveTimeline: resolveTimeline,
             compositionDuration: ctx.composition.duration,
-            renderSize: renderSize
+            renderSize: renderSize,
+            mediaFingerprints: ctx.mediaFingerprints
         )
 
         return CompositionResult(
@@ -124,7 +126,8 @@ enum CompositionBuilder {
             clipNaturalSizes: ctx.clipNaturalSizes,
             clipTransforms: ctx.clipTransforms,
             offlineMediaRefs: ctx.offlineMediaRefs,
-            unprocessableMediaRefs: ctx.unprocessableMediaRefs
+            unprocessableMediaRefs: ctx.unprocessableMediaRefs,
+            mediaFingerprints: ctx.mediaFingerprints
         )
     }
 
@@ -142,6 +145,7 @@ enum CompositionBuilder {
         var clipTransforms: [String: CGAffineTransform] = [:]
         var offlineMediaRefs: Set<String> = []
         var unprocessableMediaRefs: Set<String> = []
+        var mediaFingerprints: [String: String] = [:]
         var failedLoadOutcomes: [SourceLoadKey: LoadOutcome] = [:]
 
         init(
@@ -339,8 +343,10 @@ enum CompositionBuilder {
             renderSize: ctx.renderSize
         )
         switch outcome {
-        case .loaded:
-            break
+        case .loaded(let asset, _):
+            if mediaType == .video, ctx.mediaFingerprints[clip.mediaRef] == nil {
+                ctx.mediaFingerprints[clip.mediaRef] = await DiskCache.loadSizeMtimeTag(for: asset.url)
+            }
         case .offline, .unprocessable:
             ctx.failedLoadOutcomes[key] = outcome
         }
@@ -641,7 +647,8 @@ enum CompositionBuilder {
         clipTransforms: [String: CGAffineTransform] = [:],
         resolveTimeline: @Sendable (String) -> Timeline? = { _ in nil },
         compositionDuration: CMTime,
-        renderSize: CGSize
+        renderSize: CGSize,
+        mediaFingerprints: [String: String] = [:]
     ) -> (audioMix: AVMutableAudioMix, videoComposition: AVVideoComposition) {
         let timescale = CMTimeScale(timeline.fps)
 
@@ -740,7 +747,8 @@ enum CompositionBuilder {
             clipTransforms: clipTransforms,
             resolveTimeline: resolveTimeline,
             compositionDuration: compositionDuration,
-            renderSize: renderSize
+            renderSize: renderSize,
+            mediaFingerprints: mediaFingerprints
         )
         return (audioMix, AVVideoComposition(configuration: vcConfig))
     }
@@ -753,7 +761,8 @@ enum CompositionBuilder {
         clipTransforms: [String: CGAffineTransform],
         resolveTimeline: @Sendable (String) -> Timeline? = { _ in nil },
         compositionDuration: CMTime,
-        renderSize: CGSize
+        renderSize: CGSize,
+        mediaFingerprints: [String: String]
     ) -> [CompositorInstruction] {
         let timescale = CMTimeScale(timeline.fps)
         func cmTime(_ frame: Int) -> CMTime { CMTime(value: CMTimeValue(frame), timescale: timescale) }
@@ -803,7 +812,10 @@ enum CompositionBuilder {
         }
 
         func mediaLayer(_ slot: Slot, _ clip: Clip) -> LayerPlan {
-            LayerPlan(source: .track(slot.trackID), clip: clip, natSize: slot.natSize, preferredTransform: slot.transform)
+            LayerPlan(
+                source: .track(slot.trackID), clip: clip, natSize: slot.natSize,
+                preferredTransform: slot.transform, mediaTag: mediaFingerprints[clip.mediaRef]
+            )
         }
 
         func transitionEntries(_ resolved: ResolvedTransition) -> [Entry] {

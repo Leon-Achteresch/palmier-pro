@@ -20,6 +20,7 @@ struct LayerPlan: Sendable {
     let clip: Clip
     let natSize: CGSize
     let preferredTransform: CGAffineTransform
+    var mediaTag: String?
 
     var trackID: CMPersistentTrackID? {
         if case .track(let id) = source { return id }
@@ -50,6 +51,18 @@ final class CompositorInstruction: NSObject, AVVideoCompositionInstructionProtoc
     let layers: [LayerPlan]
     let renderSize: CGSize
     let fps: Int
+
+    private let spanLock = NSLock()
+    private var resolvedSpan: RenderCacheSpan??
+
+    var renderCacheSpan: RenderCacheSpan? {
+        spanLock.lock()
+        defer { spanLock.unlock() }
+        if let resolvedSpan { return resolvedSpan }
+        let span = RenderCacheDigest.span(for: self)
+        resolvedSpan = .some(span)
+        return span
+    }
 
     init(timeRange: CMTimeRange, layers: [LayerPlan], renderSize: CGSize, fps: Int) {
         self.timeRange = timeRange

@@ -5,6 +5,13 @@ import CoreImage
 /// per-layer crop → effects → corner mask → transform → opacity, stacked bottom→top.
 enum FrameRenderer {
 
+    static func frameIndex(at compositionTime: CMTime, fps: Int) -> Int {
+        guard fps > 0, compositionTime.isNumeric else { return 0 }
+        let scaled = (compositionTime.seconds * Double(fps)).rounded()
+        guard scaled.isFinite else { return 0 }
+        return Int(min(max(scaled, Double(Int.min / 2)), Double(Int.max / 2)))
+    }
+
     static func render(
         instruction: CompositorInstruction,
         sourceFrame: (CMPersistentTrackID) -> CVPixelBuffer?,
@@ -13,7 +20,7 @@ enum FrameRenderer {
         context: CIContext
     ) {
         let renderRect = CGRect(origin: .zero, size: instruction.renderSize)
-        let frame = Int((compositionTime.seconds * Double(instruction.fps)).rounded())
+        let frame = frameIndex(at: compositionTime, fps: instruction.fps)
 
         let base = CIImage(color: .black).cropped(to: renderRect)
         let accum = composite(

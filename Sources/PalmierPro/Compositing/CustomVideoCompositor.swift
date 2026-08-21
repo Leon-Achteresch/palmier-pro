@@ -70,6 +70,16 @@ final class CustomVideoCompositor: NSObject, AVVideoCompositing, @unchecked Send
             }
             return
         }
+        if let span = instruction.renderCacheSpan {
+            let key = RenderCacheKey(
+                spanDigest: span.digest,
+                frame: FrameRenderer.frameIndex(at: request.compositionTime, fps: instruction.fps)
+            )
+            if let cached = RenderFrameCache.shared.frame(for: key, size: request.renderContext.size) {
+                request.finish(withComposedVideoFrame: cached)
+                return
+            }
+        }
         guard let output = request.renderContext.newPixelBuffer() else {
             request.finish(with: RenderError())
             return

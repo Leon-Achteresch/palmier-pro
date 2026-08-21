@@ -48,6 +48,7 @@ final class VideoEngine {
     private var clipNaturalSizes: [String: CGSize] = [:]
     private var resolveTimelineSnapshot: @Sendable (String) -> Timeline? = { _ in nil }
     private var clipTransforms: [String: CGAffineTransform] = [:]
+    private var mediaFingerprints: [String: String] = [:]
     private var compositionDuration: CMTime = .zero
 
     private var pendingInteractiveSeek: (time: CMTime, tolerance: CMTime)?
@@ -65,6 +66,9 @@ final class VideoEngine {
     func teardown() {
         invalidateRebuild()
         cancelSourcePreviewLoad()
+        cancelRenderPrefetch()
+        RenderFrameCache.shared.removeAll()
+        Task { await RenderFrameStore.trimShared() }
         compositionCache.removeAll()
         invalidateSeekState()
         scrubAudioEngine.teardown()
@@ -90,6 +94,7 @@ final class VideoEngine {
     func play() {
         guard let editor else { return }
         scrubAudioEngine.stopScrubbing()
+        cancelRenderPrefetch()
         editor.isPlaying = true
         guard rebuildTask == nil, sourcePreviewTask == nil else { return }
         let frame = playbackStartFrame(for: editor)
@@ -101,10 +106,12 @@ final class VideoEngine {
         scrubAudioEngine.stopScrubbing()
         editor?.isPlaying = false
         player.pause()
+        scheduleRenderPrefetch()
     }
 
     func resumePlayback() {
         scrubAudioEngine.stopScrubbing()
+        cancelRenderPrefetch()
         editor?.isPlaying = true
         guard sourcePreviewTask == nil else { return }
         player.play()
@@ -227,6 +234,7 @@ final class VideoEngine {
         guard let editor else { return }
         invalidateRebuild()
         cancelSourcePreviewLoad()
+        cancelRenderPrefetch()
         sourceTrackStart = .zero
         invalidateSeekState()
         pause()
@@ -374,6 +382,7 @@ final class VideoEngine {
         trackMappings = result.trackMappings
         clipNaturalSizes = result.clipNaturalSizes
         clipTransforms = result.clipTransforms
+        mediaFingerprints = result.mediaFingerprints
         compositionDuration = result.composition.duration
         resolveTimelineSnapshot = resolveTimeline
         editor.offlineMediaRefs = result.offlineMediaRefs
@@ -386,6 +395,32 @@ final class VideoEngine {
 
         seek(to: editor.currentFrame, mode: .exact)
         if editor.isPlaying { player.play() }
+        scheduleRenderPrefetch()
+    }
+
+    private func scheduleRenderPrefetch() {
+        guard let editor,
+              editor.activePreviewTab == .timeline,
+              !editor.isPlaying,
+              let item = player.currentItem,
+              let videoComposition = item.videoComposition,
+              editor.timeline.fps > 0 else { return }
+        let request = RenderPrefetchRequest(
+            asset: item.asset,
+            videoComposition: videoComposition,
+            fps: editor.timeline.fps,
+            priorityFrame: editor.currentFrame,
+            report: { [weak editor] status in
+                Task { @MainActor in editor?.renderCacheStatus = status }
+            }
+        )
+        let generation = RenderPrefetchSequence.next()
+        Task { await RenderPrefetcher.shared.start(request, generation: generation) }
+    }
+
+    private func cancelRenderPrefetch() {
+        let generation = RenderPrefetchSequence.next()
+        Task { await RenderPrefetcher.shared.cancel(generation: generation) }
     }
 
     func refreshVisuals() {
@@ -403,7 +438,8 @@ final class VideoEngine {
             clipTransforms: clipTransforms,
             resolveTimeline: resolveTimelineSnapshot,
             compositionDuration: compositionDuration,
-            renderSize: CGSize(width: editor.timeline.width, height: editor.timeline.height)
+            renderSize: CGSize(width: editor.timeline.width, height: editor.timeline.height),
+            mediaFingerprints: mediaFingerprints
         )
         currentItem.audioMix = audioMix
         currentItem.videoComposition = videoComposition
@@ -412,12 +448,14 @@ final class VideoEngine {
         case .meterPlayback:
             scrubAudioEngine.meterPlayback(at: player.currentTime())
         case .seekToActiveFrame:
-            guard let time = playerTime(forPreviewFrame: editor.activeFrame) else { return }
-            cancelInteractiveSeek()
-            performSeek(time: time, tolerance: .zero)
+            if let time = playerTime(forPreviewFrame: editor.activeFrame) {
+                cancelInteractiveSeek()
+                performSeek(time: time, tolerance: .zero)
+            }
         case .none:
             break
         }
+        scheduleRenderPrefetch()
     }
 
     // MARK: - Scopes
