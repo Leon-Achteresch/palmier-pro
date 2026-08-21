@@ -230,6 +230,7 @@ final class ToolExecutor {
         case .getTranscript: return try await getTranscript(editor, args)
         case .detectBeats:   return try await detectBeats(editor, args)
         case .measureLoudness: return try await measureLoudness(editor, args)
+        case .mixAudio:      return try await mixAudio(editor, args)
         case .inspectTimeline: return try await inspectTimeline(editor, args)
         case .searchMedia:   return try await searchMedia(editor, args)
         case .searchStockMedia: return try await searchStockMedia(editor, args)

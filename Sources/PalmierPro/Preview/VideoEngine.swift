@@ -49,6 +49,7 @@ final class VideoEngine {
     private var resolveTimelineSnapshot: @Sendable (String) -> Timeline? = { _ in nil }
     private var clipTransforms: [String: CGAffineTransform] = [:]
     private var mediaFingerprints: [String: String] = [:]
+    private var duckingPlan: DuckingPlan = .empty
     private var compositionDuration: CMTime = .zero
 
     private var pendingInteractiveSeek: (time: CMTime, tolerance: CMTime)?
@@ -383,6 +384,7 @@ final class VideoEngine {
         clipNaturalSizes = result.clipNaturalSizes
         clipTransforms = result.clipTransforms
         mediaFingerprints = result.mediaFingerprints
+        duckingPlan = result.ducking
         compositionDuration = result.composition.duration
         resolveTimelineSnapshot = resolveTimeline
         editor.offlineMediaRefs = result.offlineMediaRefs
@@ -439,7 +441,8 @@ final class VideoEngine {
             resolveTimeline: resolveTimelineSnapshot,
             compositionDuration: compositionDuration,
             renderSize: CGSize(width: editor.timeline.width, height: editor.timeline.height),
-            mediaFingerprints: mediaFingerprints
+            mediaFingerprints: mediaFingerprints,
+            ducking: duckingPlan
         )
         currentItem.audioMix = audioMix
         currentItem.videoComposition = videoComposition

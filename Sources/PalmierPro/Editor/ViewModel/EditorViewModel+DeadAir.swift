@@ -92,12 +92,6 @@ extension EditorViewModel {
     }
 
     private func timelineRange(clip: Clip, sourceStart: Double, sourceEnd: Double) -> FrameRange? {
-        let s0 = max(sourceStart, Double(clip.trimStartFrame))
-        let s1 = min(sourceEnd, Double(clip.trimStartFrame + clip.sourceFramesConsumed))
-        guard s1 > s0, clip.speed > 0 else { return nil }
-        let t0 = Double(clip.startFrame) + (s0 - Double(clip.trimStartFrame)) / clip.speed
-        let t1 = Double(clip.startFrame) + (s1 - Double(clip.trimStartFrame)) / clip.speed
-        let range = FrameRange(start: Int(t0.rounded()), end: Int(t1.rounded()))
-        return range.length > 0 ? range : nil
+        clip.timelineRange(sourceStartFrame: sourceStart, sourceEndFrame: sourceEnd)
     }
 }

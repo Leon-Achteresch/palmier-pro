@@ -19,6 +19,7 @@ extension ToolExecutor {
         if let window {
             dict["window"] = [window.lowerBound, min(window.upperBound, editor.timeline.totalFrames)]
         }
+        if !editor.timeline.ducking.enabled { dict.removeValue(forKey: "ducking") }
         if editor.timeline.markers.isEmpty {
             dict.removeValue(forKey: "markers")
         } else {
@@ -242,7 +243,7 @@ extension ToolExecutor {
             }
         }
         let stripped = strippingDefaults(compactClipKeyframes(partner), clipDefaults)
-        for key in ["volumeDb", "fadeInFrames", "fadeOutFrames", "fadeInInterpolation", "fadeOutInterpolation", "keyframes", "audioMix"] {
+        for key in ["volumeDb", "fadeInFrames", "fadeOutFrames", "fadeInInterpolation", "fadeOutInterpolation", "keyframes", "audioMix", "duckingRole"] {
             if let v = stripped[key] { out[key] = v }
         }
         if let fx = stripped["effects"] as? [[String: Any]] {

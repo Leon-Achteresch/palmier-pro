@@ -72,6 +72,7 @@ fileprivate struct SetClipPropertiesInput: DecodableToolArgs {
     let transform: ParsedTransform?
     let blendMode: String?
     let audioMix: ParsedAudioMix?
+    let duckingRole: String?
 
     static let allowedKeys: Set<String> = Set([
         "clipIds",
@@ -82,6 +83,7 @@ fileprivate struct SetClipPropertiesInput: DecodableToolArgs {
         "transform",
         "blendMode",
         "audioMix",
+        "duckingRole",
     ])
 
     var hasAnyProperty: Bool {
@@ -93,6 +95,7 @@ fileprivate struct SetClipPropertiesInput: DecodableToolArgs {
             || transform?.hasAnyField == true
             || blendMode != nil
             || audioMix?.hasAnyField == true
+            || duckingRole != nil
     }
 }
 
@@ -598,6 +601,15 @@ extension ToolExecutor {
         if let audioMix = input.audioMix {
             try audioMix.validated(path: "set_clip_properties.audioMix")
         }
+        var duckingRole: DuckingRole?
+        if let raw = input.duckingRole {
+            guard let parsed = DuckingRole(rawValue: raw) else {
+                throw ToolError(
+                    "invalid duckingRole '\(raw)'. Valid: \(DuckingRole.allCases.map(\.rawValue).joined(separator: ", "))"
+                )
+            }
+            duckingRole = parsed
+        }
         if let t = input.trimStartFrame, t < 0 {
             throw ToolError("trimStartFrame must be >= 0 (got \(t))")
         }
@@ -661,6 +673,15 @@ extension ToolExecutor {
             if !unsupported.isEmpty {
                 throw ToolError(
                     "audioMix only applies to audio clips: \(unsupported.joined(separator: ", ")). "
+                        + "A video clip's sound is its nested audio.id from get_timeline — pass that id instead."
+                )
+            }
+        }
+        if duckingRole != nil {
+            let unsupported = targetClips.filter { $0.value.mediaType != .audio }.map(\.key).sorted()
+            if !unsupported.isEmpty {
+                throw ToolError(
+                    "duckingRole only applies to audio clips: \(unsupported.joined(separator: ", ")). "
                         + "A video clip's sound is its nested audio.id from get_timeline — pass that id instead."
                 )
             }
@@ -729,6 +750,7 @@ extension ToolExecutor {
                     blendMode: blendMode,
                     setBlendMode: setBlendMode,
                     audioMix: input.audioMix,
+                    duckingRole: duckingRole,
                     clipId: id,
                     editor: editor
                 )
@@ -746,7 +768,7 @@ extension ToolExecutor {
                     fadeInFrames: nil, fadeOutFrames: nil,
                     fadeInInterpolation: nil, fadeOutInterpolation: nil,
                     edgeRounding: nil, edgeSoftness: nil, transform: nil,
-                    blendMode: nil, setBlendMode: false, audioMix: nil,
+                    blendMode: nil, setBlendMode: false, audioMix: nil, duckingRole: nil,
                     clipId: partnerId,
                     editor: editor
                 )
@@ -779,6 +801,7 @@ extension ToolExecutor {
         blendMode: BlendMode?,
         setBlendMode: Bool,
         audioMix: ParsedAudioMix?,
+        duckingRole: DuckingRole?,
         clipId: String,
         editor: EditorViewModel
     ) -> [String] {
@@ -812,6 +835,7 @@ extension ToolExecutor {
             if let v = edgeSoftness { clip.edgeSoftness = v; changed.append("edgeSoftness") }
             if setBlendMode           { clip.blendMode = blendMode; changed.append("blendMode") }
             if let audioMix           { audioMix.apply(to: &clip); changed.append("audioMix") }
+            if let duckingRole        { clip.duckingRole = duckingRole; changed.append("duckingRole") }
             if let t = transform {
                 t.apply(to: &clip)
                 changed.append("transform")

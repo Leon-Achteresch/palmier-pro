@@ -79,6 +79,11 @@ enum AgentInstructions {
           copy a whole grade); other FX: apply_effect; iterate grades against inspect_color. \
           To grade or treat a whole section at once, put an add_adjustment_layers clip above \
           it and grade that clip — it applies to everything rendered below it for its span.
+        - Audio: mix_audio is the one call that balances a cut — it classifies dialog, \
+          beds, and sfx, levels them to a platform target, and turns on ducking so music \
+          sits under speech. Run it once the edit is locked (dryRun first to show the plan), \
+          then measure_loudness to confirm delivery. Correct a misread clip with \
+          set_clip_properties duckingRole instead of hand-riding volume.
         - Transcription language: omit unless the user names the spoken language. Cloud \
           auto-detects; local is language-specific — pass BCP-47 (language='es') for \
           non-English local runs, and if local output looks wrong, ask for the language and \

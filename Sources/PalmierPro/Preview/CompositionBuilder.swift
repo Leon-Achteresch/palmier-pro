@@ -28,6 +28,7 @@ struct CompositionResult {
     let offlineMediaRefs: Set<String>
     let unprocessableMediaRefs: Set<String>
     let mediaFingerprints: [String: String]
+    let ducking: DuckingPlan
 }
 
 /// Builds an AVFoundation composition from a Timeline.
@@ -107,6 +108,9 @@ enum CompositionBuilder {
             }
         }
 
+        let ducking = await DuckingAnalyzer.cachedPlan(for: timeline, resolveURL: resolveURL)
+        guard !Task.isCancelled else { throw CancellationError() }
+
         let (audioMix, videoComposition) = buildVisuals(
             timeline: timeline,
             trackMappings: ctx.trackMappings,
@@ -115,7 +119,8 @@ enum CompositionBuilder {
             resolveTimeline: resolveTimeline,
             compositionDuration: ctx.composition.duration,
             renderSize: renderSize,
-            mediaFingerprints: ctx.mediaFingerprints
+            mediaFingerprints: ctx.mediaFingerprints,
+            ducking: ducking
         )
 
         return CompositionResult(
@@ -127,7 +132,8 @@ enum CompositionBuilder {
             clipTransforms: ctx.clipTransforms,
             offlineMediaRefs: ctx.offlineMediaRefs,
             unprocessableMediaRefs: ctx.unprocessableMediaRefs,
-            mediaFingerprints: ctx.mediaFingerprints
+            mediaFingerprints: ctx.mediaFingerprints,
+            ducking: ducking
         )
     }
 
@@ -648,7 +654,8 @@ enum CompositionBuilder {
         resolveTimeline: @Sendable (String) -> Timeline? = { _ in nil },
         compositionDuration: CMTime,
         renderSize: CGSize,
-        mediaFingerprints: [String: String] = [:]
+        mediaFingerprints: [String: String] = [:],
+        ducking: DuckingPlan = .empty
     ) -> (audioMix: AVMutableAudioMix, videoComposition: AVVideoComposition) {
         let timescale = CMTimeScale(timeline.fps)
 
@@ -677,13 +684,15 @@ enum CompositionBuilder {
                 var tappedClips: [Clip] = []
                 for handle in handles {
                     // A handle whose transition changed shape since the build is no longer its lane.
-                    guard crossfadesById[handle.transitionId]?.window == handle.window else {
+                    guard let crossfade = crossfadesById[handle.transitionId], crossfade.window == handle.window else {
                         silence(params: params, clip: handle.clip, timescale: timescale)
                         continue
                     }
+                    let sourceId = handle.role == .outgoing ? crossfade.outgoing.id : crossfade.incoming.id
                     emitVolumeEnvelope(
                         params: params, clip: handle.clip, timescale: timescale,
-                        crossfades: [TransitionGainCurve(window: handle.window, role: handle.role)]
+                        crossfades: [TransitionGainCurve(window: handle.window, role: handle.role)],
+                        duck: ducking.curve(forClipId: sourceId)
                     )
                     tappedClips.append(handle.clip)
                 }
@@ -725,7 +734,8 @@ enum CompositionBuilder {
                         : (mapping.blendedClipIds.contains(clip.id) ? 1 - strength : 1)
                     emitVolumeEnvelope(
                         params: params, clip: clip, timescale: timescale, gain: gain,
-                        crossfades: crossfadeCurvesByClipId[clip.id] ?? []
+                        crossfades: crossfadeCurvesByClipId[clip.id] ?? [],
+                        duck: ducking.curve(forClipId: clip.id)
                     )
                     tappedClips.append(clip)
                     prevEndFrame = clip.startFrame + clip.durationFrames
@@ -1078,15 +1088,14 @@ enum CompositionBuilder {
         params.audioTimePitchAlgorithm = .spectral
     }
 
-    /// Linear-ramp volume envelope; a nest `carrier` multiplies its envelope in, and each
-    /// `crossfades` curve multiplies in the equal-power side of a transition window.
     private static func emitVolumeEnvelope(
         params: AVMutableAudioMixInputParameters,
         clip: Clip,
         timescale: CMTimeScale,
         carrier: Clip? = nil,
         gain: Float = 1,
-        crossfades: [TransitionGainCurve] = []
+        crossfades: [TransitionGainCurve] = [],
+        duck: DuckingCurve? = nil
     ) {
         let kfs = normalizedKeyframes(clip.volumeTrack?.keyframes ?? [], duration: clip.durationFrames)
         let hasFade = clip.fadeInFrames > 0 || clip.fadeOutFrames > 0
@@ -1097,9 +1106,11 @@ enum CompositionBuilder {
             crossfades.reduce(1) { $0 * $1.gain(atFrame: absFrame) }
         }
         let gainAt: (Int) -> Double = { absFrame in
-            (carrier.map { $0.volumeAt(frame: absFrame) } ?? 1) * crossfadeGainAt(absFrame)
+            (carrier.map { $0.volumeAt(frame: absFrame) } ?? 1)
+                * crossfadeGainAt(absFrame)
+                * (duck?.gain(atFrame: absFrame) ?? 1)
         }
-        if kfs.isEmpty && !hasFade && !carrierVaries && crossfades.isEmpty {
+        if kfs.isEmpty && !hasFade && !carrierVaries && crossfades.isEmpty && duck == nil {
             let volume = Float(clip.volumeAt(frame: clip.startFrame) * gainAt(clip.startFrame)) * gain
             let start = CMTime(value: CMTimeValue(clip.startFrame), timescale: timescale)
             let end = CMTime(value: CMTimeValue(clip.endFrame), timescale: timescale)
@@ -1141,6 +1152,11 @@ enum CompositionBuilder {
         }
         for curve in crossfades {
             extraOffsets += curve.breakpointFrames
+                .map { $0 - clip.startFrame }
+                .filter { $0 > 0 && $0 < clip.durationFrames }
+        }
+        if let duck {
+            extraOffsets += duck.breakpointFrames
                 .map { $0 - clip.startFrame }
                 .filter { $0 > 0 && $0 < clip.durationFrames }
         }

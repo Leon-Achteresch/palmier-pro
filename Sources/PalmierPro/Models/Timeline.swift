@@ -90,6 +90,7 @@ struct Timeline: Codable, Sendable, Equatable, Identifiable {
     var tracks: [Track] = []
     /// Always ordered by frame; mutate through the marker helpers to preserve that.
     private(set) var markers: [TimelineMarker] = []
+    var ducking: TimelineDuckingSettings = TimelineDuckingSettings()
 
     init(
         id: String = UUID().uuidString,
@@ -100,7 +101,8 @@ struct Timeline: Codable, Sendable, Equatable, Identifiable {
         settingsConfigured: Bool = false,
         folderId: String? = nil,
         tracks: [Track] = [],
-        markers: [TimelineMarker] = []
+        markers: [TimelineMarker] = [],
+        ducking: TimelineDuckingSettings = TimelineDuckingSettings()
     ) {
         self.id = id
         self.name = name
@@ -111,6 +113,7 @@ struct Timeline: Codable, Sendable, Equatable, Identifiable {
         self.folderId = folderId
         self.tracks = tracks
         self.markers = markers
+        self.ducking = ducking.normalized
         sortMarkers()
     }
 
@@ -151,7 +154,7 @@ struct Timeline: Codable, Sendable, Equatable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, fps, width, height, settingsConfigured, folderId, tracks, markers
+        case id, name, fps, width, height, settingsConfigured, folderId, tracks, markers, ducking
     }
 }
 
@@ -167,7 +170,8 @@ extension Timeline {
             settingsConfigured: (try? c.decode(Bool.self, forKey: .settingsConfigured)) ?? false,
             folderId: try? c.decode(String.self, forKey: .folderId),
             tracks: try c.decode([Track].self, forKey: .tracks),
-            markers: (try? c.decode([TimelineMarker].self, forKey: .markers)) ?? []
+            markers: (try? c.decode([TimelineMarker].self, forKey: .markers)) ?? [],
+            ducking: (try? c.decode(TimelineDuckingSettings.self, forKey: .ducking)) ?? TimelineDuckingSettings()
         )
     }
 }
@@ -315,6 +319,8 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
 
     var audioMix: ClipAudioMix?
 
+    var duckingRole: DuckingRole = .auto
+
     private enum CodingKeys: String, CodingKey {
         case id, mediaRef, mediaType, sourceClipType, startFrame, durationFrames
         case trimStartFrame, trimEndFrame, speed, volume
@@ -323,7 +329,7 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
         case linkGroupId, captionGroupId, multicamGroupId, textContent, textStyle, textAnimation, wordTimings
         case textFillMode
         case opacityTrack, positionTrack, scaleTrack, rotationTrack, cropTrack, volumeTrack, speedTrack
-        case effects, blendMode, audioMix
+        case effects, blendMode, audioMix, duckingRole
     }
 
     /// Frame where this clip ends on the timeline
@@ -633,7 +639,8 @@ extension Clip {
             speedTrack: try? c.decode(KeyframeTrack<Double>.self, forKey: .speedTrack),
             effects: try? c.decode([Effect].self, forKey: .effects),
             blendMode: try? c.decode(BlendMode.self, forKey: .blendMode),
-            audioMix: (try? c.decode(ClipAudioMix.self, forKey: .audioMix))?.normalized
+            audioMix: (try? c.decode(ClipAudioMix.self, forKey: .audioMix))?.normalized,
+            duckingRole: (try? c.decode(DuckingRole.self, forKey: .duckingRole)) ?? .auto
         )
     }
 }

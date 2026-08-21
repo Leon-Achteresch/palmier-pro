@@ -57,6 +57,7 @@ enum TimelineLoudness {
         isolated.startFrame = 0
         var soloTimeline = timeline
         soloTimeline.tracks = [Track(type: .audio, clips: [isolated])]
+        soloTimeline.ducking.enabled = false
         return try await measure(
             timeline: soloTimeline,
             resolver: resolver,
