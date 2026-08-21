@@ -200,6 +200,7 @@ extension InspectorView {
                 lutContent(clips: clips)
             }
             adjustSection(title: "Effects", effectIds: effectsEffectIds, clips: clips) {
+                PresetRow(kind: .effects, clips: clips)
                 adjustSubgroup(title: "Detail", controls: detailControls, clips: clips)
                 adjustSubgroup(title: "Blur", controls: blurControls, clips: clips)
                 adjustSubgroup(title: "Motion Blur", controls: motionBlurControls, clips: clips)
@@ -720,33 +721,22 @@ extension InspectorView {
 
     @ViewBuilder
     private func looksContent(clips: [Clip]) -> some View {
+        PresetRow(kind: .look, clips: clips)
         LazyVGrid(
             columns: [GridItem(.adaptive(minimum: AppTheme.Slider.labelColumn), spacing: AppTheme.Spacing.xs)],
             spacing: AppTheme.Spacing.xs
         ) {
-            ForEach(LookPreset.allCases) { preset in
+            ForEach(LookPreset.allCases) { look in
                 Button {
-                    applyLook(preset, clips: clips)
+                    PresetApplication.apply(look.preset, to: clips.map(\.id), editor: editor)
                 } label: {
-                    Text(preset.displayName)
+                    Text(look.displayName)
                         .font(.system(size: AppTheme.FontSize.sm))
                         .lineLimit(1)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-                .help("Apply \(preset.displayName) look")
-            }
-        }
-    }
-
-    private func applyLook(_ preset: LookPreset, clips: [Clip]) {
-        commitEffects(clips, actionName: "Apply \(preset.displayName) Look") { effects in
-            effects.removeAll { LookPreset.effectIds.contains($0.type) }
-            for adjustment in preset.adjustments {
-                effects.insert(
-                    Effect.make(adjustment.type, adjustment.params),
-                    at: EffectRegistry.insertIndex(effects, for: adjustment.type)
-                )
+                .help("Apply \(look.displayName) look")
             }
         }
     }

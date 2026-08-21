@@ -21,10 +21,16 @@ enum LookPreset: String, CaseIterable, Identifiable {
         }
     }
 
-    static let effectIds: Set<String> = [
-        "color.exposure", "color.contrast", "color.highlightsShadows",
-        "color.blacksWhites", "color.temperature", "color.vibrance", "color.saturation",
-    ]
+    var preset: StylePreset {
+        StylePreset(
+            id: "look.\(rawValue)",
+            name: displayName,
+            kind: .look,
+            payload: .effects(adjustments.map { Effect.make($0.type, $0.params) }),
+            createdAt: Date(timeIntervalSince1970: 0),
+            isBuiltIn: true
+        )
+    }
 
     var adjustments: [(type: String, params: [String: Double])] {
         switch self {

@@ -255,7 +255,7 @@ extension ToolExecutor {
 
     /// Read shape for the effect stack: no ids (removal is by type), flat params, enabled
     /// only when false. color.* entries live in the clip's `color` object instead.
-    private static func compactEffects(_ raw: [[String: Any]]) -> [[String: Any]] {
+    static func compactEffects(_ raw: [[String: Any]]) -> [[String: Any]] {
         raw.compactMap { e in
             guard let type = e["type"] as? String, !type.hasPrefix("color.") else { return nil }
             var out: [String: Any] = ["type": type]
@@ -375,7 +375,7 @@ extension ToolExecutor {
     }
 
     /// Removes keys whose values equal the defaults; recurses into nested objects.
-    private static func strippingDefaults(_ dict: [String: Any], _ defaults: [String: Any]) -> [String: Any] {
+    static func strippingDefaults(_ dict: [String: Any], _ defaults: [String: Any]) -> [String: Any] {
         var out = dict
         for (key, def) in defaults {
             guard let val = out[key] else { continue }

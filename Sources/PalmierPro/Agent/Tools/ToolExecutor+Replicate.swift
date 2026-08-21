@@ -15,7 +15,7 @@ fileprivate struct DuplicateClipsInput: DecodableToolArgs {
 }
 
 /// Attribute groups copy_attributes understands, shared with its tool schema.
-let copyableClipAttributes = ["transform", "crop", "opacity", "volume", "fades", "edges", "effects", "color", "keyframes", "blendMode", "textStyle", "audioMix"]
+let copyableClipAttributes = ClipAttribute.allCases.map(\.rawValue)
 
 fileprivate struct CopyAttributesInput: DecodableToolArgs {
     let fromClipId: String
@@ -98,18 +98,23 @@ extension ToolExecutor {
 
     // MARK: copy_attributes
 
-    private static let defaultCopiedAttributes = ["transform", "crop", "opacity", "volume", "fades", "edges", "effects", "color", "keyframes", "blendMode", "audioMix"]
+    private static let defaultCopiedAttributes: [ClipAttribute] = ClipAttribute.allCases.filter { $0 != .textStyle }
 
     func copyAttributes(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
         let input: CopyAttributesInput = try decodeToolArgs(args, path: "copy_attributes")
         guard let source = editor.clipFor(id: input.fromClipId) else {
             throw ToolError("Clip not found: \(input.fromClipId)")
         }
-        let attributes = input.attributes ?? Self.defaultCopiedAttributes
-        guard !attributes.isEmpty else { throw ToolError("attributes is empty — omit it to copy the full look.") }
-        let unknown = Set(attributes).subtracting(copyableClipAttributes)
-        guard unknown.isEmpty else {
-            throw ToolError("Unknown attribute(s) '\(unknown.sorted().joined(separator: "', '"))'. Allowed: \(copyableClipAttributes.sorted().joined(separator: ", ")).")
+        let selected: Set<ClipAttribute>
+        if let requested = input.attributes {
+            guard !requested.isEmpty else { throw ToolError("attributes is empty — omit it to copy the full look.") }
+            let unknown = Set(requested).subtracting(copyableClipAttributes)
+            guard unknown.isEmpty else {
+                throw ToolError("Unknown attribute(s) '\(unknown.sorted().joined(separator: "', '"))'. Allowed: \(copyableClipAttributes.sorted().joined(separator: ", ")).")
+            }
+            selected = Set(requested.compactMap(ClipAttribute.init(rawValue:)))
+        } else {
+            selected = Set(Self.defaultCopiedAttributes)
         }
 
         var targets: [String] = []
@@ -120,7 +125,7 @@ extension ToolExecutor {
                 continue
             }
             guard let target = editor.clipFor(id: id) else { throw ToolError("Clip not found: \(id)") }
-            if attributes.contains("textStyle") && (target.mediaType != .text || source.mediaType != .text) {
+            if selected.contains(.textStyle) && (target.mediaType != .text || source.mediaType != .text) {
                 throw ToolError("'textStyle' needs a text clip on both sides (\(id) is \(target.mediaType.rawValue)).")
             }
             targets.append(id)
@@ -129,69 +134,19 @@ extension ToolExecutor {
             return .ok(Self.jsonString(["status": "noop", "reason": "No target clips left after removing the source."]) ?? "{}")
         }
 
-        let selected = Set(attributes)
         let snapshot = timelineSnapshot(editor)
         let actionName = "Copy Attributes (Agent)"
         editor.undo.perform(actionName) {
             editor.mutateClips(ids: Set(targets), actionName: actionName) { clip in
-                if selected.contains("transform") { clip.transform = source.transform }
-                if selected.contains("crop") { clip.crop = source.crop }
-                if selected.contains("opacity") { clip.opacity = source.opacity }
-                if selected.contains("volume") { clip.volume = source.volume }
-                if selected.contains("fades") {
-                    clip.fadeInFrames = min(source.fadeInFrames, max(0, clip.durationFrames - source.fadeOutFrames))
-                    clip.fadeOutFrames = min(source.fadeOutFrames, max(0, clip.durationFrames - clip.fadeInFrames))
-                    clip.fadeInInterpolation = source.fadeInInterpolation
-                    clip.fadeOutInterpolation = source.fadeOutInterpolation
-                }
-                if selected.contains("edges") {
-                    clip.edgeRounding = source.edgeRounding
-                    clip.edgeSoftness = source.edgeSoftness
-                }
-                if selected.contains("effects") || selected.contains("color") {
-                    let keepColor = !selected.contains("color")
-                    let keepOther = !selected.contains("effects")
-                    var stack = (clip.effects ?? []).filter { e in
-                        e.type.hasPrefix("color.") ? keepColor : keepOther
-                    }
-                    let incoming = (source.effects ?? []).filter { e in
-                        e.type.hasPrefix("color.") ? selected.contains("color") : selected.contains("effects")
-                    }
-                    for var e in incoming {
-                        e.id = UUID().uuidString
-                        stack.removeAll { $0.type == e.type }
-                        stack.insert(e, at: EffectRegistry.insertIndex(stack, for: e.type))
-                    }
-                    clip.effects = stack.isEmpty ? nil : stack
-                }
-                if selected.contains("blendMode") { clip.blendMode = source.blendMode }
-                if selected.contains("audioMix") { clip.audioMix = source.audioMix }
-                if selected.contains("keyframes") {
-                    clip.opacityTrack = source.opacityTrack
-                    clip.positionTrack = source.positionTrack
-                    clip.scaleTrack = source.scaleTrack
-                    clip.rotationTrack = source.rotationTrack
-                    clip.cropTrack = source.cropTrack
-                    clip.volumeTrack = source.volumeTrack
-                    clip.clampKeyframesToDuration()
-                    let withoutSpeed = clip
-                    clip.speedTrack = source.speedTrack
-                    clip.clampKeyframesToDuration()
-                    if (try? clip.validateSpeedRamp(clip.speedTrack)) == nil { clip = withoutSpeed }
-                }
-                if selected.contains("textStyle") {
-                    clip.textStyle = source.textStyle
-                    clip.textFillMode = source.textFillMode
-                    clip.textAnimation = source.textAnimation
-                }
+                clip.absorb(selected, from: source)
             }
         }
 
-        if selected.contains("keyframes"),
+        if selected.contains(.keyframes),
            targets.contains(where: { (editor.clipFor(id: $0)?.durationFrames ?? 0) < source.durationFrames }) {
             notes.append("Keyframes past a shorter target clip's end were dropped.")
         }
-        if selected.contains("keyframes"), source.hasSpeedRamp {
+        if selected.contains(.keyframes), source.hasSpeedRamp {
             let skipped = targets.filter { id in
                 guard var candidate = editor.clipFor(id: id) else { return false }
                 candidate.speedTrack = source.speedTrack
@@ -201,9 +156,6 @@ extension ToolExecutor {
             if !skipped.isEmpty {
                 notes.append("Speed curve not copied to \(skipped.joined(separator: ", ")) — not enough source material or unsupported media.")
             }
-        }
-        if selected.contains("speed") {
-            notes.append("Copied speed keeps each target's timeline length; retime with set_clip_properties if you want the duration to follow.")
         }
         return mutationResult(editor, since: snapshot, touched: targets, notes: notes)
     }

@@ -17,6 +17,8 @@ struct TextTab: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.zero) {
             contentField
+            PresetRow(kind: .textStyle, clips: clips)
+                .padding(.horizontal, AppTheme.Spacing.lg)
             TextStyleControls(
                 selection: TextStyleSelection(
                     styles: clips.map { $0.textStyle ?? Self.defaults },

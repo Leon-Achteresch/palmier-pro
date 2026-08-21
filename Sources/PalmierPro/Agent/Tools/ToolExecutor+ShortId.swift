@@ -10,7 +10,7 @@ extension ToolExecutor {
         "mediaRef", "startFrameMediaRef", "endFrameMediaRef",
         "sourceVideoMediaRef", "videoSourceMediaRef", "sourceMediaRef",
         "captionGroupId", "timelineId", "trackId", "item", "from", "reference",
-        "groupId", "memberId", "markerId", "transitionId",
+        "groupId", "memberId", "markerId", "transitionId", "presetId",
     ]
     private static let arrayIdKeys: Set<String> = [
         "clipIds", "targetClipIds", "toClipIds", "transitionIds", "items", "ids", "deletes", "remove",
@@ -33,6 +33,8 @@ extension ToolExecutor {
             }
         }
         for asset in editor.mediaAssets { ids.insert(asset.id) }
+        for preset in PresetStore.builtInPresets { ids.insert(preset.id) }
+        for preset in presetStore.userPresets { ids.insert(preset.id) }
         for group in editor.multicamGroups {
             ids.insert(group.id)
             for member in group.members { ids.insert(member.id) }

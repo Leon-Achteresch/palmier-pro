@@ -40,6 +40,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case syncClips = "sync_clips"
     case duplicateClips = "duplicate_clips"
     case copyAttributes = "copy_attributes"
+    case managePresets = "manage_presets"
     case linkClips = "link_clips"
     case manageNest = "manage_nest"
     case swapClipMedia = "swap_clip_media"
@@ -816,6 +817,29 @@ enum ToolDefinitions {
                     ],
                 ],
                 required: ["fromClipId", "toClipIds"]
+            )
+        ),
+        AgentTool(
+            name: .managePresets,
+            description: "The user's app-wide preset library — saved looks (color grades), effect stacks, and text styles that outlive a single project. Use it when the user asks to save a look/style \"for later\", to reuse \"my\" look, or to apply the same treatment in a new project. Within one project, copy_attributes is the faster route: it needs no library entry.\n\nkinds: 'look' is the color grade (everything apply_color writes), 'effects' is the non-color effect stack (apply_effect), 'textStyle' is a text clip's style, fill mode, and text animation. action='list' returns every preset with a stable presetId, name, kind, and its payload in the same vocabulary get_timeline uses (look → `color`, effects → effects: [{type, params}], textStyle → textStyle). The six built-in looks are listed with builtIn:true; they can be applied but not renamed or deleted.\n\naction='save' captures the named kind from sourceClipId — it fails when that clip carries nothing of that kind, and a name already in use gets a numeric suffix (reported in notes). action='apply' writes the preset onto clipIds in one undoable action with exactly the semantics of copy_attributes: a look replaces the target's whole color grade and leaves its other effects alone, an effect stack replaces the target's non-color effects and leaves its grade alone, and a text style needs text clips on the receiving end. action='rename' and action='delete' take presetId. The library is shared across projects, so deleting is not undoable — confirm with the user first.",
+            inputSchema: objectSchema(
+                properties: [
+                    "action": [
+                        "type": "string",
+                        "enum": ["list", "save", "apply", "rename", "delete"],
+                        "description": "list reads the library, save captures from a clip, apply writes onto clips, rename and delete edit a saved preset.",
+                    ],
+                    "kind": [
+                        "type": "string",
+                        "enum": PresetKind.allCases.map(\.rawValue),
+                        "description": "Required for save. Optional filter for list. look = color grade, effects = non-color effect stack, textStyle = text style + fill mode + text animation.",
+                    ],
+                    "presetId": ["type": "string", "description": "Required for apply, rename, and delete. A presetId from action='list'."],
+                    "name": ["type": "string", "description": "Required for rename. Optional for save (defaults to the kind's name, or the text content for a text style). Duplicates get a numeric suffix."],
+                    "sourceClipId": ["type": "string", "description": "Required for save. The clip the preset is captured from."],
+                    "clipIds": ["type": "array", "items": ["type": "string"], "description": "Required for apply. The clips that receive the preset; every clip must accept the preset's kind."],
+                ],
+                required: ["action"]
             )
         ),
         AgentTool(

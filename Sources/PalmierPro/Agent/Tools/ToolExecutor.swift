@@ -55,6 +55,7 @@ final class ToolExecutor {
 
     var feedbackState = FeedbackState()
     var lastTranscriptContext: TranscriptionToolContext?
+    lazy var presetStore: PresetStore = .shared
 
     func execute(name: String, args: [String: Any], source: String = "agent") async -> ToolResult {
         let started = ContinuousClock.now
@@ -250,6 +251,7 @@ final class ToolExecutor {
         case .trimClips:        return try trimClips(editor, args)
         case .duplicateClips:   return try duplicateClips(editor, args)
         case .copyAttributes:   return try copyAttributes(editor, args)
+        case .managePresets:    return try await managePresets(editor, args)
         case .linkClips:        return try linkClips(editor, args)
         case .manageNest:       return try manageNest(editor, args)
         case .swapClipMedia:    return try swapClipMedia(editor, args)

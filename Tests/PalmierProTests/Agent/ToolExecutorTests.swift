@@ -13,12 +13,22 @@ final class ToolHarness {
     let executor: ToolExecutor
     let exportQueue: ExportQueue
 
+    let presetRoot: URL
+
     init(timeline: Timeline = Fixtures.timeline(), exportQueue: ExportQueue = ExportQueue()) {
         let editor = EditorViewModel()
         editor.timeline = timeline
         self.editor = editor
         self.exportQueue = exportQueue
         self.executor = ToolExecutor(editor: editor, exportQueue: exportQueue)
+        presetRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("palmier-presets-\(UUID().uuidString)", isDirectory: true)
+        executor.presetStore = PresetStore(rootURL: presetRoot)
+    }
+
+    func removePresetLibrary() {
+        let root = presetRoot
+        Task.detached(priority: .utility) { try? FileManager.default.removeItem(at: root) }
     }
 
     /// Run a tool by name and decode the .ok text payload as JSON.
