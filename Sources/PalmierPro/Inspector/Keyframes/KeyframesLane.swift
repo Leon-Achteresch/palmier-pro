@@ -283,9 +283,16 @@ struct KeyframesPanel: View {
     private static let audioRows: [(AnimatableProperty, String)] = [
         (.volume, "Volume"),
     ]
+    private static let adjustmentRows: [(AnimatableProperty, String)] = [
+        (.opacity, "Mix"),
+    ]
 
     private var rows: [(AnimatableProperty, String)] {
-        clip.mediaType == .audio ? Self.audioRows : Self.videoRows
+        switch clip.mediaType {
+        case .audio: Self.audioRows
+        case .adjustment: Self.adjustmentRows
+        default: Self.videoRows
+        }
     }
 
     private var tint: Color { Color(nsColor: clip.sourceClipType.themeColor) }

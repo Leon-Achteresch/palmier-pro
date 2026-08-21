@@ -76,7 +76,7 @@ extension ToolExecutor {
         if let primaryIndex = TimelineReview.primaryVideoTrackIndex(timeline) {
             let clips = timeline.tracks[primaryIndex].clips
             stats = TimelineReview.shotStats(clips: clips, fps: fps, totalFrames: timeline.totalFrames)
-            gapList = TimelineReview.gaps(in: clips.filter { $0.mediaType != .text })
+            gapList = TimelineReview.gaps(in: clips.filter { !$0.mediaType.isSourcelessLayer })
             cuts = TimelineReview.cutFrames(clips)
         } else {
             notes.append("No video clips found — pacing metrics unavailable.")

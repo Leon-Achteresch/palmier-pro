@@ -22,7 +22,7 @@ enum PreviewHitTester {
 
         // Video/image: track 0 is topmost (see CompositionBuilder), so first hit wins.
         for track in editor.timeline.tracks where track.type != .audio && !track.hidden {
-            for clip in track.clips where clip.mediaType != .text && clip.mediaType != .audio {
+            for clip in track.clips where !clip.mediaType.isSourcelessLayer && clip.mediaType != .audio {
                 guard clip.contains(timelineFrame: frame), clip.opacityAt(frame: frame) > 0.01 else { continue }
                 if videoHit(clip, frame: frame, point: point, videoRect: videoRect) { return clip.id }
             }

@@ -265,6 +265,7 @@ final class ToolExecutor {
         case .getMulticam:   return try getMulticam(editor, args)
         case .undo:          return try undo(editor)
         case .addTexts:      return try addTexts(editor, args)
+        case .addAdjustmentLayers: return try addAdjustmentLayers(editor, args)
         case .updateText:    return try updateText(editor, args)
         case .addCaptions:   return try await addCaptions(editor, args)
         case .manageMotionScene: return try await manageMotionScene(editor, args)

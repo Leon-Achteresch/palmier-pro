@@ -644,7 +644,7 @@ extension ToolExecutor {
         let setBlendMode = input.blendMode != nil
         if let raw = input.blendMode {
             let nonVisual = targetClips.filter {
-                $0.value.mediaType == .text || $0.value.mediaType == .audio
+                $0.value.mediaType.isSourcelessLayer || $0.value.mediaType == .audio
             }.map(\.key).sorted()
             if !nonVisual.isEmpty {
                 throw ToolError("blendMode only applies to video/image clips: \(nonVisual.joined(separator: ", "))")
@@ -667,10 +667,19 @@ extension ToolExecutor {
         }
         if input.edgeRounding != nil || input.edgeSoftness != nil {
             let unsupported = targetClips.filter {
-                $0.value.mediaType == .audio || $0.value.mediaType == .text
+                $0.value.mediaType == .audio || $0.value.mediaType.isSourcelessLayer
             }.map(\.key).sorted()
             if !unsupported.isEmpty {
-                throw ToolError("edgeRounding and edgeSoftness only apply to non-text visual clips: \(unsupported.joined(separator: ", "))")
+                throw ToolError("edgeRounding and edgeSoftness only apply to visual clips with source media: \(unsupported.joined(separator: ", "))")
+            }
+        }
+        if input.trimStartFrame != nil || input.trimEndFrame != nil || input.speed != nil {
+            let unsupported = targetClips.filter { $0.value.isAdjustmentLayer }.map(\.key).sorted()
+            if !unsupported.isEmpty {
+                throw ToolError(
+                    "Adjustment layers have no source media, so trims and speed don't apply: \(unsupported.joined(separator: ", ")). "
+                        + "Use durationFrames, move_clips, or trim_clips to change the span they cover."
+                )
             }
         }
 

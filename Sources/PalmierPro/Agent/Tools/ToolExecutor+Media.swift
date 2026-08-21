@@ -108,6 +108,7 @@ extension ToolExecutor {
         case .lottie: return try await readLottie(asset: asset, args: args)
         case .motion: return try await readMotion(asset: asset, args: args)
         case .text: throw ToolError("Text clips are not stored as media assets.")
+        case .adjustment: throw ToolError("Adjustment layers are not stored as media assets.")
         case .sequence: throw ToolError("Sequences are timelines, not media assets. Use get_timeline.")
         }
     }

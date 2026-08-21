@@ -348,7 +348,7 @@ struct PreviewContainerView: View {
         var offline: Clip?
         var generatingLabel: String?
         for track in editor.timeline.tracks where track.type != .audio && !track.hidden {
-            for clip in track.clips where clip.mediaType != .text {
+            for clip in track.clips where !clip.mediaType.isSourcelessLayer {
                 guard clip.contains(timelineFrame: frame), clip.opacityAt(frame: frame) > 0.01 else { continue }
                 if let asset = generatingAsset(for: clip) {
                     generatingLabel = generatingLabel ?? asset.generatingLabel

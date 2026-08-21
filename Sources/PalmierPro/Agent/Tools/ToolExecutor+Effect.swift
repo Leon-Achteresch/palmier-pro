@@ -76,8 +76,9 @@ extension ToolExecutor {
 
         for id in input.clipIds {
             guard let clip = editor.clipFor(id: id) else { throw ToolError("Clip not found: \(id)") }
-            guard clip.mediaType == .video || clip.mediaType == .image || clip.mediaType == .text else {
-                throw ToolError("Clip \(id) is a \(clip.mediaType.rawValue) clip; apply_effect needs a video, image, or text clip.")
+            guard clip.mediaType == .video || clip.mediaType == .image
+                    || clip.mediaType == .text || clip.mediaType == .adjustment else {
+                throw ToolError("Clip \(id) is a \(clip.mediaType.rawValue) clip; apply_effect needs a video, image, text, or adjustment clip.")
             }
         }
 

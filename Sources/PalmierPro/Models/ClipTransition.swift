@@ -179,14 +179,14 @@ extension Clip {
     var hasBoundedSourceHandles: Bool {
         switch mediaType {
         case .video, .audio, .sequence, .motion: true
-        case .image, .lottie, .text: false
+        case .image, .lottie, .text, .adjustment: false
         }
     }
 
     var supportsTransitions: Bool {
         switch mediaType {
         case .video, .image, .lottie, .motion: true
-        case .audio, .text, .sequence: false
+        case .audio, .text, .sequence, .adjustment: false
         }
     }
 

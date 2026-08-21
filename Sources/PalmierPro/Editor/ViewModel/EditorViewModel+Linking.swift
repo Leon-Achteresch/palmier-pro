@@ -191,7 +191,7 @@ extension EditorViewModel {
     /// Positive delta (drag right) reveals earlier material: trimStart -= d, trimEnd += d.
     /// A clip's trim can be slipped only if it has bounded source material and isn't part of a multicam group.
     func isSlipEligible(_ clip: Clip) -> Bool {
-        clip.mediaType != .image && clip.mediaType != .text && clip.multicamGroupId == nil
+        clip.mediaType != .image && !clip.mediaType.isSourcelessLayer && clip.multicamGroupId == nil
     }
 
     /// Linked partners of `clipId` whose trim should slip along with it — the same
@@ -241,7 +241,7 @@ extension EditorViewModel {
     func trimValues(for clip: Clip, edge: TrimEdge, delta: Int) -> (trimStart: Int, trimEnd: Int) {
         let sourceDelta = Int((Double(delta) * clip.speed).rounded())
         // Image/Text clips have no source-material bound, so their trim fields can go negative
-        let unbounded = clip.mediaType == .image || clip.mediaType == .text
+        let unbounded = clip.mediaType == .image || clip.mediaType.isSourcelessLayer
         switch edge {
         case .left:
             let newStart = clip.trimStartFrame + sourceDelta

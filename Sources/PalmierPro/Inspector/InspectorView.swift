@@ -4,12 +4,15 @@ import SwiftUI
 struct InspectorClipSelection {
     private(set) var textClips: [Clip] = []
     private(set) var nonTextVisualClips: [Clip] = []
+    private(set) var adjustmentClips: [Clip] = []
     private(set) var audioClips: [Clip] = []
     private(set) var firstVisualClip: Clip?
 
     var clipCount: Int {
-        textClips.count + nonTextVisualClips.count + audioClips.count
+        textClips.count + nonTextVisualClips.count + adjustmentClips.count + audioClips.count
     }
+
+    var gradableClips: [Clip] { nonTextVisualClips + textClips + adjustmentClips }
 
     var firstAudioClip: Clip? { audioClips.first }
 
@@ -24,10 +27,10 @@ struct InspectorClipSelection {
                     if selection.firstVisualClip == nil {
                         selection.firstVisualClip = clip
                     }
-                    if clip.mediaType == .text {
-                        selection.textClips.append(clip)
-                    } else {
-                        selection.nonTextVisualClips.append(clip)
+                    switch clip.mediaType {
+                    case .text: selection.textClips.append(clip)
+                    case .adjustment: selection.adjustmentClips.append(clip)
+                    default: selection.nonTextVisualClips.append(clip)
                     }
                 }
             }
@@ -60,6 +63,7 @@ struct InspectorView: View {
     @State private var preferredAssetTab: AssetTab = .details
     @State private var transformExpanded = true
     @State private var imageAdjustmentExpanded = true
+    @State private var adjustmentMixExpanded = true
     @State var audioLevelsExpanded = true
     @State private var fileSizeText: String?
     @State var audioMixExpanded = false
@@ -378,7 +382,8 @@ struct InspectorView: View {
         let audios = selection.audioClips
         let texts = selection.textClips
         let nonText = selection.nonTextVisualClips
-        let isTextOnly = !texts.isEmpty && nonText.isEmpty && audios.isEmpty
+        let adjustments = selection.adjustmentClips
+        let isTextOnly = !texts.isEmpty && nonText.isEmpty && audios.isEmpty && adjustments.isEmpty
 
         var tabs: [ClipTab] = []
         if isTextOnly { tabs.append(.text); tabs.append(.textAnimate); tabs.append(.effects) }
@@ -386,6 +391,7 @@ struct InspectorView: View {
             tabs.append(.video)
             tabs.append(.effects)
         }
+        if !adjustments.isEmpty, !tabs.contains(.effects) { tabs.append(.effects) }
         if !audios.isEmpty { tabs.append(.audio) }
         if selectedMulticamGroupId != nil { tabs.append(.multicam) }
         if aiEditEligible(selection: selection, resolvedClipAsset: resolvedClipAsset)
@@ -447,7 +453,14 @@ struct InspectorView: View {
                 if selectedTab == .ai, let asset = clipAsset {
                     AIEditTab(asset: asset, clipId: selection.firstVisualClip?.id ?? selection.firstAudioClip?.id)
                 } else if selectedTab == .effects {
-                    ScrollView { effectsTabContent(clips: selection.nonTextVisualClips + selection.textClips) }
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: AppTheme.Spacing.zero) {
+                            if !selection.adjustmentClips.isEmpty {
+                                adjustmentMixSection(clips: selection.adjustmentClips)
+                            }
+                            effectsTabContent(clips: selection.gradableClips)
+                        }
+                    }
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: AppTheme.Spacing.zero) {
@@ -686,6 +699,33 @@ struct InspectorView: View {
             cropRow(single: single)
             flipRow(clips: clips)
             blendRow(clips: clips)
+        }
+    }
+
+    private func adjustmentMixSection(clips: [Clip]) -> some View {
+        EditorPanelGroup(
+            AdjustmentLayer.displayName,
+            isExpanded: $adjustmentMixExpanded,
+            onReset: {
+                commitPropertiesToClips(clips, actionName: "Reset Mix") { clip in
+                    clip.opacity = 1
+                    clip.opacityTrack = nil
+                }
+            }
+        ) {
+            animatableRow(
+                label: "Mix",
+                clipId: clips.count == 1 ? clips.first?.id : nil,
+                property: .opacity,
+                onReset: {
+                    commitPropertiesToClips(clips, actionName: "Reset Mix") { clip in
+                        clip.opacity = 1
+                        clip.opacityTrack = nil
+                    }
+                }
+            ) {
+                opacityScrubField(clips: clips)
+            }
         }
     }
 

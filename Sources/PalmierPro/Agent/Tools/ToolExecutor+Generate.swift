@@ -54,6 +54,8 @@ extension ToolExecutor {
             throw ToolError("Cannot generate a sequence. Sequences are timelines.")
         case .motion:
             throw ToolError("Motion scenes are authored as code, not generated. Use manage_motion_scene.")
+        case .adjustment:
+            throw ToolError("Adjustment layers carry no media. Use add_adjustment_layers.")
         case .video:
             let modelId = try args.string("model") ?? defaultModelId(
                 VideoModelConfig.allModels.map { (id: $0.id, paidOnly: $0.paidOnly) }, kind: "video")

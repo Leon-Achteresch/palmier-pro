@@ -496,6 +496,7 @@ extension EditorViewModel {
     }
 
     func clipDisplayLabel(for clip: Clip) -> String {
+        if clip.mediaType == .adjustment { return AdjustmentLayer.displayName }
         if clip.mediaType == .text {
             let content = clip.textContent ?? ""
             if content.isEmpty { return "Text" }
@@ -551,11 +552,11 @@ extension EditorViewModel {
         if clip.sourceClipType == .sequence {
             return timeline(for: clip.mediaRef) == nil
         }
-        return clip.mediaType != .text && isMediaOffline(clip.mediaRef)
+        return !clip.mediaType.isSourcelessLayer && isMediaOffline(clip.mediaRef)
     }
 
     func isClipMediaGenerating(_ clip: Clip) -> Bool {
-        guard clip.mediaType != .text else { return false }
+        guard !clip.mediaType.isSourcelessLayer else { return false }
         return mediaAssetsById[clip.mediaRef]?.isGenerating ?? false
     }
 
@@ -673,7 +674,7 @@ extension EditorViewModel {
             mediaVisualCache.generateWaveform(for: asset)
         case .image:
             mediaVisualCache.generateImageThumbnail(for: asset)
-        case .text, .lottie, .motion, .sequence:
+        case .text, .lottie, .motion, .sequence, .adjustment:
             break
         }
     }

@@ -268,6 +268,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
 extension EditorWindowController: EditorActions {
     @objc func splitAtPlayhead(_ sender: Any?) { editorViewModel.splitAtPlayhead() }
+    @objc func addAdjustmentLayer(_ sender: Any?) { _ = editorViewModel.addAdjustmentLayer() }
     @objc func trimStartToPlayhead(_ sender: Any?) { editorViewModel.trimStartToPlayhead() }
     @objc func trimEndToPlayhead(_ sender: Any?) { editorViewModel.trimEndToPlayhead() }
     @objc func selectForwardOnTrack(_ sender: Any?) { editorViewModel.selectForwardFromCurrentSelection(scope: .track) }

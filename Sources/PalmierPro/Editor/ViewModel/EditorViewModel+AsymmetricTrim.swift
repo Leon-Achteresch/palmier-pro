@@ -77,7 +77,7 @@ extension EditorViewModel {
                 }
                 continue
             }
-            guard clip.mediaType != .image, clip.mediaType != .text else { continue }
+            guard clip.mediaType != .image, !clip.mediaType.isSourcelessLayer else { continue }
             let sourceDelta = Int((Double(magnitude) * clip.speed).rounded())
             let handle = trimHandle(for: clip, edge: edge)
             guard sourceDelta <= handle else {

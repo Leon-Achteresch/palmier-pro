@@ -44,6 +44,11 @@ enum FrameRenderer {
         for layer in layers {
             if gateByClipRange, !layer.clip.contains(timelineFrame: frame) { continue }
 
+            if case .adjustment = layer.source {
+                accum = adjusted(accum, clip: layer.clip, frame: frame)
+                continue
+            }
+
             if case .text = layer.source, layer.clip.textFillMode == .footage {
                 let opacity = min(1.0, max(0.0, layer.clip.opacityAt(frame: frame)))
                 if opacity > 0, let matte = textStencilMatte(layer, frame: frame, renderSize: renderSize) {
@@ -91,6 +96,26 @@ enum FrameRenderer {
             }
         }
         return accum
+    }
+
+    private static func adjusted(_ background: CIImage, clip: Clip, frame: Int) -> CIImage {
+        let mix = min(1.0, max(0.0, clip.opacityAt(frame: frame)))
+        let effects = clip.adjustmentEffects
+        guard mix > 0, !effects.isEmpty else { return background }
+        let extent = background.extent
+        let offset = frame - clip.startFrame
+        var image = background
+        for effect in effects {
+            guard let descriptor = EffectRegistry.descriptor(id: effect.type) else { continue }
+            image = descriptor.render(image, effect: effect, atOffset: offset)
+        }
+        image = image.cropped(to: extent)
+        guard mix < 1 else { return image }
+        let f = CIFilter(name: "CIDissolveTransition")
+        f?.setValue(background, forKey: kCIInputImageKey)
+        f?.setValue(image, forKey: "inputTargetImage")
+        f?.setValue(mix, forKey: "inputTime")
+        return (f?.outputImage ?? image).cropped(to: extent)
     }
 
     /// Composites `image`, then re-blends the subject of the frame below back on top,
@@ -159,6 +184,8 @@ enum FrameRenderer {
         case .text:
             return composedTextLayer(layer, frame: frame, renderSize: renderSize,
                                      bakeOpacity: bakeOpacity)
+        case .adjustment:
+            return nil
         case .group(let children, let canvas):
             return composedGroupLayer(layer, children: children, canvas: canvas, frame: frame,
                                       renderSize: renderSize, sourceFrame: sourceFrame, bakeOpacity: bakeOpacity)
@@ -267,7 +294,7 @@ enum FrameRenderer {
             switch layer.source {
             case .track(let id):
                 if let buffer = sourceFrame(id) { return buffer }
-            case .text:
+            case .text, .adjustment:
                 continue
             case .group(let children, _):
                 if let buffer = colorTagSource(

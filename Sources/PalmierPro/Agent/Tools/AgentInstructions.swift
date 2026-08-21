@@ -76,7 +76,9 @@ enum AgentInstructions {
           spoken audio (no targeting) — restyle with update_text and the returned \
           captionGroupId. fillMode 'footage' stencils layers below through the letter shapes. \
           Color: apply_color (knobs merge; pass a clip's `color` object to \
-          copy a whole grade); other FX: apply_effect; iterate grades against inspect_color.
+          copy a whole grade); other FX: apply_effect; iterate grades against inspect_color. \
+          To grade or treat a whole section at once, put an add_adjustment_layers clip above \
+          it and grade that clip — it applies to everything rendered below it for its span.
         - Transcription language: omit unless the user names the spoken language. Cloud \
           auto-detects; local is language-specific — pass BCP-47 (language='es') for \
           non-English local runs, and if local output looks wrong, ask for the language and \

@@ -295,7 +295,7 @@ final class TimelineInputController {
                     originalTrimEnd: headroom.right,
                     originalStartFrame: clip.startFrame,
                     originalDuration: resized.map(\.durationFrames).min() ?? clip.durationFrames,
-                    hasNoSourceMedia: resized.allSatisfy { $0.mediaType == .image || $0.mediaType == .text },
+                    hasNoSourceMedia: resized.allSatisfy { $0.mediaType == .image || $0.mediaType.isSourcelessLayer },
                     propagateToLinked: linkedForTrim,
                     scope: trimScope,
                     isRipple: rippleTrim
@@ -305,7 +305,7 @@ final class TimelineInputController {
                 if clip.multicamGroupId != nil {
                     editor.refuseWithToast("Can't slip a multicam clip — it would go out of sync with the group.")
                     dragState = .idle
-                } else if clip.mediaType == .image || clip.mediaType == .text {
+                } else if clip.mediaType == .image || clip.mediaType.isSourcelessLayer {
                     dragState = .idle
                 } else {
                     Self.slipCursor.set()
@@ -820,7 +820,7 @@ final class TimelineInputController {
                 return
             }
             if editor.toolMode == .trim {
-                if clip.multicamGroupId == nil, clip.mediaType != .image, clip.mediaType != .text {
+                if clip.multicamGroupId == nil, clip.mediaType != .image, !clip.mediaType.isSourcelessLayer {
                     Self.slipCursor.set()
                 } else {
                     NSCursor.operationNotAllowed.set()

@@ -385,7 +385,7 @@ extension EditorViewModel {
         }
         modify(&clip)
         timeline.tracks[loc.trackIndex].clips[loc.clipIndex] = clip
-        if clip.mediaType == .text {
+        if clip.mediaType.isSourcelessLayer {
             videoEngine?.refreshVisuals()
             return
         }
@@ -409,7 +409,7 @@ extension EditorViewModel {
                 }
                 modify(&clip)
                 timeline.tracks[loc.trackIndex].clips[loc.clipIndex] = clip
-                if clip.mediaType == .text {
+                if clip.mediaType.isSourcelessLayer {
                     touchedText = true
                 } else {
                     touchedVisual = true
@@ -439,7 +439,7 @@ extension EditorViewModel {
                 guard let original = dragBefore.removeValue(forKey: clipId),
                       let loc = locations[clipId] else { continue }
                 timeline.tracks[loc.trackIndex].clips[loc.clipIndex] = original
-                if original.mediaType == .text {
+                if original.mediaType.isSourcelessLayer {
                     touchedText = true
                 } else {
                     touchedVisual = true
@@ -575,7 +575,7 @@ extension EditorViewModel {
                 actionName: actionName
             )
         }
-        if clip.mediaType == .text {
+        if clip.mediaType.isSourcelessLayer {
             videoEngine?.refreshVisuals()
         } else {
             notifyTimelineChanged()
@@ -605,7 +605,7 @@ extension EditorViewModel {
                     before.append((clipId, undoTarget))
                     after.append((clipId, clip))
                 }
-                if clip.mediaType == .text {
+                if clip.mediaType.isSourcelessLayer {
                     touchedText = true
                 } else {
                     touchedVisual = true
@@ -659,7 +659,7 @@ extension EditorViewModel {
                 redoTarget: undoTarget,
                 actionName: actionName
             )
-            if undoTarget.mediaType == .text {
+            if undoTarget.mediaType.isSourcelessLayer {
                 vm.videoEngine?.refreshVisuals()
             } else {
                 vm.notifyTimelineChanged()

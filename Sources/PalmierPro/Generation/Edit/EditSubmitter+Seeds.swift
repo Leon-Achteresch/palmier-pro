@@ -31,7 +31,7 @@ extension EditSubmitter {
         case .image:
             guard let model = ImageModelConfig.imageEdit else { return nil }
             modelId = model.id
-        case .audio, .text, .lottie, .motion, .sequence:
+        case .audio, .text, .lottie, .motion, .sequence, .adjustment:
             return nil
         }
         var stored = GenerationInput(

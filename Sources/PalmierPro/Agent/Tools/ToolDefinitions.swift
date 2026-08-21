@@ -68,6 +68,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case manageMotionScene = "manage_motion_scene"
 
     // Color & effects
+    case addAdjustmentLayers = "add_adjustment_layers"
     case applyColor = "apply_color"
     case applyEffect = "apply_effect"
     case inspectColor = "inspect_color"
@@ -1179,6 +1180,28 @@ enum ToolDefinitions {
                     "durationInFrames": ["type": "integer", "description": "How many frames to render (1–36000). Defaults to 5 seconds. The last frame is held, so a clip can be extended past the animation as a freeze-frame."],
                 ],
                 required: ["action"]
+            )
+        ),
+        AgentTool(
+            name: .addAdjustmentLayers,
+            description: "Adds adjustment layers: clips that carry no media and apply their grade and effects to EVERYTHING rendered below them for the frames they span — the way to grade a whole sequence, a section, or a stack of stacked layers at once instead of pasting the same grade onto every clip. Grade one with apply_color and apply_effect exactly like a normal clip; its opacity is the mix strength between the graded and the ungraded picture (1 = full effect). An adjustment layer with no effects renders nothing.\n\nOmit trackIndex on every entry to create one new top video track (affects every existing track); otherwise set it on every entry and the layer affects only the tracks below that one. Entries overwrite whatever they land on, like add_clips. Adjustment layers have no source media: trims into source, speed, transitions, and audio don\'t apply — move, trim edges, split, delete, copy_attributes, and keyframes work as on any clip.",
+            inputSchema: objectSchema(
+                properties: [
+                    "entries": [
+                        "type": "array",
+                        "description": "Adjustment layers to add. Each entry is validated up front; one bad entry rejects the whole call with no partial state.",
+                        "items": [
+                            "type": "object",
+                            "properties": [
+                                "trackIndex": ["type": "integer", "description": "Optional. Existing non-audio track (0-based). The layer affects the tracks BELOW this one. Omit on all entries to create a new top track."],
+                                "startFrame": ["type": "integer", "description": "Timeline start frame (inclusive)."],
+                                "endFrame": ["type": "integer", "description": "Timeline end frame (exclusive) — copy a clip's frames pair to cover exactly that span."],
+                            ],
+                            "required": ["startFrame", "endFrame"],
+                        ],
+                    ],
+                ],
+                required: ["entries"]
             )
         ),
         AgentTool(

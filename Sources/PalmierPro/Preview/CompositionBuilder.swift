@@ -66,10 +66,10 @@ enum CompositionBuilder {
         let audioCrossfades = TransitionAudioExtension.crossfades(in: timeline)
 
         for (trackIdx, track) in timeline.tracks.enumerated() {
-            // Text is composited at render, not as a track.
+            // Text and adjustment layers are composited at render, not as tracks.
             let sortedClips = track.clips
                 .sorted { $0.startFrame < $1.startFrame }
-                .filter { $0.mediaType != .text }
+                .filter { !$0.mediaType.isSourcelessLayer }
             guard !sortedClips.isEmpty else { continue }
             if track.type == .audio {
                 try await insertAudioLane(clips: sortedClips, parentTrackIndex: trackIdx, nest: nil, depth: 0, ctx: ctx)
@@ -177,7 +177,7 @@ enum CompositionBuilder {
         var previousEndFrame = Int.min
         for clip in clips {
             guard clip.durationFrames > 0, clip.startFrame >= previousEndFrame else { continue }
-            if clip.mediaType == .text { continue }   // text renders in instructions, nests render it in groups
+            if clip.mediaType.isSourcelessLayer { continue }   // rendered in instructions; nests render them in groups
             if clip.mediaType == .sequence {
                 try await expandNestVideo(carrier: clip, parentTrackIndex: parentTrackIndex, depth: depth, ctx: ctx)
                 previousEndFrame = clip.endFrame
@@ -691,7 +691,7 @@ enum CompositionBuilder {
             switch mapping.kind {
             case .timeline(let trackIndex, let clipIds):
                 guard timeline.tracks.indices.contains(trackIndex) else { continue }
-                ids = clipIds ?? Set(timeline.tracks[trackIndex].clips.filter { $0.mediaType != .text }.map(\.id))
+                ids = clipIds ?? Set(timeline.tracks[trackIndex].clips.filter { !$0.mediaType.isSourcelessLayer }.map(\.id))
             case .nested(let clips, _, _):
                 ids = Set(clips.map(\.id))
             case .blackBackground, .transitionHandles:
@@ -795,6 +795,11 @@ enum CompositionBuilder {
                     out.append(Entry(
                         start: cmTime(clip.startFrame), end: cmTime(clip.endFrame),
                         plan: LayerPlan(source: .text, clip: clip, natSize: textNatSize, preferredTransform: .identity)
+                    ))
+                } else if clip.mediaType == .adjustment {
+                    out.append(Entry(
+                        start: cmTime(clip.startFrame), end: cmTime(clip.endFrame),
+                        plan: LayerPlan(source: .adjustment, clip: clip, natSize: textNatSize, preferredTransform: .identity)
                     ))
                 } else if clip.mediaType == .sequence {
                     guard clip.startFrame >= prevEndFrame else { continue }

@@ -11,6 +11,7 @@ struct LayerPlan: Sendable {
     indirect enum Source: Sendable {
         case track(CMPersistentTrackID)
         case text
+        case adjustment
         /// Nested timeline: children composite into a `canvas`-sized unit, then the nest clip's pipeline applies.
         case group(children: [LayerPlan], canvas: CGSize)
         case transition(from: LayerPlan, to: LayerPlan, plan: TransitionPlan)
@@ -28,7 +29,7 @@ struct LayerPlan: Sendable {
     func collectTrackIDs(into ids: inout [CMPersistentTrackID]) {
         switch source {
         case .track(let id): ids.append(id)
-        case .text: break
+        case .text, .adjustment: break
         case .group(let children, _):
             for child in children { child.collectTrackIDs(into: &ids) }
         case .transition(let from, let to, _):

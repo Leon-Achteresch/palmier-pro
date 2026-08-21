@@ -328,7 +328,7 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
     /// Frame where this clip ends on the timeline
     var endFrame: Int { startFrame + durationFrames }
 
-    var supportsRetiming: Bool { sourceClipType != .sequence }
+    var supportsRetiming: Bool { sourceClipType != .sequence && mediaType != .adjustment }
 
     /// Source frames consumed by the visible portion
     var sourceFramesConsumed: Int { Int((Double(durationFrames) * speed).rounded()) }

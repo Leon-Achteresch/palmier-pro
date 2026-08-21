@@ -283,7 +283,7 @@ struct TransformOverlayView: View {
         guard editor.activePreviewTab == .timeline,
               !editor.selectedClipIds.isEmpty else { return nil }
         for track in editor.timeline.tracks where track.type != .audio {
-            for clip in track.clips where editor.selectedClipIds.contains(clip.id) {
+            for clip in track.clips where editor.selectedClipIds.contains(clip.id) && !clip.isAdjustmentLayer {
                 return clip
             }
         }

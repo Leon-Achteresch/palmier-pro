@@ -38,6 +38,11 @@ struct ToolbarView: View {
             // Add content
             HStack(spacing: AppTheme.Spacing.md) {
                 textGlyphButton("T", help: "Add Text", action: { _ = editor.addTextClip() })
+                toolbarButton(
+                    ClipType.adjustment.sfSymbolName,
+                    help: "Add Adjustment Layer (⌥⌘Y)",
+                    action: { _ = editor.addAdjustmentLayer() }
+                )
             }
 
             Spacer()

@@ -6,6 +6,7 @@ enum ClipType: String, Codable, Sendable, CaseIterable {
     case lottie
     case motion
     case sequence
+    case adjustment
 
     var sfSymbolName: String {
         switch self {
@@ -16,6 +17,7 @@ enum ClipType: String, Codable, Sendable, CaseIterable {
         case .lottie: "sparkles"
         case .motion: "wand.and.sparkles"
         case .sequence: "film.stack"
+        case .adjustment: "circle.righthalf.filled"
         }
     }
 
@@ -28,6 +30,7 @@ enum ClipType: String, Codable, Sendable, CaseIterable {
         case .lottie: "Lottie"
         case .motion: "Motion"
         case .sequence: "Video"
+        case .adjustment: "Adjustment"
         }
     }
 
@@ -35,6 +38,10 @@ enum ClipType: String, Codable, Sendable, CaseIterable {
 
     var isVisual: Bool {
         self != .audio
+    }
+
+    var isSourcelessLayer: Bool {
+        self == .text || self == .adjustment
     }
 
     func isCompatible(with other: ClipType) -> Bool {

@@ -335,8 +335,8 @@ extension ToolExecutor {
         if let s = out["sourceClipType"] as? String, s == out["mediaType"] as? String {
             out.removeValue(forKey: "sourceClipType")
         }
-        // Text has no source media; trims are placement bookkeeping, not signal.
-        if out["mediaType"] as? String == "text" {
+        // Text and adjustment layers have no source media; trims are placement bookkeeping, not signal.
+        if let type = (out["mediaType"] as? String).flatMap(ClipType.init(rawValue:)), type.isSourcelessLayer {
             out.removeValue(forKey: "trimStartFrame")
             out.removeValue(forKey: "trimEndFrame")
         }

@@ -38,7 +38,7 @@ extension ToolExecutor {
                 throw ToolError("'edge' does not apply to a slip — a slip moves both edges of the source range at once.")
             }
             guard editor.isSlipEligible(clip) else {
-                throw ToolError("Clip \(input.clipId) can't slip: image, text, and multicam clips have no independent source range.")
+                throw ToolError("Clip \(input.clipId) can't slip: image, text, adjustment, and multicam clips have no independent source range.")
             }
         } else {
             switch input.edge {

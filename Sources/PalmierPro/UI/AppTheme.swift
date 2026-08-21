@@ -190,6 +190,7 @@ enum AppTheme {
         static let lottie = NSColor(red: 0xA0/255.0, green: 0x78/255.0, blue: 0x22/255.0, alpha: 1)
         static let motion = NSColor(red: 0x3F/255.0, green: 0x3D/255.0, blue: 0x9E/255.0, alpha: 1)
         static let sequence = NSColor(red: 0xB9/255.0, green: 0xB2/255.0, blue: 0x9A/255.0, alpha: 1)
+        static let adjustment = NSColor(red: 0x6B/255.0, green: 0x5A/255.0, blue: 0x2E/255.0, alpha: 1)
         static let multicam = NSColor.systemRed
         static let transition = NSColor(red: 0x3C/255.0, green: 0x3A/255.0, blue: 0x52/255.0, alpha: 1)
     }
@@ -456,6 +457,7 @@ extension ClipType {
         case .lottie: AppTheme.TrackColor.lottie
         case .motion: AppTheme.TrackColor.motion
         case .sequence: AppTheme.TrackColor.sequence
+        case .adjustment: AppTheme.TrackColor.adjustment
         }
     }
 }

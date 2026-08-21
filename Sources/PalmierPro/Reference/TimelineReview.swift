@@ -15,7 +15,7 @@ enum TimelineReview {
     static func primaryVideoTrackIndex(_ timeline: Timeline) -> Int? {
         var best: (index: Int, count: Int)?
         for (index, track) in timeline.tracks.enumerated() where track.type == .video {
-            let count = track.clips.count(where: { $0.mediaType != .text })
+            let count = track.clips.count(where: { !$0.mediaType.isSourcelessLayer })
             if count > 0, count > (best?.count ?? 0) {
                 best = (index, count)
             }
@@ -25,7 +25,7 @@ enum TimelineReview {
 
     static func shotStats(clips: [Clip], fps: Int, totalFrames: Int) -> TimelineShotStats? {
         guard fps > 0, totalFrames > 0 else { return nil }
-        let sorted = clips.filter { $0.mediaType != .text }.sorted { $0.startFrame < $1.startFrame }
+        let sorted = clips.filter { !$0.mediaType.isSourcelessLayer }.sorted { $0.startFrame < $1.startFrame }
         guard !sorted.isEmpty else { return nil }
         let fpsD = Double(fps)
         let shots = sorted.map { clip in
@@ -58,7 +58,7 @@ enum TimelineReview {
     }
 
     static func cutFrames(_ clips: [Clip]) -> [Int] {
-        clips.filter { $0.mediaType != .text }
+        clips.filter { !$0.mediaType.isSourcelessLayer }
             .sorted { $0.startFrame < $1.startFrame }
             .dropFirst()
             .map(\.startFrame)

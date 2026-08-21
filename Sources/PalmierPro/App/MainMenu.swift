@@ -88,6 +88,12 @@ enum MainMenuBuilder {
 
         menu.addItem(.separator())
 
+        let adjustmentItem = NSMenuItem(title: "Add Adjustment Layer", action: #selector(EditorActions.addAdjustmentLayer(_:)), keyEquivalent: "y")
+        adjustmentItem.keyEquivalentModifierMask = [.command, .option]
+        menu.addItem(adjustmentItem)
+
+        menu.addItem(.separator())
+
         let splitItem = NSMenuItem(title: "Split at Playhead", action: #selector(EditorActions.splitAtPlayhead(_:)), keyEquivalent: "k")
         splitItem.keyEquivalentModifierMask = [.command]
         menu.addItem(splitItem)
@@ -191,6 +197,7 @@ enum MainMenuBuilder {
 /// Actions dispatched through the responder chain to reach the active EditorViewModel.
 @MainActor @objc protocol EditorActions {
     func splitAtPlayhead(_ sender: Any?)
+    func addAdjustmentLayer(_ sender: Any?)
     func trimStartToPlayhead(_ sender: Any?)
     func trimEndToPlayhead(_ sender: Any?)
     func selectForwardOnTrack(_ sender: Any?)
