@@ -136,6 +136,7 @@ extension EditorViewModel {
     func commitStagedProjectMedia(
         _ stagedURL: URL,
         filename: String,
+        directory: String = Project.mediaDirectoryName,
         maxBytes: Int64? = nil,
         workAlreadyAdmitted: Bool = false
     ) async throws -> URL {
@@ -174,7 +175,7 @@ extension EditorViewModel {
                 }
                 if let destination = try await projectPackageCoordinator.performMutation({ () -> URL? in
                     guard self.projectURL?.standardizedFileURL == targetProjectURL.standardizedFileURL else { return nil }
-                    let destination = targetProjectURL.appendingPathComponent(Project.mediaDirectoryName, isDirectory: true)
+                    let destination = targetProjectURL.appendingPathComponent(directory, isDirectory: true)
                         .appendingPathComponent(filename, isDirectory: false)
                     try FileIO.installPreparedFile(from: preparedURL, to: destination)
                     return destination
@@ -655,6 +656,7 @@ extension EditorViewModel {
         unprocessableMediaRefs.remove(asset.id)
         refreshMissingMediaCache()
         searchIndex.schedule(asset)
+        queueProxyIfAutomatic(for: asset)
         if !batchManifestUpdate {
             prepareMediaVisuals(for: asset)
         }

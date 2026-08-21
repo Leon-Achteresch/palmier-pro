@@ -22,6 +22,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case importMedia = "import_media"
     case captureFrame = "capture_frame"
     case organizeMedia = "organize_media"
+    case manageProxies = "manage_proxies"
 
     // Clips
     case manageTracks = "manage_tracks"
@@ -343,6 +344,29 @@ enum ToolDefinitions {
                         "description": "Asset ids, timeline ids, and/or folder paths to delete.",
                     ],
                 ]
+            )
+        ),
+        AgentTool(
+            name: .manageProxies,
+            description: "Manages half-resolution proxy media for smooth editing of heavy footage. A proxy is an H.264 twin (half the source's display size, capped at 960px wide) stored inside the project package; the preview player uses it while proxies are enabled. Export, capture_frame, and inspect_color always read the full-resolution original, so a proxy never affects delivered quality or measurements.\n\nUse it when the user reports choppy playback or is working with 4K/large source files. action=status lists every video asset with its proxy state (none | queued | generating | ready | failed) — call it to check progress instead of guessing from elapsed time. action=generate queues transcodes in the background (two at a time) for assetIds, or for every eligible video asset when assetIds is omitted; the call returns immediately with a receipt, so poll action=status for completion. action=cancel drops queued and in-flight jobs. action=remove deletes proxies and frees the space. action=enable / action=disable switch playback between proxy and original media in one undoable step; enabling also auto-generates proxies for newly imported video. Audio always plays from the original file.",
+            inputSchema: objectSchema(
+                properties: [
+                    "action": [
+                        "type": "string",
+                        "enum": ["status", "generate", "cancel", "remove", "enable", "disable"],
+                        "description": "status reports per-asset proxy state; generate queues transcodes; cancel stops pending work; remove deletes proxy files; enable/disable switch preview playback between proxies and originals.",
+                    ],
+                    "assetIds": [
+                        "type": "array",
+                        "items": ["type": "string"],
+                        "description": "Optional. Asset ids from get_media for generate, cancel, and remove. Omit to target every eligible video asset. Not valid for status, enable, or disable.",
+                    ],
+                    "regenerate": [
+                        "type": "boolean",
+                        "description": "generate only. Optional, default false. true re-encodes assets that already have a ready proxy (use after the source file changed).",
+                    ],
+                ],
+                required: ["action"]
             )
         ),
         AgentTool(

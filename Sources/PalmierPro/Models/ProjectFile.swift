@@ -14,6 +14,7 @@ struct ProjectFile: Codable, Sendable {
     var multicamGroups: [MulticamSource]?
     var linkedContextPath: String?
     var enabledAddons: [String]?
+    var useProxies: Bool?
 
     static func decode(_ data: Data) throws -> ProjectFile {
         let decoder = JSONDecoder()

@@ -42,6 +42,7 @@ enum CompositionBuilder {
     static func build(
         timeline: Timeline,
         resolveURL: @escaping @Sendable (String) -> URL?,
+        resolveVideoURL: @escaping @Sendable (String) -> URL? = { _ in nil },
         resolveSourceSize: @escaping @Sendable (String) -> CGSize? = { _ in nil },
         resolveTimeline: @escaping @Sendable (String) -> Timeline? = { _ in nil },
         missingMediaRefs: Set<String> = [],
@@ -60,6 +61,7 @@ enum CompositionBuilder {
             timescale: CMTimeScale(timeline.fps),
             renderSize: renderSize,
             resolveURL: resolveURL,
+            resolveVideoURL: resolveVideoURL,
             resolveSourceSize: resolveSourceSize,
             resolveTimeline: resolveTimeline,
             missingMediaRefs: missingMediaRefs
@@ -143,6 +145,7 @@ enum CompositionBuilder {
         let timescale: CMTimeScale
         let renderSize: CGSize
         let resolveURL: @Sendable (String) -> URL?
+        let resolveVideoURL: @Sendable (String) -> URL?
         let resolveSourceSize: @Sendable (String) -> CGSize?
         let resolveTimeline: @Sendable (String) -> Timeline?
         let missingMediaRefs: Set<String>
@@ -159,6 +162,7 @@ enum CompositionBuilder {
             timescale: CMTimeScale,
             renderSize: CGSize,
             resolveURL: @escaping @Sendable (String) -> URL?,
+            resolveVideoURL: @escaping @Sendable (String) -> URL?,
             resolveSourceSize: @escaping @Sendable (String) -> CGSize?,
             resolveTimeline: @escaping @Sendable (String) -> Timeline?,
             missingMediaRefs: Set<String>
@@ -167,6 +171,7 @@ enum CompositionBuilder {
             self.timescale = timescale
             self.renderSize = renderSize
             self.resolveURL = resolveURL
+            self.resolveVideoURL = resolveVideoURL
             self.resolveSourceSize = resolveSourceSize
             self.resolveTimeline = resolveTimeline
             self.missingMediaRefs = missingMediaRefs
@@ -345,6 +350,7 @@ enum CompositionBuilder {
         }
         let outcome = try await loadSource(
             clip: clip, mediaType: mediaType, resolveURL: ctx.resolveURL,
+            resolveVideoURL: ctx.resolveVideoURL,
             resolveSourceSize: ctx.resolveSourceSize, missingMediaRefs: ctx.missingMediaRefs,
             renderSize: ctx.renderSize
         )
@@ -379,13 +385,17 @@ enum CompositionBuilder {
         clip: Clip,
         mediaType: AVMediaType,
         resolveURL: @Sendable (String) -> URL?,
+        resolveVideoURL: @Sendable (String) -> URL?,
         resolveSourceSize: @Sendable (String) -> CGSize?,
         missingMediaRefs: Set<String>,
         renderSize: CGSize
     ) async throws -> LoadOutcome {
         let mediaURL: URL
         guard !missingMediaRefs.contains(clip.mediaRef) else { return .offline }
-        guard let resolved = resolveURL(clip.mediaRef) else { return .offline }
+        guard let original = resolveURL(clip.mediaRef) else { return .offline }
+        let resolved = mediaType == .video && clip.mediaType == .video
+            ? (resolveVideoURL(clip.mediaRef) ?? original)
+            : original
         if clip.mediaType == .image {
             let imageSize = resolveSourceSize(clip.mediaRef)
                 ?? ImageVideoGenerator.imageNativeSize(url: resolved)

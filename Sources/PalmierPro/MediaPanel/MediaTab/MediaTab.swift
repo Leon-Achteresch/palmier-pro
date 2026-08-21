@@ -639,6 +639,37 @@ struct MediaTab: View {
                     Label("Organize with Agent", systemImage: "wand.and.stars")
                 }
             }
+            Divider()
+            proxyMenuSection
+        }
+    }
+
+    @ViewBuilder
+    private var proxyMenuSection: some View {
+        let pending = editor.proxyService.pendingCount
+        Section("Proxies") {
+            Button {
+                editor.setUseProxies(!editor.useProxies)
+            } label: {
+                Label(
+                    "Play Proxy Media",
+                    systemImage: editor.useProxies ? "checkmark" : "square.stack.3d.down.right"
+                )
+            }
+            .disabled(editor.projectURL == nil)
+            Button {
+                editor.generateProxiesForAll()
+            } label: {
+                Label("Generate Missing Proxies", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .disabled(editor.projectURL == nil || editor.proxyEligibleAssets.isEmpty)
+            if pending > 0 {
+                Button {
+                    editor.proxyService.cancelAll()
+                } label: {
+                    Label("Cancel \(pending) Proxy Job\(pending == 1 ? "" : "s")", systemImage: "xmark")
+                }
+            }
         }
     }
 

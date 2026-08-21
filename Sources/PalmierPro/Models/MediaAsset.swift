@@ -25,6 +25,7 @@ final class MediaAsset: Identifiable {
     var generationInput: GenerationInput?
     var importInput: MediaImportInput?
     var generationStatus: GenerationStatus = .none
+    var proxyStatus: ProxyStatus = .none
     var folderId: String?
     var pendingDownloadURL: URL?
     var cachedRemoteURL: String?
@@ -133,6 +134,7 @@ final class MediaAsset: Identifiable {
         self.importInput = entry.importInput
         let restoredStatus = GenerationStatus(serialized: entry.generationStatus)
         self.generationStatus = restoredStatus == .preparing && !canResumeGeneration ? .none : restoredStatus
+        self.proxyStatus = ProxyStatus(serialized: entry.proxyStatus)
     }
 
     /// Produce a serializable manifest entry from this asset.
@@ -154,6 +156,7 @@ final class MediaAsset: Identifiable {
             cachedRemoteURLExpiresAt: fresh == nil ? nil : cachedRemoteURLExpiresAt,
             generationStatus: generationStatus.manifestValue,
             importInput: importInput,
+            proxyStatus: proxyStatus.manifestValue,
         )
     }
 

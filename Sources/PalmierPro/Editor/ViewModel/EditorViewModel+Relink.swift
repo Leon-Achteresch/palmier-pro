@@ -38,6 +38,7 @@ extension EditorViewModel {
         denoiseFailed.remove(Self.studioBakeKey(id))
         denoiseBaked.remove(Self.studioBakeKey(id))
         mediaVisualCache.invalidate(id)
+        invalidateProxy(for: mediaAssets[i])
         speakerAssignments.removeValue(forKey: id)
         if let j = mediaManifest.entries.firstIndex(where: { $0.id == id }) {
             mediaManifest.entries[j].source = mediaAssets[i].toManifestEntry(projectURL: projectURL).source

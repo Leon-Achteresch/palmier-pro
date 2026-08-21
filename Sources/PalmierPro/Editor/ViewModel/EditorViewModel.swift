@@ -102,6 +102,7 @@ final class EditorViewModel {
     var multicamGroups: [MulticamSource] = []
     var linkedContextPath: String?
     var enabledAddons: Set<String> = []
+    var useProxies: Bool = false
     var speakerAssignments: [String: [String: Int]] = [:]
     var speakerIdentifyPhase: String?
     var speakerIdentifyInFlight: Bool { speakerIdentifyPhase != nil }
@@ -237,6 +238,7 @@ final class EditorViewModel {
 
     let generationService = GenerationService()
     let agentService = AgentService()
+    let proxyService = ProxyService()
 
     var agentPanelVisible: Bool = {
         UserDefaults.standard.object(forKey: "agentPanelVisible") as? Bool ?? false
@@ -330,6 +332,7 @@ final class EditorViewModel {
             projectURL: { [weak self] in self?.projectURL }
         )
         agentService.editor = self
+        proxyService.editor = self
         searchIndex.assetsProvider = { [weak self] in self?.mediaAssets ?? [] }
         mediaVisualCache.speech.onAnalyzingCountChange = { [weak self] count in
             self?.speechAnalyzingCount = count

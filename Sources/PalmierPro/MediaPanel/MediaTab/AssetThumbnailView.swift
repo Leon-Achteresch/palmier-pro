@@ -192,8 +192,45 @@ struct AssetThumbnailView: View {
             if asset.isGenerated && !asset.isGenerating {
                 sourceBadge
             }
+            proxyBadge
         }
         .padding(AppTheme.Spacing.xs)
+    }
+
+    @ViewBuilder
+    private var proxyBadge: some View {
+        switch asset.proxyStatus {
+        case .none:
+            EmptyView()
+        case .queued, .generating:
+            proxyChip(
+                symbol: "arrow.triangle.2.circlepath",
+                tint: AppTheme.Text.secondaryColor,
+                help: asset.proxyStatus == .queued ? "Proxy queued" : "Generating proxy…"
+            )
+        case .ready:
+            proxyChip(
+                symbol: "square.stack.3d.down.right.fill",
+                tint: editor.useProxies ? AppTheme.Accent.primary : AppTheme.Text.secondaryColor,
+                help: editor.useProxies ? "Playing proxy media" : "Proxy ready — playback uses the original"
+            )
+        case .failed(let message):
+            proxyChip(
+                symbol: "exclamationmark.triangle.fill",
+                tint: AppTheme.Status.errorColor,
+                help: "Proxy failed: \(message)"
+            )
+        }
+    }
+
+    private func proxyChip(symbol: String, tint: Color, help: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: AppTheme.FontSize.xxs, weight: AppTheme.FontWeight.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, AppTheme.Spacing.xs)
+            .padding(.vertical, AppTheme.Spacing.xxs)
+            .background(Color.black.opacity(AppTheme.Opacity.prominent), in: .capsule)
+            .help(help)
     }
 
     @ViewBuilder

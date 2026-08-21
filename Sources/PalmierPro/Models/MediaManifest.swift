@@ -33,6 +33,7 @@ struct MediaManifestEntry: Codable, Sendable, Equatable, Identifiable {
     var cachedRemoteURLExpiresAt: Date?
     var generationStatus: String?
     var importInput: MediaImportInput?
+    var proxyStatus: String?
 }
 
 struct MediaImportInput: Codable, Sendable, Equatable {

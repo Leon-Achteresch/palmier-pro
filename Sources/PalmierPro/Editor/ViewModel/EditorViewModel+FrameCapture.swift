@@ -65,7 +65,7 @@ extension EditorViewModel {
             guard frame >= 0, frame < timeline.totalFrames else {
                 throw FrameCaptureError.timelineFrameOutOfRange(frame: frame, totalFrames: timeline.totalFrames)
             }
-            let mediaURLs = mediaResolver.expectedURLMap()
+            let mediaURLs = mediaURLMap(quality: .full)
             let resolveTimeline = timelineResolver()
             let missingMediaRefs = missingMediaRefs
             defaultName = "Frame \(frame)"

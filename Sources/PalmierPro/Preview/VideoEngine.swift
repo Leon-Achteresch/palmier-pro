@@ -302,6 +302,7 @@ final class VideoEngine {
     private struct RebuildInputs: Equatable {
         let involved: [Timeline]  // active timeline plus nested children
         let mediaURLs: [String: URL]
+        let videoURLs: [String: URL]
         let assetSizes: [String: CGSize]
         let missingMediaRefs: Set<String>
     }
@@ -311,6 +312,7 @@ final class VideoEngine {
         let generation = invalidateRebuild()
 
         let mediaURLs = editor.mediaResolver.expectedURLMap()
+        let videoURLs = editor.mediaURLMap(quality: .playback)
         let missingMediaRefs = editor.missingMediaRefs
         let assetSizes: [String: CGSize] = Dictionary(
             uniqueKeysWithValues: editor.mediaAssets.compactMap { asset in
@@ -324,6 +326,7 @@ final class VideoEngine {
         let inputs = RebuildInputs(
             involved: [editor.timeline] + editor.timeline.reachableTimelines(resolve: { editor.timeline(for: $0) }),
             mediaURLs: mediaURLs,
+            videoURLs: videoURLs,
             assetSizes: assetSizes,
             missingMediaRefs: missingMediaRefs
         )
@@ -339,6 +342,7 @@ final class VideoEngine {
                 result = try await CompositionBuilder.build(
                     timeline: snapshot,
                     resolveURL: { mediaURLs[$0] },
+                    resolveVideoURL: { videoURLs[$0] },
                     resolveSourceSize: { assetSizes[$0] },
                     resolveTimeline: resolveTimeline,
                     missingMediaRefs: missingMediaRefs,

@@ -25,6 +25,7 @@ extension EditorViewModel {
         multicamGroups = file.multicamGroups ?? []
         linkedContextPath = file.linkedContextPath
         enabledAddons = Set(file.enabledAddons ?? [])
+        useProxies = file.useProxies ?? false
         syncSpeakerColors()
         if !openTimelineIds.contains(activeTimelineId) {
             openTimelineIds.append(activeTimelineId)
@@ -44,7 +45,8 @@ extension EditorViewModel {
             speakers: speakerRegistry.isEmpty ? nil : speakerRegistry,
             multicamGroups: savedMulticamGroups(),
             linkedContextPath: linkedContextPath,
-            enabledAddons: enabledAddons.isEmpty ? nil : enabledAddons.sorted()
+            enabledAddons: enabledAddons.isEmpty ? nil : enabledAddons.sorted(),
+            useProxies: useProxies ? true : nil
         )
     }
 

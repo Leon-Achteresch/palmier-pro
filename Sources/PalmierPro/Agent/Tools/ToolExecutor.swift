@@ -280,6 +280,7 @@ final class ToolExecutor {
         case .importMedia:   return try await importMedia(editor, args)
         case .listModels:    return listModels(args)
         case .organizeMedia: return try organizeMedia(editor, args)
+        case .manageProxies: return try await manageProxies(editor, args)
         case .sendFeedback:  return try await sendFeedback(editor, args)
         case .setProjectSettings: return try setProjectSettings(editor, args)
         case .createTimeline:     return try createTimeline(editor, args)

@@ -157,6 +157,13 @@ enum AgentInstructions {
           living backgrounds, generate_transition between scenes. Then animate the layers \
           with keyframes — generated media is footage, not the motion itself.
 
+        # Playback performance
+        - When the user says playback stutters or the footage is heavy (4K, long takes), \
+          offer proxies: manage_proxies action=generate then action=enable. Transcoding runs \
+          in the background — poll action=status rather than guessing, and never claim a \
+          proxy is ready before status says so. Proxies change preview only; export, \
+          capture_frame, and inspect_color always read the originals.
+
         # Export
         - export_project modes: video (default — H.264/H.265/ProRes, 720p–4K or Match \
           Timeline), xml (Premiere), fcpxml (Resolve / Final Cut), palmier (self-contained \
