@@ -715,6 +715,7 @@ extension EditorViewModel {
         let targetIds = linkedClipIdsSharingMedia(anchor: clipId)
 
         var oldTrims: [String: (start: Int, end: Int)] = [:]
+        var oldStabilization: [String: ClipStabilization] = [:]
         for id in targetIds {
             if let l = findClip(id: id) {
                 if resetTrim {
@@ -722,6 +723,11 @@ extension EditorViewModel {
                     oldTrims[id] = (c.trimStartFrame, c.trimEndFrame)
                     timeline.tracks[l.trackIndex].clips[l.clipIndex].trimStartFrame = 0
                     timeline.tracks[l.trackIndex].clips[l.clipIndex].trimEndFrame = 0
+                }
+                if let s = timeline.tracks[l.trackIndex].clips[l.clipIndex].stabilization {
+                    oldStabilization[id] = s
+                    stabilizationJobs.forget(clipId: id)
+                    timeline.tracks[l.trackIndex].clips[l.clipIndex].stabilization = nil
                 }
                 timeline.tracks[l.trackIndex].clips[l.clipIndex].mediaRef = newAssetId
             }
@@ -731,6 +737,7 @@ extension EditorViewModel {
             for id in targetIds {
                 if let l = vm.findClip(id: id) {
                     vm.timeline.tracks[l.trackIndex].clips[l.clipIndex].mediaRef = oldMediaRef
+                    vm.timeline.tracks[l.trackIndex].clips[l.clipIndex].stabilization = oldStabilization[id]
                     if let old = oldTrims[id] {
                         vm.timeline.tracks[l.trackIndex].clips[l.clipIndex].trimStartFrame = old.start
                         vm.timeline.tracks[l.trackIndex].clips[l.clipIndex].trimEndFrame = old.end

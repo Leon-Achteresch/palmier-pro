@@ -255,6 +255,7 @@ final class ToolExecutor {
         case .swapClipMedia:    return try swapClipMedia(editor, args)
         case .relinkMedia:      return try relinkMedia(editor, args)
         case .cutoutSubject:    return try await cutoutSubject(editor, args)
+        case .stabilizeClips:   return try stabilizeClips(editor, args)
         case .addTransition:    return try addTransition(editor, args)
         case .rippleDeleteRanges: return try rippleDeleteRanges(editor, args)
         case .removeWords:   return try await removeWords(editor, args)

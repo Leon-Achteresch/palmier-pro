@@ -6,7 +6,9 @@ extension EditorViewModel {
         denoiseBaked.removeAll()
         denoiseFailed.removeAll()
         mediaVisualCache.resetSessionState()
+        stabilizationJobs.reset()
         enhancePendingDenoises()
+        resumePendingStabilizations()
     }
 
     func setDenoise(clipIds: Set<String>, enabled: Bool, amount: Double? = nil, actionName: String) {

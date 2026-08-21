@@ -342,6 +342,9 @@ extension ToolExecutor {
             out.removeValue(forKey: "trimEndFrame")
         }
         out = strippingDefaults(out, clipDefaults)
+        if let stabilization = out.removeValue(forKey: "stabilization") as? [String: Any] {
+            out["stabilize"] = compactStabilization(stabilization)
+        }
         if let id = out["id"] as? String, let grade = grades[id] { out["color"] = grade }
         if let fx = out["effects"] as? [[String: Any]] {
             let cleaned = compactEffects(fx)
@@ -354,6 +357,19 @@ extension ToolExecutor {
         if let id = out["id"] as? String, let partner = fold.partnerByVisualId[id] {
             out["audio"] = audioSummary(partner.clip, trackIndex: partner.trackIndex, visual: clip)
             out.removeValue(forKey: "linkGroupId")
+        }
+        return out
+    }
+
+    private static func compactStabilization(_ stabilization: [String: Any]) -> [String: Any] {
+        let hasSamples = (stabilization["samples"] as? String).map { !$0.isEmpty } ?? false
+        var out: [String: Any] = [
+            "state": hasSamples ? "ready" : "analyzing",
+            "smoothing": (stabilization["smoothing"] as? NSNumber)?.doubleValue ?? ClipStabilization.defaultSmoothing,
+        ]
+        if hasSamples {
+            let cropScale = (stabilization["cropScale"] as? NSNumber)?.doubleValue ?? 1
+            out["cropPercent"] = cropScale > 1 ? (1 - 1 / cropScale) * 100 : 0
         }
         return out
     }

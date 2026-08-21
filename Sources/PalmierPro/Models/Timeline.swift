@@ -320,6 +320,7 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
     var audioMix: ClipAudioMix?
 
     var duckingRole: DuckingRole = .auto
+    var stabilization: ClipStabilization?
 
     private enum CodingKeys: String, CodingKey {
         case id, mediaRef, mediaType, sourceClipType, startFrame, durationFrames
@@ -329,7 +330,7 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
         case linkGroupId, captionGroupId, multicamGroupId, textContent, textStyle, textAnimation, wordTimings
         case textFillMode
         case opacityTrack, positionTrack, scaleTrack, rotationTrack, cropTrack, volumeTrack, speedTrack
-        case effects, blendMode, audioMix, duckingRole
+        case effects, blendMode, audioMix, duckingRole, stabilization
     }
 
     /// Frame where this clip ends on the timeline
@@ -640,7 +641,8 @@ extension Clip {
             effects: try? c.decode([Effect].self, forKey: .effects),
             blendMode: try? c.decode(BlendMode.self, forKey: .blendMode),
             audioMix: (try? c.decode(ClipAudioMix.self, forKey: .audioMix))?.normalized,
-            duckingRole: (try? c.decode(DuckingRole.self, forKey: .duckingRole)) ?? .auto
+            duckingRole: (try? c.decode(DuckingRole.self, forKey: .duckingRole)) ?? .auto,
+            stabilization: try? c.decode(ClipStabilization.self, forKey: .stabilization)
         )
     }
 }

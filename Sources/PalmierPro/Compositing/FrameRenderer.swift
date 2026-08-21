@@ -24,7 +24,7 @@ enum FrameRenderer {
 
         let base = CIImage(color: .black).cropped(to: renderRect)
         let accum = composite(
-            layers: instruction.layers, over: base, frame: frame,
+            layers: instruction.layers, over: base, frame: frame, fps: instruction.fps,
             renderSize: instruction.renderSize, sourceFrame: sourceFrame, gateByClipRange: false
         )
         let tagSource = colorTagSource(
@@ -43,6 +43,7 @@ enum FrameRenderer {
         layers: [LayerPlan],
         over background: CIImage,
         frame: Int,
+        fps: Int,
         renderSize: CGSize,
         sourceFrame: (CMPersistentTrackID) -> CVPixelBuffer?,
         gateByClipRange: Bool
@@ -83,7 +84,7 @@ enum FrameRenderer {
             // the blend RESULT (Photoshop/Premiere semantics), so don't bake it there.
             let isNormal = mode.ciFilterName == nil
             let image = layerImage(
-                layer, frame: frame, renderSize: renderSize,
+                layer, frame: frame, fps: fps, renderSize: renderSize,
                 sourceFrame: sourceFrame, bakeOpacity: isNormal
             )
             guard let image else { continue }
@@ -179,6 +180,7 @@ enum FrameRenderer {
     private static func layerImage(
         _ layer: LayerPlan,
         frame: Int,
+        fps: Int,
         renderSize: CGSize,
         sourceFrame: (CMPersistentTrackID) -> CVPixelBuffer?,
         bakeOpacity: Bool
@@ -186,7 +188,7 @@ enum FrameRenderer {
         switch layer.source {
         case .track(let id):
             guard let buffer = sourceFrame(id) else { return nil }
-            return composedLayer(layer, buffer: buffer, frame: frame,
+            return composedLayer(layer, buffer: buffer, frame: frame, fps: fps,
                                  renderSize: renderSize, bakeOpacity: bakeOpacity)
         case .text:
             return composedTextLayer(layer, frame: frame, renderSize: renderSize,
@@ -194,10 +196,10 @@ enum FrameRenderer {
         case .adjustment:
             return nil
         case .group(let children, let canvas):
-            return composedGroupLayer(layer, children: children, canvas: canvas, frame: frame,
+            return composedGroupLayer(layer, children: children, canvas: canvas, frame: frame, fps: fps,
                                       renderSize: renderSize, sourceFrame: sourceFrame, bakeOpacity: bakeOpacity)
         case .transition(let from, let to, let plan):
-            return composedTransitionLayer(from: from, to: to, plan: plan, frame: frame,
+            return composedTransitionLayer(from: from, to: to, plan: plan, frame: frame, fps: fps,
                                            renderSize: renderSize, sourceFrame: sourceFrame)
         }
     }
@@ -207,12 +209,13 @@ enum FrameRenderer {
         to: LayerPlan,
         plan: TransitionPlan,
         frame: Int,
+        fps: Int,
         renderSize: CGSize,
         sourceFrame: (CMPersistentTrackID) -> CVPixelBuffer?
     ) -> CIImage? {
-        let fromImage = layerImage(from, frame: frame, renderSize: renderSize,
+        let fromImage = layerImage(from, frame: frame, fps: fps, renderSize: renderSize,
                                    sourceFrame: sourceFrame, bakeOpacity: true)
-        let toImage = layerImage(to, frame: frame, renderSize: renderSize,
+        let toImage = layerImage(to, frame: frame, fps: fps, renderSize: renderSize,
                                  sourceFrame: sourceFrame, bakeOpacity: true)
         return TransitionCompositor.blend(
             from: fromImage,
@@ -245,6 +248,7 @@ enum FrameRenderer {
         children: [LayerPlan],
         canvas: CGSize,
         frame: Int,
+        fps: Int,
         renderSize: CGSize,
         sourceFrame: (CMPersistentTrackID) -> CVPixelBuffer?,
         bakeOpacity: Bool
@@ -254,11 +258,11 @@ enum FrameRenderer {
         let canvasRect = CGRect(origin: .zero, size: canvas)
         let base = CIImage(color: .black).cropped(to: canvasRect)
         let intermediate = composite(
-            layers: children, over: base, frame: frame,
+            layers: children, over: base, frame: frame, fps: fps,
             renderSize: canvas, sourceFrame: sourceFrame, gateByClipRange: true
         )
         return applyClipPipeline(
-            image: intermediate, srcHeight: canvas.height, layer: layer, frame: frame,
+            image: intermediate, srcHeight: canvas.height, layer: layer, frame: frame, fps: fps,
             renderSize: renderSize, alpha: alpha, bakeOpacity: bakeOpacity
         )
     }
@@ -373,6 +377,7 @@ enum FrameRenderer {
         _ layer: LayerPlan,
         buffer: CVPixelBuffer,
         frame: Int,
+        fps: Int,
         renderSize: CGSize,
         bakeOpacity: Bool = true
     ) -> CIImage? {
@@ -387,7 +392,7 @@ enum FrameRenderer {
             .unpremultiplyingAlpha()
         return applyClipPipeline(
             image: image, srcHeight: CGFloat(CVPixelBufferGetHeight(buffer)), layer: layer,
-            frame: frame, renderSize: renderSize, alpha: alpha, bakeOpacity: bakeOpacity
+            frame: frame, fps: fps, renderSize: renderSize, alpha: alpha, bakeOpacity: bakeOpacity
         )
     }
 
@@ -397,6 +402,7 @@ enum FrameRenderer {
         srcHeight: CGFloat,
         layer: LayerPlan,
         frame: Int,
+        fps: Int,
         renderSize: CGSize,
         alpha: Double,
         bakeOpacity: Bool
@@ -428,6 +434,11 @@ enum FrameRenderer {
                 guard let descriptor = EffectRegistry.descriptor(id: effect.type) else { continue }
                 image = descriptor.render(image, effect: effect, atOffset: offset)
             }
+        }
+
+        if let sample = clip.stabilizationSample(atTimelineFrame: frame, fps: fps),
+           let stabilization = clip.stabilization {
+            image = stabilized(image, sample: sample, cropScale: stabilization.cropScale)
         }
 
         image = EdgeRoundingKernel.apply(
@@ -463,6 +474,22 @@ enum FrameRenderer {
             ])
         }
         return image
+    }
+
+    static func stabilized(_ image: CIImage, sample: StabilizationSample, cropScale: Double) -> CIImage {
+        let extent = image.extent
+        guard extent.width >= 1, extent.height >= 1, !extent.isInfinite, !extent.isNull,
+              cropScale.isFinite, cropScale >= 1 else { return image }
+        let center = CGPoint(x: extent.midX, y: extent.midY)
+        var transform = CGAffineTransform(translationX: center.x, y: center.y)
+            .scaledBy(x: cropScale, y: cropScale)
+            .rotated(by: sample.rotation)
+            .translatedBy(x: -center.x, y: -center.y)
+        transform = transform.concatenating(CGAffineTransform(
+            translationX: sample.dx * extent.width,
+            y: sample.dy * extent.height
+        ))
+        return image.transformed(by: transform).cropped(to: extent)
     }
 
     private static func uprightedSource(_ image: CIImage, layer: LayerPlan, srcHeight: CGFloat) -> CIImage {

@@ -45,6 +45,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case swapClipMedia = "swap_clip_media"
     case relinkMedia = "relink_media"
     case cutoutSubject = "cutout_subject"
+    case stabilizeClips = "stabilize_clips"
     case manageMarkers = "manage_markers"
     case undo = "undo"
 
@@ -888,6 +889,18 @@ enum ToolDefinitions {
                         ],
                     ],
                     "remove": ["type": "boolean", "description": "true strips the subject key from the clips again. Ignores the other parameters."],
+                ],
+                required: ["clipIds"]
+            )
+        ),
+        AgentTool(
+            name: .stabilizeClips,
+            description: "Smooths handheld camera shake on video clips. Palmier Pro measures the camera path between consecutive source frames on-device (Vision), low-passes it, and stores the per-frame correction on the clip — the media is never re-encoded, so the edit, trims, and grade stay exactly as they are. The correction zooms in slightly to hide the edges it swings past; the receipt reports that crop as a percentage, so warn the user when it is large (over ~15%) and offer a lower smoothing.\n\nsmoothing 0-1 (default 0.5) is how locked-off the result looks: low keeps the operator's intent and crops little, high fights every wobble and crops more. Changing smoothing re-runs the analysis.\n\nAnalysis runs as a background job, so the first call usually returns status 'analyzing' with a jobId and no crop yet; the timeline picks the result up on its own. Call stabilize_clips again with the SAME clipIds and smoothing to poll — a running job is reported, never restarted or duplicated, and a finished one returns status 'ready' with cropPercent and the analyzed source range. A job that failed (offline media, an unreadable source) is retried by that same call, and the receipt carries 'retriedAfterFailure' with the reason it failed, so a repeated failure is always visible rather than silently looping. A cached analysis (same media, same source range, same smoothing) returns 'ready' immediately.\n\nOnly video clips qualify: images, text, adjustment layers, nested timelines, audio, and multicam members are refused. Pass remove:true to strip stabilization and go back to the original framing. Requesting and removing are undoable in one step each; the background bake itself is not a separate undo entry.",
+            inputSchema: objectSchema(
+                properties: [
+                    "clipIds": ["type": "array", "items": ["type": "string"], "description": "Video clip ids from get_timeline."],
+                    "smoothing": ["type": "number", "description": "0-1, default 0.5. 0 = light hold that barely crops, 1 = locked-off tripod look with the most crop."],
+                    "remove": ["type": "boolean", "description": "true removes stabilization from the clips and cancels any running analysis. Ignores smoothing."],
                 ],
                 required: ["clipIds"]
             )

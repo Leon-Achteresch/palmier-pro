@@ -219,6 +219,7 @@ final class EditorViewModel {
     var missingMediaRefs: Set<String> = []
     @ObservationIgnored var missingMediaRefreshTask: Task<Void, Never>?
     let mediaVisualCache = MediaVisualCache()
+    let stabilizationJobs = StabilizationJobs()
     let searchIndex = SearchIndexCoordinator()
     var projectURL: URL? {
         didSet {
@@ -504,6 +505,7 @@ final class EditorViewModel {
     func notifyTimelineChanged(refreshVisuals: Bool = true) {
         guard undo.isRegistrationEnabled else { return }
         enhancePendingDenoises()
+        resumePendingStabilizations()
         pendingRebuildTask?.cancel()
         pendingRebuildTask = nil
         if isPlaying {

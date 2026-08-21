@@ -481,6 +481,7 @@ class VideoProject: NSDocument {
             editorViewModel.verifyRestoredProxies()
         }
         editorViewModel.enhancePendingDenoises()
+        editorViewModel.resumePendingStabilizations()
         if editorViewModel.markSpeakers { editorViewModel.identifySpeakers() }
 
         let editorView = EditorView()

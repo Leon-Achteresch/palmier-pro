@@ -515,6 +515,7 @@ struct InspectorView: View {
     private func videoTabContent(clips: [Clip], audioClips: [Clip]) -> some View {
         transformSection(clips: clips)
         imageAdjustmentSection(clips: clips)
+        stabilizeSection(clips: clips)
         speedSection(clips: (clips + audioClips).filter(\.supportsRetiming))
     }
 
