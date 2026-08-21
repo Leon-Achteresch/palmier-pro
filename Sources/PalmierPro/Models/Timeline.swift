@@ -306,6 +306,7 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
     var rotationTrack: KeyframeTrack<Double>?
     var cropTrack: KeyframeTrack<Crop>?
     var volumeTrack: KeyframeTrack<Double>?
+    var speedTrack: KeyframeTrack<Double>?
 
     var effects: [Effect]?
 
@@ -321,7 +322,7 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
         case opacity, transform, crop, edgeRounding, edgeSoftness
         case linkGroupId, captionGroupId, multicamGroupId, textContent, textStyle, textAnimation, wordTimings
         case textFillMode
-        case opacityTrack, positionTrack, scaleTrack, rotationTrack, cropTrack, volumeTrack
+        case opacityTrack, positionTrack, scaleTrack, rotationTrack, cropTrack, volumeTrack, speedTrack
         case effects, blendMode, audioMix
     }
 
@@ -463,7 +464,13 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
         let sourceFrame = t * Double(fps)
         let offsetFromTrim = sourceFrame - Double(trimStartFrame)
         guard offsetFromTrim >= 0 else { return nil }
-        let frame = Int((Double(startFrame) + offsetFromTrim / max(speed, 0.0001)).rounded())
+        let frame: Int
+        if let ramp = speedRamp {
+            guard let clipFrame = ramp.clipFrame(forSourceOffset: offsetFromTrim) else { return nil }
+            frame = startFrame + clipFrame
+        } else {
+            frame = Int((Double(startFrame) + offsetFromTrim / max(speed, 0.0001)).rounded())
+        }
         guard frame >= startFrame && frame < endFrame else { return nil }
         return frame
     }
@@ -494,6 +501,7 @@ extension Clip {
         rotationTrack = clampedKeyframeTrack(rotationTrack)
         cropTrack = clampedKeyframeTrack(cropTrack)
         volumeTrack = clampedKeyframeTrack(volumeTrack)
+        speedTrack = clampedKeyframeTrack(speedTrack)
     }
 
     mutating func rescaleKeyframes(by scale: Double) {
@@ -503,6 +511,7 @@ extension Clip {
         rotationTrack = rescaledKeyframeTrack(rotationTrack, by: scale)
         cropTrack = rescaledKeyframeTrack(cropTrack, by: scale)
         volumeTrack = rescaledKeyframeTrack(volumeTrack, by: scale)
+        speedTrack = rescaledKeyframeTrack(speedTrack, by: scale)
     }
 
     private func clampedKeyframeTrack<V: Codable & Sendable & Equatable>(
@@ -621,6 +630,7 @@ extension Clip {
             rotationTrack: try? c.decode(KeyframeTrack<Double>.self, forKey: .rotationTrack),
             cropTrack: try? c.decode(KeyframeTrack<Crop>.self, forKey: .cropTrack),
             volumeTrack: try? c.decode(KeyframeTrack<Double>.self, forKey: .volumeTrack),
+            speedTrack: try? c.decode(KeyframeTrack<Double>.self, forKey: .speedTrack),
             effects: try? c.decode([Effect].self, forKey: .effects),
             blendMode: try? c.decode(BlendMode.self, forKey: .blendMode),
             audioMix: (try? c.decode(ClipAudioMix.self, forKey: .audioMix))?.normalized

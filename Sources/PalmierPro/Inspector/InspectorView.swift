@@ -564,22 +564,26 @@ struct InspectorView: View {
     func speedSection(clips: [Clip]) -> some View {
         if !clips.isEmpty {
             EditorPanelGroup("Playback", contentSpacing: AppTheme.Spacing.smMd) {
-                propertyRow(
+                animatableRow(
                     label: "Speed",
-                    onReset: { editor.commitClipSpeed(ids: clips.map(\.id), newSpeed: 1) }
+                    clipId: clips.count == 1 && clips[0].supportsSpeedRamp ? clips[0].id : nil,
+                    property: .speed,
+                    onReset: {
+                        editor.commitClipSpeed(ids: clips.map(\.id), newSpeed: 1)
+                    }
                 ) {
                     ScrubbableNumberField(
-                        value: sharedClipValue(clips) { $0.speed },
-                        range: 0.25...4.0,
+                        value: sharedClipValue(clips) { $0.speedAt(frame: editor.activeFrame) },
+                        range: SpeedRamp.multiplierRange,
                         format: "%.2f",
                         valueSuffix: "x",
                         dragSensitivity: 0.01,
                         fieldWidth: AppTheme.EditorPanel.numericFieldWidth,
                         onChanged: { newVal in
-                            for c in clips { editor.applyClipSpeed(clipId: c.id, newSpeed: newVal) }
+                            editor.applySpeedMultiplier(clipIds: clips.map(\.id), value: newVal)
                         }
                     ) { newVal in
-                        editor.commitClipSpeed(ids: clips.map(\.id), newSpeed: newVal)
+                        editor.commitSpeedMultiplier(clipIds: clips.map(\.id), value: newVal)
                     }
                 }
             }

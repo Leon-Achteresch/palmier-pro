@@ -26,37 +26,60 @@ extension EditorViewModel {
 
     // MARK: - Stamp / remove / clear
 
+    static func writeKeyframe(
+        into clip: inout Clip, property: AnimatableProperty, _ body: (inout Clip) -> Void
+    ) {
+        guard property == .speed else {
+            body(&clip)
+            return
+        }
+        guard clip.supportsSpeedRamp, clip.multicamGroupId == nil else { return }
+        let before = clip
+        body(&clip)
+        if (try? clip.validateSpeedRamp(clip.speedTrack)) == nil { clip = before }
+    }
+
     func stampKeyframe(clipId: String, property: AnimatableProperty, frame: Int? = nil) {
         guard let clip = clipFor(id: clipId) else { return }
         let f = frame ?? currentFrame
         guard clip.contains(timelineFrame: f) else { return }
         commitClipProperty(clipId: clipId, actionName: "Add Keyframe") { clip in
-            switch property {
-            case .opacity:
-                clip.upsertKeyframe(in: \.opacityTrack, frame: f, value: clip.rawOpacityAt(frame: f))
-            case .position:
-                let tl = clip.topLeftAt(frame: f)
-                clip.upsertKeyframe(in: \.positionTrack, frame: f, value: AnimPair(a: tl.x, b: tl.y))
-            case .scale:
-                let sz = clip.sizeAt(frame: f)
-                clip.upsertKeyframe(in: \.scaleTrack, frame: f, value: AnimPair(a: sz.width, b: sz.height))
-            case .rotation:
-                clip.upsertKeyframe(in: \.rotationTrack, frame: f, value: clip.rotationAt(frame: f))
-            case .crop:
-                clip.upsertKeyframe(in: \.cropTrack, frame: f, value: clip.cropAt(frame: f))
-            case .volume:
-                let currentDb = clip.volumeTrack?.sample(at: f - clip.startFrame, fallback: 0) ?? 0
-                clip.upsertKeyframe(in: \.volumeTrack, frame: f, value: currentDb)
+            Self.writeKeyframe(into: &clip, property: property) { clip in
+                switch property {
+                case .opacity:
+                    clip.upsertKeyframe(in: \.opacityTrack, frame: f, value: clip.rawOpacityAt(frame: f))
+                case .position:
+                    let tl = clip.topLeftAt(frame: f)
+                    clip.upsertKeyframe(in: \.positionTrack, frame: f, value: AnimPair(a: tl.x, b: tl.y))
+                case .scale:
+                    let sz = clip.sizeAt(frame: f)
+                    clip.upsertKeyframe(in: \.scaleTrack, frame: f, value: AnimPair(a: sz.width, b: sz.height))
+                case .rotation:
+                    clip.upsertKeyframe(in: \.rotationTrack, frame: f, value: clip.rotationAt(frame: f))
+                case .crop:
+                    clip.upsertKeyframe(in: \.cropTrack, frame: f, value: clip.cropAt(frame: f))
+                case .volume:
+                    let currentDb = clip.volumeTrack?.sample(at: f - clip.startFrame, fallback: 0) ?? 0
+                    clip.upsertKeyframe(in: \.volumeTrack, frame: f, value: currentDb)
+                case .speed:
+                    clip.upsertKeyframe(in: \.speedTrack, frame: f, value: clip.speedAt(frame: f))
+                }
             }
         }
     }
 
     func removeKeyframe(clipId: String, property: AnimatableProperty, at frame: Int) {
-        commitClipProperty(clipId: clipId, actionName: "Delete Keyframe") { $0.removeKeyframe(for: property, at: frame) }
+        commitClipProperty(clipId: clipId, actionName: "Delete Keyframe") { clip in
+            Self.writeKeyframe(into: &clip, property: property) { $0.removeKeyframe(for: property, at: frame) }
+        }
     }
 
     func setInterpolation(clipId: String, property: AnimatableProperty, frame: Int, interpolation: Interpolation) {
-        commitClipProperty(clipId: clipId, actionName: "Change Interpolation") { $0.setInterpolation(for: property, atFrame: frame, interpolation) }
+        commitClipProperty(clipId: clipId, actionName: "Change Interpolation") { clip in
+            Self.writeKeyframe(into: &clip, property: property) {
+                $0.setInterpolation(for: property, atFrame: frame, interpolation)
+            }
+        }
     }
 
     func arrivalInterpolation(clipId: String, property: AnimatableProperty, atFrame frame: Int) -> Interpolation? {
@@ -64,8 +87,10 @@ extension EditorViewModel {
     }
 
     func setArrivalInterpolation(clipId: String, property: AnimatableProperty, frame: Int, interpolation: Interpolation?) {
-        commitClipProperty(clipId: clipId, actionName: "Change Interpolation") {
-            $0.setArrivalInterpolation(for: property, atFrame: frame, interpolation)
+        commitClipProperty(clipId: clipId, actionName: "Change Interpolation") { clip in
+            Self.writeKeyframe(into: &clip, property: property) {
+                $0.setArrivalInterpolation(for: property, atFrame: frame, interpolation)
+            }
         }
     }
 
@@ -73,7 +98,11 @@ extension EditorViewModel {
 
     /// Live move during a drag — pair with `commitMoveKeyframe` on release for a single undo entry.
     func applyMoveKeyframe(clipId: String, property: AnimatableProperty, fromFrame: Int, toFrame: Int) {
-        applyClipProperty(clipId: clipId) { $0.moveKeyframe(for: property, from: fromFrame, to: toFrame) }
+        applyClipProperty(clipId: clipId) { clip in
+            Self.writeKeyframe(into: &clip, property: property) {
+                $0.moveKeyframe(for: property, from: fromFrame, to: toFrame)
+            }
+        }
     }
 
     /// Closes the drag started by `applyMoveKeyframe` calls.
@@ -131,6 +160,37 @@ extension EditorViewModel {
             clip.upsertKeyframe(in: \.volumeTrack, frame: activeFrame, value: valueDb)
         } else {
             clip.volume = VolumeScale.linearFromDb(valueDb)
+        }
+    }
+
+    func applySpeedMultiplier(clipIds: [String], value: Double) {
+        for id in clipIds {
+            guard let clip = clipFor(id: id) else { continue }
+            if clip.hasSpeedRamp {
+                applyClipProperty(clipId: id) { self.writeSpeedKeyframe(into: &$0, value: value) }
+            } else {
+                applyClipSpeed(clipId: id, newSpeed: value)
+            }
+        }
+    }
+
+    func commitSpeedMultiplier(clipIds: [String], value: Double) {
+        let ramped = clipIds.filter { clipFor(id: $0)?.hasSpeedRamp == true }
+        let plain = clipIds.filter { clipFor(id: $0)?.hasSpeedRamp != true }
+        undo.perform("Change Speed") {
+            if !plain.isEmpty { self.commitClipSpeed(ids: plain, newSpeed: value) }
+            for id in ramped {
+                self.commitClipProperty(clipId: id, actionName: "Change Speed") {
+                    self.writeSpeedKeyframe(into: &$0, value: value)
+                }
+            }
+        }
+    }
+
+    private func writeSpeedKeyframe(into clip: inout Clip, value: Double) {
+        let frame = activeFrame
+        Self.writeKeyframe(into: &clip, property: .speed) {
+            $0.upsertKeyframe(in: \.speedTrack, frame: frame, value: value)
         }
     }
 

@@ -150,8 +150,11 @@ extension EditorViewModel {
     nonisolated static func splitValues(of clip: Clip, atFrame: Int) -> (left: Clip, right: Clip)? {
         guard atFrame > clip.startFrame && atFrame < clip.endFrame else { return nil }
         let splitOffset = atFrame - clip.startFrame
-        let leftSource = Int((Double(splitOffset) * clip.speed).rounded())
-        let rightSource = Int((Double(clip.durationFrames - splitOffset) * clip.speed).rounded())
+        let ramp = clip.speedRamp
+        let leftSource = ramp.map { Int($0.sourceOffset(atClipFrame: splitOffset).rounded()) }
+            ?? Int((Double(splitOffset) * clip.speed).rounded())
+        let rightSource = ramp.map { max(0, $0.sourceFramesConsumed - leftSource) }
+            ?? Int((Double(clip.durationFrames - splitOffset) * clip.speed).rounded())
 
         var left = clip
         left.durationFrames = splitOffset
@@ -171,6 +174,7 @@ extension EditorViewModel {
         (left.scaleTrack,    right.scaleTrack)    = splitKeyframeTrack(clip.scaleTrack,    at: splitOffset, fallback: AnimPair(a: 1, b: 1))
         (left.rotationTrack, right.rotationTrack) = splitKeyframeTrack(clip.rotationTrack, at: splitOffset, fallback: 0)
         (left.cropTrack,     right.cropTrack)     = splitKeyframeTrack(clip.cropTrack,     at: splitOffset, fallback: clip.crop)
+        (left.speedTrack,    right.speedTrack)    = splitKeyframeTrack(clip.speedTrack,    at: splitOffset, fallback: clip.speed)
         left.clampFadesToDuration()
         right.clampFadesToDuration()
         return (left, right)
@@ -291,6 +295,7 @@ extension EditorViewModel {
     fileprivate func setClipSpeed(at loc: ClipLocation, newSpeed: Double, ripple: Bool = true) {
         let ti = loc.trackIndex
         let clip = timeline.tracks[ti].clips[loc.clipIndex]
+        guard !clip.hasSpeedRamp else { return }
         let basis = dragBefore[clip.id] ?? clip
         let newDuration = Self.retimedDurationFrames(
             durationFrames: basis.durationFrames, speed: basis.speed, newSpeed: newSpeed)

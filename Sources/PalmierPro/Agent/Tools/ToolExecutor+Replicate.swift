@@ -174,6 +174,10 @@ extension ToolExecutor {
                     clip.cropTrack = source.cropTrack
                     clip.volumeTrack = source.volumeTrack
                     clip.clampKeyframesToDuration()
+                    let withoutSpeed = clip
+                    clip.speedTrack = source.speedTrack
+                    clip.clampKeyframesToDuration()
+                    if (try? clip.validateSpeedRamp(clip.speedTrack)) == nil { clip = withoutSpeed }
                 }
                 if selected.contains("textStyle") {
                     clip.textStyle = source.textStyle
@@ -186,6 +190,17 @@ extension ToolExecutor {
         if selected.contains("keyframes"),
            targets.contains(where: { (editor.clipFor(id: $0)?.durationFrames ?? 0) < source.durationFrames }) {
             notes.append("Keyframes past a shorter target clip's end were dropped.")
+        }
+        if selected.contains("keyframes"), source.hasSpeedRamp {
+            let skipped = targets.filter { id in
+                guard var candidate = editor.clipFor(id: id) else { return false }
+                candidate.speedTrack = source.speedTrack
+                candidate.clampKeyframesToDuration()
+                return (try? candidate.validateSpeedRamp(candidate.speedTrack)) == nil
+            }
+            if !skipped.isEmpty {
+                notes.append("Speed curve not copied to \(skipped.joined(separator: ", ")) — not enough source material or unsupported media.")
+            }
         }
         if selected.contains("speed") {
             notes.append("Copied speed keeps each target's timeline length; retime with set_clip_properties if you want the duration to follow.")

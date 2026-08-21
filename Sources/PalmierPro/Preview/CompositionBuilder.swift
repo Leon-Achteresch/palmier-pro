@@ -455,6 +455,18 @@ enum CompositionBuilder {
             compTrack.insertEmptyTimeRange(CMTimeRange(start: cursor, duration: gap))
         }
 
+        if let ramp = clip.speedRamp {
+            let assetDuration = try? await sourceAsset.load(.duration)
+            guard insertRampSegments(
+                clip, ramp: ramp, sourceTrack: sourceTrack,
+                assetDuration: assetDuration.flatMap { $0.isNumeric ? $0 : nil },
+                into: compTrack, clipStart: clipStart,
+                trimStart: trimStart, timescale: timescale, sourceTimescale: sourceTimescale
+            ) else { return false }
+            cursor = clipStart + clipDuration
+            return true
+        }
+
         let sourceFrames = clip.speed == 1.0
             ? clip.durationFrames
             : max(1, Int(Double(clip.durationFrames) * clip.speed))
@@ -485,6 +497,70 @@ enum CompositionBuilder {
         }
 
         cursor = clipStart + clipDuration
+        return true
+    }
+
+    private static func insertRampSegments(
+        _ clip: Clip,
+        ramp: SpeedRamp,
+        sourceTrack: AVAssetTrack,
+        assetDuration: CMTime?,
+        into compTrack: AVMutableCompositionTrack,
+        clipStart: CMTime,
+        trimStart: CMTime,
+        timescale: CMTimeScale,
+        sourceTimescale: CMTimeScale
+    ) -> Bool {
+        var insertedTimelineFrames = 0
+        for segment in ramp.segments {
+            let segmentStart = clipStart + CMTime(value: CMTimeValue(segment.clipFrame), timescale: timescale)
+            let segmentDuration = CMTime(value: CMTimeValue(segment.timelineFrames), timescale: timescale)
+            let sourceStart = trimStart + CMTime(
+                seconds: segment.sourceOffset / Double(timescale), preferredTimescale: sourceTimescale
+            )
+            var sourceDuration = CMTime(
+                seconds: segment.sourceFrames / Double(timescale), preferredTimescale: sourceTimescale
+            )
+            if let assetDuration {
+                sourceDuration = CMTimeMinimum(sourceDuration, assetDuration - sourceStart)
+            }
+            guard sourceDuration > .zero else { break }
+            do {
+                try compTrack.insertTimeRange(
+                    CMTimeRange(start: sourceStart, duration: sourceDuration), of: sourceTrack, at: segmentStart
+                )
+            } catch {
+                Log.preview.error("""
+                    ramp insertTimeRange failed — skipping clip. \
+                    clipId=\(clip.id) mediaRef=\(clip.mediaRef) \
+                    segmentFrame=\(segment.clipFrame) segmentFrames=\(segment.timelineFrames) \
+                    error=\(error.localizedDescription)
+                    """)
+                if insertedTimelineFrames > 0 {
+                    compTrack.removeTimeRange(CMTimeRange(
+                        start: clipStart,
+                        duration: CMTime(value: CMTimeValue(insertedTimelineFrames), timescale: timescale)
+                    ))
+                }
+                return false
+            }
+            compTrack.scaleTimeRange(
+                CMTimeRange(start: segmentStart, duration: sourceDuration), toDuration: segmentDuration
+            )
+            insertedTimelineFrames = segment.clipEndFrame
+        }
+        guard insertedTimelineFrames > 0 else { return false }
+        if insertedTimelineFrames < ramp.durationFrames {
+            let holdStart = clipStart + CMTime(value: CMTimeValue(insertedTimelineFrames), timescale: timescale)
+            let holdFrames = ramp.durationFrames - insertedTimelineFrames
+            compTrack.insertEmptyTimeRange(CMTimeRange(
+                start: holdStart, duration: CMTime(value: CMTimeValue(holdFrames), timescale: timescale)
+            ))
+            Log.preview.warning("""
+                speed ramp exhausted source before the clip ended. \
+                clipId=\(clip.id) mediaRef=\(clip.mediaRef) missingFrames=\(holdFrames)
+                """)
+        }
         return true
     }
 
@@ -969,6 +1045,7 @@ enum CompositionBuilder {
     private static func attachClipAudioMixTap(
         to params: AVMutableAudioMixInputParameters, clips: [Clip], fps: Int
     ) {
+        applyPitchAlgorithm(to: params, clips: clips)
         let segments = ClipAudioMixTap.segments(for: clips, fps: fps)
         guard !segments.isEmpty, let tap = ClipAudioMixTap.make(segments: segments) else { return }
         params.audioTapProcessor = tap
@@ -982,6 +1059,11 @@ enum CompositionBuilder {
         let end = CMTime(value: CMTimeValue(clip.endFrame), timescale: timescale)
         guard end > start else { return }
         params.setVolumeRamp(fromStartVolume: 0, toEndVolume: 0, timeRange: CMTimeRange(start: start, end: end))
+    }
+
+    private static func applyPitchAlgorithm(to params: AVMutableAudioMixInputParameters, clips: [Clip]) {
+        guard clips.contains(where: \.hasSpeedRamp) else { return }
+        params.audioTimePitchAlgorithm = .spectral
     }
 
     /// Linear-ramp volume envelope; a nest `carrier` multiplies its envelope in, and each

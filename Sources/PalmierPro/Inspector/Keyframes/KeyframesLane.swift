@@ -288,11 +288,12 @@ struct KeyframesPanel: View {
     ]
 
     private var rows: [(AnimatableProperty, String)] {
-        switch clip.mediaType {
+        let base: [(AnimatableProperty, String)] = switch clip.mediaType {
         case .audio: Self.audioRows
         case .adjustment: Self.adjustmentRows
         default: Self.videoRows
         }
+        return clip.supportsSpeedRamp ? base + [(.speed, AnimatableProperty.speed.displayName)] : base
     }
 
     private var tint: Color { Color(nsColor: clip.sourceClipType.themeColor) }

@@ -202,7 +202,7 @@ extension EditorViewModel {
             || clip.effects?.isEmpty == false
             || clip.fadeInFrames > 0 || clip.fadeOutFrames > 0 || clip.blendMode != nil
             || clip.opacityTrack != nil || clip.positionTrack != nil || clip.scaleTrack != nil
-            || clip.rotationTrack != nil || clip.cropTrack != nil
+            || clip.rotationTrack != nil || clip.cropTrack != nil || clip.speedTrack != nil
             || clip.transform != fitTransform(sourceWidth: child.width, sourceHeight: child.height)
     }
 

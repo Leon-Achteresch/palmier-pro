@@ -257,6 +257,8 @@ struct Keyframe<Value: Codable & Sendable & Equatable>: Codable, Sendable, Equat
     }
 }
 
+extension Keyframe: Hashable where Value: Hashable {}
+
 struct KeyframeTrack<Value: Codable & Sendable & Equatable>: Codable, Sendable, Equatable {
     var keyframes: [Keyframe<Value>] = []
 
@@ -283,6 +285,8 @@ struct KeyframeTrack<Value: Codable & Sendable & Equatable>: Codable, Sendable, 
         upsert(kf)
     }
 }
+
+extension KeyframeTrack: Hashable where Value: Hashable {}
 
 extension KeyframeTrack where Value: KeyframeInterpolatable {
     func rebased(by offset: Int, fallback: Value) -> KeyframeTrack? {
@@ -340,7 +344,7 @@ extension Crop: KeyframeInterpolatable {
 
 /// Identifies which clip property an inspector lane / stamp button drives.
 enum AnimatableProperty: String, CaseIterable, Sendable {
-    case opacity, position, scale, rotation, crop, volume
+    case opacity, position, scale, rotation, crop, volume, speed
 
     var displayName: String {
         switch self {
@@ -350,6 +354,7 @@ enum AnimatableProperty: String, CaseIterable, Sendable {
         case .rotation: "Rotation"
         case .crop:     "Crop"
         case .volume:   "Volume"
+        case .speed:    "Speed"
         }
     }
 }
@@ -375,6 +380,7 @@ extension Clip {
         case .rotation: offsets = rotationTrack?.keyframes.map(\.frame) ?? []
         case .crop:     offsets = cropTrack?.keyframes.map(\.frame) ?? []
         case .volume:   offsets = volumeTrack?.keyframes.map(\.frame) ?? []
+        case .speed:    offsets = speedTrack?.keyframes.map(\.frame) ?? []
         }
         return offsets.map(toAbs)
     }
@@ -388,6 +394,7 @@ extension Clip {
         case .rotation: return rotationTrack?.keyframes.first(where: { $0.frame == o })?.interpolationOut
         case .crop:     return cropTrack?.keyframes.first(where: { $0.frame == o })?.interpolationOut
         case .volume:   return volumeTrack?.keyframes.first(where: { $0.frame == o })?.interpolationOut
+        case .speed:    return speedTrack?.keyframes.first(where: { $0.frame == o })?.interpolationOut
         }
     }
 
@@ -419,6 +426,7 @@ extension Clip {
         case .rotation: return read(rotationTrack)
         case .crop:     return read(cropTrack)
         case .volume:   return read(volumeTrack)
+        case .speed:    return read(speedTrack)
         }
     }
 
@@ -436,6 +444,7 @@ extension Clip {
         case .rotation: update(&rotationTrack)
         case .crop:     update(&cropTrack)
         case .volume:   update(&volumeTrack)
+        case .speed:    update(&speedTrack)
         }
     }
 
@@ -460,6 +469,9 @@ extension Clip {
         case .volume:
             volumeTrack?.remove(at: o)
             if volumeTrack?.keyframes.isEmpty == true { volumeTrack = nil }
+        case .speed:
+            speedTrack?.remove(at: o)
+            if speedTrack?.keyframes.isEmpty == true { speedTrack = nil }
         }
     }
 
@@ -490,6 +502,10 @@ extension Clip {
             if let i = volumeTrack?.keyframes.firstIndex(where: { $0.frame == o }) {
                 volumeTrack?.keyframes[i].interpolationOut = interpolation
             }
+        case .speed:
+            if let i = speedTrack?.keyframes.firstIndex(where: { $0.frame == o }) {
+                speedTrack?.keyframes[i].interpolationOut = interpolation
+            }
         }
     }
 
@@ -502,6 +518,7 @@ extension Clip {
         case .rotation: rotationTrack?.move(from: fromO, to: toO)
         case .crop:     cropTrack?.move(from: fromO, to: toO)
         case .volume:   volumeTrack?.move(from: fromO, to: toO)
+        case .speed:    speedTrack?.move(from: fromO, to: toO)
         }
     }
 }

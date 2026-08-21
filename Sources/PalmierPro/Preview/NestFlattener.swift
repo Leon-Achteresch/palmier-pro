@@ -92,5 +92,6 @@ enum NestFlattener {
         clip.scaleTrack = clip.scaleTrack?.rebased(by: headCut, fallback: AnimPair(a: 1, b: 1))
         clip.rotationTrack = clip.rotationTrack?.rebased(by: headCut, fallback: 0)
         clip.cropTrack = clip.cropTrack?.rebased(by: headCut, fallback: clip.crop)
+        clip.speedTrack = clip.speedTrack?.rebased(by: headCut, fallback: clip.speed)
     }
 }

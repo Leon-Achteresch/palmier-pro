@@ -837,6 +837,8 @@ extension ToolExecutor {
         if let v = speed {
             if !clip.supportsRetiming {
                 changed.append("speed skipped (nested timelines don't support retiming)")
+            } else if clip.hasSpeedRamp {
+                changed.append("speed skipped (clip has a speed curve — clear it with set_keyframes first)")
             } else {
                 if durationFrames == nil, v > 0 {
                     let sourceConsumed = Double(clip.durationFrames) * clip.speed
@@ -860,7 +862,7 @@ extension ToolExecutor {
 
     // MARK: set_keyframes
 
-    private static let keyframePropertyNames: Set<String> = ["volumeDb", "opacity", "rotation", "position", "scale", "crop"]
+    private static let keyframePropertyNames: Set<String> = ["volumeDb", "opacity", "rotation", "position", "scale", "crop", "speed"]
 
     func setKeyframes(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
         let input: SetKeyframesInput = try decodeToolArgs(args, path: "set_keyframes")
@@ -925,6 +927,11 @@ extension ToolExecutor {
         }
         let offsets = Dictionary(uniqueKeysWithValues: clipIds.enumerated().map { ($1, stagger * $0) })
 
+        var rampNotes: [String] = []
+        if requested.contains(where: { $0.property == "speed" }) {
+            rampNotes = try Self.validateSpeedCurves(editor, clipIds: clipIds, offsets: offsets, writers: writers)
+        }
+
         let snapshot = timelineSnapshot(editor)
         editor.undo.perform("Set Keyframes (Agent)") {
             editor.commitClipProperties(clipIds: clipIds, actionName: "Set Keyframes (Agent)") { clip in
@@ -933,7 +940,7 @@ extension ToolExecutor {
             }
         }
 
-        var notes: [String] = []
+        var notes = rampNotes
         let cleared = requested.filter { $0.rows.isEmpty }.map(\.property)
         if !cleared.isEmpty { notes.append("Cleared \(cleared.joined(separator: ", ")) keyframes.") }
         if stagger != 0 { notes.append("Staggered by \(stagger) frames per clip in clipIds order.") }
@@ -941,6 +948,43 @@ extension ToolExecutor {
             notes.append("Unrolled \(repeatSpec.count) \(repeatSpec.pingPong ? "ping-pong" : "loop") cycles into explicit keyframes.")
         }
         return mutationResult(editor, since: snapshot, touched: clipIds, notes: notes)
+    }
+
+    private static func validateSpeedCurves(
+        _ editor: EditorViewModel,
+        clipIds: [String],
+        offsets: [String: Int],
+        writers: [(inout Clip, Int) -> Void]
+    ) throws -> [String] {
+        var notes: [String] = []
+        for id in clipIds {
+            guard var candidate = editor.clipFor(id: id) else { throw ToolError("Clip not found: \(id)") }
+            let resolvedId = candidate.id
+            let before = candidate.hasSpeedRamp
+            for write in writers { write(&candidate, offsets[id] ?? 0) }
+            do {
+                try candidate.validateSpeedRamp(candidate.speedTrack)
+            } catch {
+                throw ToolError(error.message)
+            }
+            if let track = editor.timeline.tracks.first(where: { $0.clips.contains { $0.id == resolvedId } }),
+               let transition = track.transitionTouching(clipId: resolvedId),
+               candidate.hasSpeedRamp {
+                throw ToolError(
+                    SpeedRampRefusal.transitionOnEdge(clipId: resolvedId, transitionId: transition.id).message
+                )
+            }
+            if let ramp = candidate.speedRamp {
+                notes.append(
+                    "Clip \(id): speed curve plays \(ramp.sourceFramesConsumed) source frames across "
+                    + "\(candidate.durationFrames) timeline frames (\(ramp.segments.count) constant-rate segments); "
+                    + "\(candidate.rampSourceBudgetFrames - ramp.sourceFramesConsumed) source frames spare."
+                )
+            } else if before {
+                notes.append("Clip \(id): speed curve cleared; the clip is back to constant speed \(candidate.speed).")
+            }
+        }
+        return notes
     }
 
     private static func parseRepeatSpec(_ raw: Any?) throws -> KeyframeRepeatSpec? {
@@ -1063,6 +1107,11 @@ extension ToolExecutor {
             return try writer(try parsePairKeyframes(rows, path: path), \.scaleTrack)
         case "crop":
             return try writer(try parseCropKeyframes(rows, path: path), \.cropTrack)
+        case "speed":
+            let kfs = try parseScalarKeyframes(
+                rows, path: path, valueName: "multiplier", range: SpeedRamp.multiplierRange
+            )
+            return try writer(kfs, \.speedTrack)
         default:
             throw ToolError("Unknown property '\(property)'. Expected one of: \(keyframePropertyNames.sorted().joined(separator: ", "))")
         }

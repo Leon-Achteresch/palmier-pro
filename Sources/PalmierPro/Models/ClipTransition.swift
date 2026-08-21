@@ -86,6 +86,7 @@ enum TransitionRefusal: Error, Equatable, Sendable {
     case unexpectedDirection(TransitionStyle)
     case unsupportedMedia(clipId: String, mediaType: ClipType)
     case invalidSpeed(clipId: String)
+    case speedRampOnNeighbour(clipId: String)
     case notAdjacent(fromEndFrame: Int, toStartFrame: Int)
     case windowExceedsClip(clipId: String, neededFrames: Int, availableFrames: Int)
     case insufficientHandles(clipId: String, neededSourceFrames: Int, availableSourceFrames: Int)
@@ -105,6 +106,7 @@ enum TransitionRefusal: Error, Equatable, Sendable {
         case .unexpectedDirection: "unexpected_direction"
         case .unsupportedMedia: "unsupported_media"
         case .invalidSpeed: "invalid_speed"
+        case .speedRampOnNeighbour: "speed_ramp_on_neighbour"
         case .notAdjacent: "not_adjacent"
         case .windowExceedsClip: "window_exceeds_clip"
         case .insufficientHandles: "insufficient_handles"
@@ -135,6 +137,8 @@ enum TransitionRefusal: Error, Equatable, Sendable {
             "Clip \(id) is '\(type.rawValue)' media; transitions support video, image, and lottie clips."
         case .invalidSpeed(let id):
             "Clip \(id) has an unusable speed."
+        case .speedRampOnNeighbour(let id):
+            "Clip \(id) carries a speed curve; its handles are non-linear. Clear the speed keyframes before adding a transition."
         case .notAdjacent(let fromEnd, let toStart):
             "Clips are not adjacent — the outgoing clip ends at \(fromEnd) but the incoming clip starts at \(toStart). Close the gap or overlap first."
         case .windowExceedsClip(let id, let needed, let available):
@@ -210,6 +214,10 @@ extension Track {
         return accepted.sorted { $0.window.startFrame < $1.window.startFrame }
     }
 
+    func transitionTouching(clipId: String) -> ClipTransition? {
+        transitions.first { $0.fromClipId == clipId || $0.toClipId == clipId }
+    }
+
     func resolvedTransition(id: String) -> ResolvedTransition? {
         resolvedTransitions.first { $0.id == id }
     }
@@ -241,6 +249,9 @@ extension Track {
             }
             guard clip.blendMode == nil || clip.blendMode == .normal else {
                 throw TransitionRefusal.blendModeOnNeighbour(clipId: clip.id)
+            }
+            guard !clip.hasSpeedRamp else {
+                throw TransitionRefusal.speedRampOnNeighbour(clipId: clip.id)
             }
         }
         guard from.endFrame == to.startFrame else {

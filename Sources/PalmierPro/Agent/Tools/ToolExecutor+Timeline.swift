@@ -469,6 +469,7 @@ extension ToolExecutor {
             ("positionTrack", "position", KeyframeValueShape.pair),
             ("scaleTrack", "scale", KeyframeValueShape.pair),
             ("cropTrack", "crop", KeyframeValueShape.crop),
+            ("speedTrack", "speed", KeyframeValueShape.scalar),
         ] {
             defer { out.removeValue(forKey: trackKey) }
             guard let track = clip[trackKey] as? [String: Any],
