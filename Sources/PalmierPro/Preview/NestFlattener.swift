@@ -6,8 +6,8 @@ enum NestFlattener {
     static let maxDepth = 8
 
     struct Flattened: Sendable {
-        /// Child visual tracks, child track order preserved (text clips included).
-        var videoTracks: [[Clip]] = []
+        /// Child visual tracks, child track order preserved (text clips and transitions included).
+        var videoTracks: [Track] = []
         /// Unmuted child audio tracks; clips within a track never overlap.
         var audioTracks: [[Clip]] = []
         var childCanvas: CGSize = .zero
@@ -26,7 +26,15 @@ enum NestFlattener {
                 let clips = track.clips
                     .sorted { $0.startFrame < $1.startFrame }
                     .compactMap { remap($0, window: window, shift: shift, nestId: carrier.id) }
-                if !clips.isEmpty { out.videoTracks.append(clips) }
+                if !clips.isEmpty {
+                    var flat = track
+                    flat.id = nestScoped(track.id, nestId: carrier.id)
+                    flat.clips = clips
+                    flat.transitions = remapTransitions(
+                        track.transitions, nestId: carrier.id, survivors: Set(clips.map(\.id))
+                    )
+                    out.videoTracks.append(flat)
+                }
             } else {
                 guard track.type == .audio, !track.muted else { continue }
                 let clips = track.clips
@@ -36,6 +44,24 @@ enum NestFlattener {
             }
         }
         return out
+    }
+
+    /// Unique per nest instance so the same child nested twice can't collide.
+    private static func nestScoped(_ id: String, nestId: String) -> String { "\(nestId)/\(id)" }
+
+    /// Transitions follow their clips into the parent. A transition whose neighbour fell outside the
+    /// carrier window is dropped here; the rest are re-validated by `Track.resolve` like any other.
+    private static func remapTransitions(
+        _ transitions: [ClipTransition], nestId: String, survivors: Set<String>
+    ) -> [ClipTransition] {
+        transitions.compactMap { transition in
+            var out = transition
+            out.id = nestScoped(transition.id, nestId: nestId)
+            out.fromClipId = nestScoped(transition.fromClipId, nestId: nestId)
+            out.toClipId = nestScoped(transition.toClipId, nestId: nestId)
+            guard survivors.contains(out.fromClipId), survivors.contains(out.toClipId) else { return nil }
+            return out
+        }
     }
 
     private static func remap(_ clip: Clip, window: Range<Int>, shift: Int, nestId: String) -> Clip? {
@@ -55,8 +81,7 @@ enum NestFlattener {
         c.durationFrames = end - start
         c.clampFadesToDuration()
         c.clampKeyframesToDuration()
-        // Unique per nest instance so the same child nested twice can't collide.
-        c.id = "\(nestId)/\(clip.id)"
+        c.id = nestScoped(clip.id, nestId: nestId)
         return c
     }
 

@@ -1606,7 +1606,8 @@ final class TimelineView: NSView {
         } else {
             targets = SnapEngine.collectTargets(
                 tracks: editor.timeline.tracks,
-                beatFrames: editor.beatSnapFrames(for:)
+                beatFrames: editor.beatSnapFrames(for:),
+                markers: editor.timeline.markers
             )
             externalSnapTargetsCache = (editor.timelineRenderRevision, targets)
         }

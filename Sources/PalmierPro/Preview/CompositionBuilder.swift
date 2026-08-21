@@ -5,6 +5,8 @@ struct TrackMapping: @unchecked Sendable {
         case timeline(trackIndex: Int, clipIds: Set<String>?)
         case nested(clips: [Clip], carrier: Clip, parentTrackIndex: Int)
         case blackBackground(range: CMTimeRange)
+        /// Audio pulled past a cut so a video transition crossfades instead of hard-cutting.
+        case transitionHandles(handles: [TransitionAudioHandle], trackIndex: Int)
     }
     let compositionTrack: AVMutableCompositionTrack
     let kind: Kind
@@ -61,6 +63,8 @@ enum CompositionBuilder {
             missingMediaRefs: missingMediaRefs
         )
 
+        let audioCrossfades = TransitionAudioExtension.crossfades(in: timeline)
+
         for (trackIdx, track) in timeline.tracks.enumerated() {
             // Text is composited at render, not as a track.
             let sortedClips = track.clips
@@ -69,6 +73,15 @@ enum CompositionBuilder {
             guard !sortedClips.isEmpty else { continue }
             if track.type == .audio {
                 try await insertAudioLane(clips: sortedClips, parentTrackIndex: trackIdx, nest: nil, depth: 0, ctx: ctx)
+                let handles = TransitionAudioExtension.handles(
+                    forAudioTrackIndex: trackIdx, crossfades: audioCrossfades
+                )
+                if !handles.isEmpty {
+                    try await insertAudioLane(
+                        clips: handles.map(\.clip), parentTrackIndex: trackIdx, nest: nil, depth: 0,
+                        ctx: ctx, transitionHandles: handles
+                    )
+                }
             } else {
                 try await insertVideoLane(clips: sortedClips, parentTrackIndex: trackIdx, nestCarrier: nil, depth: 0, ctx: ctx)
                 let handles = TransitionExtension.extensionClips(for: track)
@@ -206,7 +219,8 @@ enum CompositionBuilder {
         parentTrackIndex: Int,
         nest: (topCarrier: Clip, volumeScale: Double)?,
         depth: Int,
-        ctx: BuildContext
+        ctx: BuildContext,
+        transitionHandles: [TransitionAudioHandle]? = nil
     ) async throws {
         var compTrack: AVMutableCompositionTrack?
         var cursor = CMTime.zero
@@ -239,7 +253,8 @@ enum CompositionBuilder {
             if await insertClip(clip, sourceAsset: source.asset, sourceTrack: source.track,
                                 into: track, cursor: &cursor, timescale: ctx.timescale) {
                 inserted.append(clip)
-                if nest == nil, await insertDenoisedTwin(clip, parentTrackIndex: parentTrackIndex, ctx: ctx) {
+                if nest == nil, transitionHandles == nil,
+                   await insertDenoisedTwin(clip, parentTrackIndex: parentTrackIndex, ctx: ctx) {
                     blendedClipIds.insert(clip.id)
                 }
             }
@@ -249,8 +264,18 @@ enum CompositionBuilder {
             ctx.composition.removeTrack(compTrack)
             return
         }
-        let kind: TrackMapping.Kind = nest.map { .nested(clips: inserted, carrier: $0.topCarrier, parentTrackIndex: parentTrackIndex) }
-            ?? .timeline(trackIndex: parentTrackIndex, clipIds: Set(inserted.map(\.id)))
+        let kind: TrackMapping.Kind
+        if let transitionHandles {
+            let insertedIds = Set(inserted.map(\.id))
+            kind = .transitionHandles(
+                handles: transitionHandles.filter { insertedIds.contains($0.clip.id) },
+                trackIndex: parentTrackIndex
+            )
+        } else if let nest {
+            kind = .nested(clips: inserted, carrier: nest.topCarrier, parentTrackIndex: parentTrackIndex)
+        } else {
+            kind = .timeline(trackIndex: parentTrackIndex, clipIds: Set(inserted.map(\.id)))
+        }
         ctx.trackMappings.append(TrackMapping(
             compositionTrack: compTrack, kind: kind, naturalSize: .zero, endTime: .zero, isVideo: false,
             blendedClipIds: blendedClipIds
@@ -384,6 +409,15 @@ enum CompositionBuilder {
             }
         } else if mediaType == .video {
             mediaURL = (try? await AlphaVideoNormalizer.premultipliedVideo(for: resolved, mediaRef: clip.mediaRef)) ?? resolved
+        } else if MonoStereoUpmixer.isNeeded(for: clip.audioMix) {
+            do {
+                mediaURL = try await MonoStereoUpmixer.stereoAudio(for: resolved, mediaRef: clip.mediaRef)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                Log.preview.warning("mono upmix failed — pan stays centred. mediaRef=\(clip.mediaRef): \(Log.detail(error))")
+                mediaURL = resolved
+            }
         } else {
             mediaURL = resolved
         }
@@ -492,9 +526,14 @@ enum CompositionBuilder {
             return
         }
         let flat = NestFlattener.flatten(carrier: carrier, child: child, visual: true)
-        for childClips in flat.videoTracks {
-            try await insertVideoLane(clips: childClips, parentTrackIndex: parentTrackIndex,
+        for childTrack in flat.videoTracks {
+            try await insertVideoLane(clips: childTrack.clips, parentTrackIndex: parentTrackIndex,
                                       nestCarrier: carrier, depth: depth + 1, ctx: ctx)
+            let handles = TransitionExtension.extensionClips(for: childTrack)
+            if !handles.isEmpty {
+                try await insertVideoLane(clips: handles, parentTrackIndex: parentTrackIndex,
+                                          nestCarrier: carrier, depth: depth + 1, ctx: ctx)
+            }
         }
     }
 
@@ -530,11 +569,43 @@ enum CompositionBuilder {
     ) -> (audioMix: AVMutableAudioMix, videoComposition: AVVideoComposition) {
         let timescale = CMTimeScale(timeline.fps)
 
+        let crossfades = TransitionAudioExtension.crossfades(in: timeline)
+        let crossfadesById = Dictionary(crossfades.map { ($0.transitionId, $0) }, uniquingKeysWith: { a, _ in a })
+        var crossfadeCurvesByClipId: [String: [TransitionGainCurve]] = [:]
+        for crossfade in crossfades {
+            crossfadeCurvesByClipId[crossfade.outgoing.id, default: []]
+                .append(TransitionGainCurve(window: crossfade.window, role: .outgoing))
+            crossfadeCurvesByClipId[crossfade.incoming.id, default: []]
+                .append(TransitionGainCurve(window: crossfade.window, role: .incoming))
+        }
+
         let audioMix = AVMutableAudioMix()
         audioMix.inputParameters = trackMappings.filter { !$0.isVideo }.compactMap { mapping in
             switch mapping.kind {
             case .blackBackground:
                 return nil
+            case .transitionHandles(let handles, let trackIndex):
+                guard timeline.tracks.indices.contains(trackIndex) else { return nil }
+                let params = AVMutableAudioMixInputParameters(track: mapping.compositionTrack)
+                if timeline.tracks[trackIndex].muted {
+                    params.setVolume(0, at: .zero)
+                    return params
+                }
+                var tappedClips: [Clip] = []
+                for handle in handles {
+                    // A handle whose transition changed shape since the build is no longer its lane.
+                    guard crossfadesById[handle.transitionId]?.window == handle.window else {
+                        silence(params: params, clip: handle.clip, timescale: timescale)
+                        continue
+                    }
+                    emitVolumeEnvelope(
+                        params: params, clip: handle.clip, timescale: timescale,
+                        crossfades: [TransitionGainCurve(window: handle.window, role: handle.role)]
+                    )
+                    tappedClips.append(handle.clip)
+                }
+                attachClipAudioMixTap(to: params, clips: tappedClips, fps: timeline.fps)
+                return params
             case .nested(let clips, let carrier, let parentTrackIndex):
                 let params = AVMutableAudioMixInputParameters(track: mapping.compositionTrack)
                 guard timeline.tracks.indices.contains(parentTrackIndex) else { return params }
@@ -569,7 +640,10 @@ enum CompositionBuilder {
                     let gain: Float = mapping.wetAudio
                         ? strength
                         : (mapping.blendedClipIds.contains(clip.id) ? 1 - strength : 1)
-                    emitVolumeEnvelope(params: params, clip: clip, timescale: timescale, gain: gain)
+                    emitVolumeEnvelope(
+                        params: params, clip: clip, timescale: timescale, gain: gain,
+                        crossfades: crossfadeCurvesByClipId[clip.id] ?? []
+                    )
                     tappedClips.append(clip)
                     prevEndFrame = clip.startFrame + clip.durationFrames
                 }
@@ -620,7 +694,7 @@ enum CompositionBuilder {
                 ids = clipIds ?? Set(timeline.tracks[trackIndex].clips.filter { $0.mediaType != .text }.map(\.id))
             case .nested(let clips, _, _):
                 ids = Set(clips.map(\.id))
-            case .blackBackground:
+            case .blackBackground, .transitionHandles:
                 continue
             }
             for id in ids {
@@ -643,48 +717,13 @@ enum CompositionBuilder {
             return flat
         }
 
-        // Group layer for one segment window; empty children still render (nest gaps are opaque black).
-        func nestGroupPlan(carrier: Clip, depth: Int, window: Range<Int>) -> LayerPlan? {
-            guard let flat = flattened(for: carrier, depth: depth) else { return nil }
-            var children: [LayerPlan] = []
-            for childClips in flat.videoTracks.reversed() {
-                var prevEnd = Int.min
-                for clip in childClips where clip.durationFrames > 0 {
-                    let overlapsWindow = clip.startFrame < window.upperBound && clip.endFrame > window.lowerBound
-                    if clip.mediaType == .text {
-                        guard overlapsWindow, !(clip.textContent ?? "").isEmpty else { continue }
-                        children.append(LayerPlan(source: .text, clip: clip, natSize: flat.childCanvas, preferredTransform: .identity))
-                    } else if clip.mediaType == .sequence {
-                        guard clip.startFrame >= prevEnd else { continue }
-                        prevEnd = clip.endFrame
-                        guard overlapsWindow, let plan = nestGroupPlan(carrier: clip, depth: depth + 1, window: window) else { continue }
-                        children.append(plan)
-                    } else {
-                        guard clip.startFrame >= prevEnd, let slot = media[clip.id] else { continue }
-                        prevEnd = clip.endFrame
-                        guard overlapsWindow else { continue }
-                        children.append(LayerPlan(source: .track(slot.trackID), clip: clip, natSize: slot.natSize, preferredTransform: slot.transform))
-                    }
-                }
-            }
-            return LayerPlan(source: .group(children: children, canvas: flat.childCanvas),
-                             clip: carrier, natSize: flat.childCanvas, preferredTransform: .identity)
-        }
-
-        // Child clip boundaries: segments scope decoder demand to what's visible.
-        func nestCutFrames(carrier: Clip, depth: Int) -> [Int] {
-            guard let flat = flattened(for: carrier, depth: depth) else { return [] }
-            var frames: [Int] = []
-            for childClips in flat.videoTracks {
-                for clip in childClips {
-                    frames.append(clip.startFrame)
-                    frames.append(clip.endFrame)
-                    if clip.mediaType == .sequence {
-                        frames.append(contentsOf: nestCutFrames(carrier: clip, depth: depth + 1))
-                    }
-                }
-            }
-            return frames.filter { $0 > carrier.startFrame && $0 < carrier.endFrame }
+        // Resolving a track's transitions rescans its clips; nest groups ask per segment window.
+        var resolvedTransitionCache: [String: [ResolvedTransition]] = [:]
+        func resolvedTransitions(of track: Track) -> [ResolvedTransition] {
+            if let cached = resolvedTransitionCache[track.id] { return cached }
+            let resolved = track.resolvedTransitions
+            resolvedTransitionCache[track.id] = resolved
+            return resolved
         }
 
         func mediaLayer(_ slot: Slot, _ clip: Clip) -> LayerPlan {
@@ -698,7 +737,10 @@ enum CompositionBuilder {
                 direction: resolved.transition.direction,
                 window: resolved.window
             )
-            let carrier = TransitionExtension.renderClip(resolved.from)
+            // The outgoing clip carries the blend's pipeline, extended to the window so a nest
+            // group — which gates its children by clip range — keeps the layer live past the cut.
+            var carrier = TransitionExtension.renderClip(resolved.from)
+            carrier.durationFrames = max(carrier.durationFrames, resolved.window.endFrame - carrier.startFrame)
             var out: [Entry] = []
             if resolved.window.headFrames > 0,
                let headSlot = media[TransitionExtension.headClipId(resolved.id)] {
@@ -727,13 +769,18 @@ enum CompositionBuilder {
             return out
         }
 
-        // Walk tracks in reverse to produce bottom→top entries. Text layers follow track order.
-        var entries: [Entry] = []
-        for track in timeline.tracks.reversed() where !track.hidden {
+        // One lane's layers, bottom→top: text, nested groups, media, and transition windows.
+        // Top-level tracks and nest groups share it so both surfaces layer a cut the same way.
+        func laneEntries(
+            track: Track,
+            textNatSize: CGSize,
+            sequenceEntries: (Clip) -> [Entry]
+        ) -> [Entry] {
+            var out: [Entry] = []
             var prevEndFrame = Int.min
             var incoming: [String: ResolvedTransition] = [:]
             var outgoing: [String: ResolvedTransition] = [:]
-            for resolved in track.resolvedTransitions {
+            for resolved in resolvedTransitions(of: track) {
                 let hasHead = resolved.window.headFrames == 0
                     || media[TransitionExtension.headClipId(resolved.id)] != nil
                 let hasTail = resolved.window.tailFrames == 0
@@ -743,42 +790,93 @@ enum CompositionBuilder {
                 outgoing[resolved.from.id] = resolved
             }
             for clip in track.clips.sorted(by: { $0.startFrame < $1.startFrame }) where clip.durationFrames > 0 {
-                let plan: LayerPlan
                 if clip.mediaType == .text {
                     guard !(clip.textContent ?? "").isEmpty else { continue }
-                    plan = LayerPlan(source: .text, clip: clip, natSize: renderSize, preferredTransform: .identity)
+                    out.append(Entry(
+                        start: cmTime(clip.startFrame), end: cmTime(clip.endFrame),
+                        plan: LayerPlan(source: .text, clip: clip, natSize: textNatSize, preferredTransform: .identity)
+                    ))
                 } else if clip.mediaType == .sequence {
                     guard clip.startFrame >= prevEndFrame else { continue }
                     prevEndFrame = clip.endFrame
-                    // One entry per child-boundary segment: each requires only the
-                    // source tracks visible in that segment.
-                    let bounds = ([clip.startFrame, clip.endFrame] + nestCutFrames(carrier: clip, depth: 0))
-                        .reduce(into: Set<Int>()) { $0.insert($1) }
-                        .sorted()
-                    for i in 0..<(bounds.count - 1) {
-                        let window = bounds[i]..<bounds[i + 1]
-                        guard window.count > 0,
-                              let group = nestGroupPlan(carrier: clip, depth: 0, window: window) else { continue }
-                        entries.append(Entry(start: cmTime(window.lowerBound), end: cmTime(window.upperBound), plan: group))
-                    }
-                    continue
+                    out.append(contentsOf: sequenceEntries(clip))
                 } else {
                     guard clip.startFrame >= prevEndFrame, let slot = media[clip.id] else { continue }
                     prevEndFrame = clip.endFrame
                     let visibleStart = incoming[clip.id].map { max(clip.startFrame, $0.window.endFrame) } ?? clip.startFrame
                     let visibleEnd = outgoing[clip.id].map { min(clip.endFrame, $0.window.startFrame) } ?? clip.endFrame
                     if visibleEnd > visibleStart {
-                        entries.append(Entry(
+                        out.append(Entry(
                             start: cmTime(visibleStart), end: cmTime(visibleEnd), plan: mediaLayer(slot, clip)
                         ))
                     }
                     if let resolved = outgoing[clip.id] {
-                        entries.append(contentsOf: transitionEntries(resolved))
+                        out.append(contentsOf: transitionEntries(resolved))
                     }
-                    continue
                 }
-                entries.append(Entry(start: cmTime(clip.startFrame), end: cmTime(clip.endFrame), plan: plan))
             }
+            return out
+        }
+
+        // Group layer for one segment window; empty children still render (nest gaps are opaque black).
+        func nestGroupPlan(carrier: Clip, depth: Int, window: Range<Int>) -> LayerPlan? {
+            guard let flat = flattened(for: carrier, depth: depth) else { return nil }
+            let windowStart = cmTime(window.lowerBound)
+            let windowEnd = cmTime(window.upperBound)
+            var children: [LayerPlan] = []
+            for childTrack in flat.videoTracks.reversed() {
+                let entries = laneEntries(track: childTrack, textNatSize: flat.childCanvas) { child in
+                    guard child.startFrame < window.upperBound, child.endFrame > window.lowerBound else { return [] }
+                    return nestGroupPlan(carrier: child, depth: depth + 1, window: window).map {
+                        [Entry(start: cmTime(child.startFrame), end: cmTime(child.endFrame), plan: $0)]
+                    } ?? []
+                }
+                for entry in entries where entry.start < windowEnd && entry.end > windowStart {
+                    children.append(entry.plan)
+                }
+            }
+            return LayerPlan(source: .group(children: children, canvas: flat.childCanvas),
+                             clip: carrier, natSize: flat.childCanvas, preferredTransform: .identity)
+        }
+
+        // Child clip and transition boundaries: segments scope decoder demand to what's visible.
+        func nestCutFrames(carrier: Clip, depth: Int) -> [Int] {
+            guard let flat = flattened(for: carrier, depth: depth) else { return [] }
+            var frames: [Int] = []
+            for childTrack in flat.videoTracks {
+                for clip in childTrack.clips {
+                    frames.append(clip.startFrame)
+                    frames.append(clip.endFrame)
+                    if clip.mediaType == .sequence {
+                        frames.append(contentsOf: nestCutFrames(carrier: clip, depth: depth + 1))
+                    }
+                }
+                for resolved in resolvedTransitions(of: childTrack) {
+                    frames.append(resolved.window.startFrame)
+                    frames.append(resolved.window.endFrame)
+                }
+            }
+            return frames.filter { $0 > carrier.startFrame && $0 < carrier.endFrame }
+        }
+
+        // Walk tracks in reverse to produce bottom→top entries. Text layers follow track order.
+        var entries: [Entry] = []
+        for track in timeline.tracks.reversed() where !track.hidden {
+            entries.append(contentsOf: laneEntries(track: track, textNatSize: renderSize) { carrier in
+                // One entry per child-boundary segment: each requires only the
+                // source tracks visible in that segment.
+                let bounds = ([carrier.startFrame, carrier.endFrame] + nestCutFrames(carrier: carrier, depth: 0))
+                    .reduce(into: Set<Int>()) { $0.insert($1) }
+                    .sorted()
+                var out: [Entry] = []
+                for i in 0..<(bounds.count - 1) {
+                    let window = bounds[i]..<bounds[i + 1]
+                    guard window.count > 0,
+                          let group = nestGroupPlan(carrier: carrier, depth: 0, window: window) else { continue }
+                    out.append(Entry(start: cmTime(window.lowerBound), end: cmTime(window.upperBound), plan: group))
+                }
+                return out
+            })
         }
 
         var cutSet = Set<CMTime>()
@@ -871,23 +969,38 @@ enum CompositionBuilder {
         params.audioTapProcessor = tap
     }
 
-    /// Linear-ramp volume envelope; a nest `carrier` multiplies its envelope in.
+    /// Flat 0 across a lane clip's span, for a handle lane whose transition no longer applies.
+    private static func silence(
+        params: AVMutableAudioMixInputParameters, clip: Clip, timescale: CMTimeScale
+    ) {
+        let start = CMTime(value: CMTimeValue(clip.startFrame), timescale: timescale)
+        let end = CMTime(value: CMTimeValue(clip.endFrame), timescale: timescale)
+        guard end > start else { return }
+        params.setVolumeRamp(fromStartVolume: 0, toEndVolume: 0, timeRange: CMTimeRange(start: start, end: end))
+    }
+
+    /// Linear-ramp volume envelope; a nest `carrier` multiplies its envelope in, and each
+    /// `crossfades` curve multiplies in the equal-power side of a transition window.
     private static func emitVolumeEnvelope(
         params: AVMutableAudioMixInputParameters,
         clip: Clip,
         timescale: CMTimeScale,
         carrier: Clip? = nil,
-        gain: Float = 1
+        gain: Float = 1,
+        crossfades: [TransitionGainCurve] = []
     ) {
         let kfs = normalizedKeyframes(clip.volumeTrack?.keyframes ?? [], duration: clip.durationFrames)
         let hasFade = clip.fadeInFrames > 0 || clip.fadeOutFrames > 0
         let carrierVaries = carrier.map {
             ($0.volumeTrack?.isActive ?? false) || $0.fadeInFrames > 0 || $0.fadeOutFrames > 0
         } ?? false
-        let gainAt: (Int) -> Double = { absFrame in
-            carrier.map { $0.volumeAt(frame: absFrame) } ?? 1
+        let crossfadeGainAt: (Int) -> Double = { absFrame in
+            crossfades.reduce(1) { $0 * $1.gain(atFrame: absFrame) }
         }
-        if kfs.isEmpty && !hasFade && !carrierVaries {
+        let gainAt: (Int) -> Double = { absFrame in
+            (carrier.map { $0.volumeAt(frame: absFrame) } ?? 1) * crossfadeGainAt(absFrame)
+        }
+        if kfs.isEmpty && !hasFade && !carrierVaries && crossfades.isEmpty {
             let volume = Float(clip.volumeAt(frame: clip.startFrame) * gainAt(clip.startFrame)) * gain
             let start = CMTime(value: CMTimeValue(clip.startFrame), timescale: timescale)
             let end = CMTime(value: CMTimeValue(clip.endFrame), timescale: timescale)
@@ -926,6 +1039,11 @@ enum CompositionBuilder {
                 extraOffsets.append(toClipOffset(b.frame) - 1)
             }
             extraOffsets = extraOffsets.filter { $0 > 0 && $0 < clip.durationFrames }
+        }
+        for curve in crossfades {
+            extraOffsets += curve.breakpointFrames
+                .map { $0 - clip.startFrame }
+                .filter { $0 > 0 && $0 < clip.durationFrames }
         }
 
         emitEnvelopeRamps(

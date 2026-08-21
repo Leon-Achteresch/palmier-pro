@@ -41,9 +41,10 @@ final class TimelineInputController {
     private func snapTargets(
         excludeClipIds: Set<String> = [],
         includePlayhead: Bool = false,
-        includeExcludedClipBeats: Bool = false
+        includeExcludedClipBeats: Bool = false,
+        excludeMarkerIds: Set<String> = []
     ) -> [SnapEngine.SnapTarget] {
-        let key = "\(editor.timelineRenderRevision)|\(editor.currentFrame)|\(includePlayhead)|\(includeExcludedClipBeats)|\(excludeClipIds.sorted().joined(separator: ","))"
+        let key = "\(editor.timelineRenderRevision)|\(editor.currentFrame)|\(includePlayhead)|\(includeExcludedClipBeats)|\(excludeClipIds.sorted().joined(separator: ","))|\(excludeMarkerIds.sorted().joined(separator: ","))"
         if let cache = snapTargetCache, cache.key == key { return cache.targets }
         let targets = SnapEngine.collectTargets(
             tracks: editor.timeline.tracks,
@@ -51,7 +52,9 @@ final class TimelineInputController {
             excludeClipIds: excludeClipIds,
             includePlayhead: includePlayhead,
             beatFrames: editor.beatSnapFrames(for:),
-            includeExcludedClipBeats: includeExcludedClipBeats
+            includeExcludedClipBeats: includeExcludedClipBeats,
+            markers: editor.timeline.markers,
+            excludeMarkerIds: excludeMarkerIds
         )
         snapTargetCache = (key, targets)
         return targets
@@ -161,7 +164,11 @@ final class TimelineInputController {
             if let markerId = markerHit(at: point, geometry: geometry) {
                 editor.selectMarker(id: markerId)
                 if event.clickCount == 2 { editor.markerEditRequestTick &+= 1 }
-                dragState = .idle
+                dragState = editor.timeline.marker(id: markerId).map {
+                    .marker(DragState.MarkerDrag(
+                        markerId: markerId, originalFrame: $0.frame, grabFrame: frame
+                    ))
+                } ?? .idle
                 view.needsDisplay = true
                 return
             }
@@ -491,6 +498,23 @@ final class TimelineInputController {
             dragState = .slip(drag)
             return
 
+        case .marker(let drag):
+            let candidate = max(0, min(editor.markerFrameLimit, drag.originalFrame + frame - drag.grabFrame))
+            let targets = snapTargets(includePlayhead: true, excludeMarkerIds: [drag.markerId])
+            if let snap = SnapEngine.findSnap(
+                position: candidate,
+                targets: targets,
+                state: &snapState,
+                baseThreshold: Snap.thresholdPixels,
+                pixelsPerFrame: geometry.pixelsPerFrame
+            ), editor.isPlaceableMarkerFrame(snap.frame) {
+                snapIndicatorX = snap.x
+                editor.previewMarkerFrame(id: drag.markerId, frame: snap.frame)
+            } else {
+                snapIndicatorX = nil
+                editor.previewMarkerFrame(id: drag.markerId, frame: candidate)
+            }
+
         case .audioVolumeKf(let drag):
             dragState = .audioVolumeKf(applyVolumeKfDrag(drag, cursorFrame: frame, cursorY: point.y, geometry: geometry))
 
@@ -694,6 +718,9 @@ final class TimelineInputController {
         case .timelineRange:
             editor.keepValidTimelineRangeOrClear()
 
+        case .marker(let drag):
+            editor.commitMarkerDrag(id: drag.markerId, fromFrame: drag.originalFrame)
+
         case .idle:
             break
         }
@@ -707,12 +734,17 @@ final class TimelineInputController {
         }
     }
 
-    /// Escape during an in-progress slip drag: drop the preview and the pending
-    /// drag so the eventual mouse-up commits nothing. Only slip is cancellable;
-    /// other drags have no uncommitted live mutation to unwind here.
+    /// Escape during an in-progress drag that already mutated live state: unwind it and drop the
+    /// pending drag so the eventual mouse-up commits nothing.
     func cancelActiveDrag() {
-        guard case .slip = dragState else { return }
-        editor.slipPreview = nil
+        switch dragState {
+        case .slip:
+            editor.slipPreview = nil
+        case .marker(let drag):
+            editor.previewMarkerFrame(id: drag.markerId, frame: drag.originalFrame)
+        default:
+            return
+        }
         dragState = .idle
         snapIndicatorX = nil
         stopPlayheadAutoScroll()

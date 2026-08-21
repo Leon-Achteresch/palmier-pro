@@ -8,7 +8,7 @@ enum SnapEngine {
     struct SnapTarget {
         let frame: Int
         let kind: Kind
-        enum Kind { case playhead, clipEdge, beat }
+        enum Kind { case playhead, clipEdge, beat, marker }
     }
 
     struct SnapResult {
@@ -25,8 +25,8 @@ enum SnapEngine {
 
     // MARK: - Target collection
 
-    /// Collects all clip edges, and optionally the playhead, as snap targets.
-    /// Pass `excludeClipIds` to skip clips being dragged.
+    /// Collects all clip edges and markers, and optionally the playhead, as snap targets.
+    /// Pass `excludeClipIds` to skip clips being dragged, `excludeMarkerIds` for a marker being dragged.
     /// Pass `includePlayhead: true` when the playhead itself is NOT what's being moved.
     static func collectTargets(
         tracks: [Track],
@@ -34,11 +34,16 @@ enum SnapEngine {
         excludeClipIds: Set<String> = [],
         includePlayhead: Bool = false,
         beatFrames: ((Clip) -> [Int])? = nil,
-        includeExcludedClipBeats: Bool = false
+        includeExcludedClipBeats: Bool = false,
+        markers: [TimelineMarker] = [],
+        excludeMarkerIds: Set<String> = []
     ) -> [SnapTarget] {
         var targets: [SnapTarget] = []
         if includePlayhead {
             targets.append(SnapTarget(frame: playheadFrame, kind: .playhead))
+        }
+        for marker in markers where !excludeMarkerIds.contains(marker.id) {
+            targets.append(SnapTarget(frame: marker.frame, kind: .marker))
         }
         for track in tracks {
             for clip in track.clips {
@@ -90,7 +95,7 @@ enum SnapEngine {
             for target in targets {
                 let threshold: Double = switch target.kind {
                 case .playhead: baseFrameThreshold * Snap.playheadMultiplier
-                case .clipEdge, .beat: baseFrameThreshold
+                case .clipEdge, .beat, .marker: baseFrameThreshold
                 }
                 let dist = abs(Double(probePos - target.frame))
                 if dist <= threshold, dist < (best?.distance ?? .infinity) {

@@ -283,6 +283,9 @@ final class ExportQueue {
             jobs[index].palmierReport = report
             jobs[index].warnings = report.warnings
         }
+        for warning in service.lastReport?.warnings ?? [] where !jobs[index].warnings.contains(warning) {
+            jobs[index].warnings.append(warning)
+        }
         operations[id] = nil
         activeID = nil
         activeTask = nil
@@ -308,11 +311,13 @@ final class ExportQueue {
 
 }
 
-private extension ExportJob {
+extension ExportJob {
     func warningCount(_ mediaReport: ExportRunReport?) -> Int {
-        if let palmierReport { return palmierReport.missing.count }
+        if let palmierReport { return palmierReport.missing.count + (mediaReport?.warnings.count ?? 0) }
         if let mediaReport {
-            return mediaReport.offlineMediaRefs.count + mediaReport.unprocessableMediaRefs.count
+            return mediaReport.offlineMediaRefs.count
+                + mediaReport.unprocessableMediaRefs.count
+                + mediaReport.warnings.count
         }
         return warnings.count
     }

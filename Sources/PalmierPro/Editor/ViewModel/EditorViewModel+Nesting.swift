@@ -141,7 +141,7 @@ extension EditorViewModel {
         }
 
         // Top lane reuses the carrier's track; later lanes reuse free-span tracks below before inserting new ones.
-        func place(lanes: [[Clip]], carrier: Clip, type: ClipType, volumeScale: Double) {
+        func place(lanes: [Track], carrier: Clip, type: ClipType, volumeScale: Double) {
             guard let l = findClip(id: carrier.id) else { return }
             let span = carrier.startFrame..<carrier.endFrame
             timeline.tracks[l.trackIndex].clips.remove(at: l.clipIndex)
@@ -151,8 +151,24 @@ extension EditorViewModel {
                     && timeline.tracks[idx].type == type
                     && !timeline.tracks[idx].clips.contains { $0.startFrame < span.upperBound && $0.endFrame > span.lowerBound }
                 if !free { idx = insertTrack(at: idx, type: type) }
-                timeline.tracks[idx].clips.append(contentsOf: lane.map { freshen($0, volumeScale: volumeScale) })
+                var freshIds: [String: String] = [:]
+                let placed = lane.clips.map { clip -> Clip in
+                    let fresh = freshen(clip, volumeScale: volumeScale)
+                    freshIds[clip.id] = fresh.id
+                    return fresh
+                }
+                timeline.tracks[idx].clips.append(contentsOf: placed)
+                timeline.tracks[idx].transitions.append(contentsOf: lane.transitions.compactMap { transition in
+                    guard let from = freshIds[transition.fromClipId],
+                          let to = freshIds[transition.toClipId] else { return nil }
+                    var out = transition
+                    out.id = UUID().uuidString
+                    out.fromClipId = from
+                    out.toClipId = to
+                    return out
+                })
                 sortClips(trackIndex: idx)
+                timeline.tracks[idx].pruneInvalidTransitions()
                 idx += 1
             }
         }
@@ -163,7 +179,8 @@ extension EditorViewModel {
                 place(lanes: lanes, carrier: carrier, type: .video, volumeScale: 1)
             }
             if let carrier = audioCarrier {
-                let lanes = NestFlattener.flatten(carrier: carrier, child: child, visual: false).audioTracks
+                let lanes = NestFlattener.flatten(carrier: carrier, child: child, visual: false)
+                    .audioTracks.map { Track(type: .audio, clips: $0) }
                 place(lanes: lanes, carrier: carrier, type: .audio, volumeScale: carrier.volume)
             }
             pruneEmptyTracks()

@@ -38,6 +38,24 @@ enum ChapterSidecar {
         return destination
     }
 
+    /// Writes the chapters list beside a rendered video. A failure never fails the export, but it
+    /// comes back as a user-facing warning: the chapters were asked for and are not there.
+    static func writeIfNeeded(markers: [TimelineMarker], fps: Int, nextTo outputURL: URL) async -> String? {
+        guard let text = text(markers: markers, fps: fps) else { return nil }
+        do {
+            let url = try await write(text, nextTo: outputURL)
+            Log.export.notice("chapters sidecar written file=\(url.lastPathComponent)")
+            return nil
+        } catch {
+            Log.export.warning(
+                "chapters sidecar failed: \(Log.detail(error))",
+                telemetry: "Export chapters sidecar failed",
+                data: ["error": Log.detail(error)]
+            )
+            return "Chapters file could not be written next to the video: \(Log.detail(error))"
+        }
+    }
+
     /// Chapter titles are one line; newlines would break the list format.
     private static func title(of marker: TimelineMarker, number: Int) -> String {
         let trimmed = marker.name

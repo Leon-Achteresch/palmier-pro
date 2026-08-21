@@ -96,6 +96,30 @@ extension EditorViewModel {
         updateMarker(id: id, MarkerEdit(name: name), actionName: "Rename Marker")
     }
 
+    /// Live position during a ruler drag. Registers nothing; `commitMarkerDrag` closes the action.
+    func previewMarkerFrame(id: String, frame: Int) {
+        guard isPlaceableMarkerFrame(frame), var marker = timeline.marker(id: id), marker.frame != frame else { return }
+        marker.frame = frame
+        undo.withoutRegistration { timeline.upsertMarker(marker) }
+        refreshTimelineDisplay()
+    }
+
+    /// Closes a ruler drag as one undoable action. A drag that ended where it started registers nothing.
+    @discardableResult
+    func commitMarkerDrag(id: String, fromFrame: Int) -> Bool {
+        guard let current = timeline.marker(id: id), current.frame != fromFrame else { return false }
+        var before = timeline
+        var original = current
+        original.frame = fromFrame
+        before.upsertMarker(original)
+        if undo.isRegistrationEnabled {
+            registerTimelineSwap(
+                undoState: before, redoState: timeline, actionName: "Move Marker", refresh: .redraw
+            )
+        }
+        return true
+    }
+
     @discardableResult
     func removeMarker(id: String, actionName: String = "Delete Marker") -> Bool {
         guard timeline.marker(id: id) != nil else { return false }

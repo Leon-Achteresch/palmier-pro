@@ -101,6 +101,8 @@ struct InspectorView: View {
         )
         if selection.clipCount > 0 {
             clipInspectorContent(selection: selection)
+        } else if let transition = selectedTransition {
+            TransitionTab(resolved: transition).id(transition.id)
         } else if let marker = editor.selectedMarker {
             MarkerTab(marker: marker).id(marker.id)
         } else if let asset = selectedMediaAsset {
@@ -108,6 +110,11 @@ struct InspectorView: View {
         } else {
             projectMetadataContent
         }
+    }
+
+    private var selectedTransition: ResolvedTransition? {
+        guard editor.selectedTransitionIds.count == 1, let id = editor.selectedTransitionIds.first else { return nil }
+        return editor.resolvedTransition(id: id)?.resolved
     }
 
     private var marqueeSelectionSummary: some View {

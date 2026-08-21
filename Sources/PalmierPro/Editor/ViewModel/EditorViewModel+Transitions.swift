@@ -38,6 +38,49 @@ extension EditorViewModel {
         return resolved
     }
 
+    struct TransitionEdit {
+        var style: TransitionStyle?
+        var direction: TransitionDirection?
+        var durationFrames: Int?
+        var alignment: TransitionAlignment?
+
+        var isEmpty: Bool {
+            style == nil && direction == nil && durationFrames == nil && alignment == nil
+        }
+    }
+
+    /// Applies `edit` to one transition after re-resolving it against the track. Refused and
+    /// unchanged edits leave the timeline and the undo stack untouched.
+    @discardableResult
+    func updateTransition(
+        id: String, _ edit: TransitionEdit, actionName: String = "Edit Transition"
+    ) throws(TransitionRefusal) -> ResolvedTransition? {
+        guard !edit.isEmpty else { return nil }
+        guard let trackIndex = timeline.trackIndexOfTransition(id: id),
+              let existing = timeline.tracks[trackIndex].transitions.first(where: { $0.id == id })
+        else { throw TransitionRefusal.clipNotFound(id) }
+
+        var candidate = existing
+        if let style = edit.style { candidate.style = style }
+        if let durationFrames = edit.durationFrames { candidate.durationFrames = durationFrames }
+        if let alignment = edit.alignment { candidate.alignment = alignment }
+        candidate.direction = candidate.style.requiresDirection
+            ? (edit.direction ?? existing.direction ?? .left)
+            : nil
+        guard candidate != existing else { return timeline.tracks[trackIndex].resolvedTransition(id: id) }
+
+        let track = timeline.tracks[trackIndex]
+        let resolved = try track.resolve(candidate, against: track.resolvedTransitions.filter { $0.id != id })
+        let trackId = track.id
+        withTimelineSwap(actionName: actionName) {
+            guard let index = timeline.tracks.firstIndex(where: { $0.id == trackId }),
+                  let slot = timeline.tracks[index].transitions.firstIndex(where: { $0.id == id })
+            else { return }
+            timeline.tracks[index].transitions[slot] = candidate
+        }
+        return resolved
+    }
+
     @discardableResult
     func removeTransition(id: String) -> ClipTransition? {
         guard let trackIndex = timeline.trackIndexOfTransition(id: id),

@@ -11,6 +11,7 @@ enum DragState {
     case fadeKnee(FadeKneeDrag)
     case marquee(MarqueeDrag)
     case timelineRange(TimelineRangeDrag)
+    case marker(MarkerDrag)
 
     struct AudioVolumeKfDrag {
         let clipId: String
@@ -103,5 +104,13 @@ enum DragState {
 
     struct TimelineRangeDrag {
         let anchorFrame: Int
+    }
+
+    struct MarkerDrag {
+        let markerId: String
+        /// Marker frame at drag-start; mouseUp both detects the no-op and anchors the undo state.
+        let originalFrame: Int
+        /// Cursor frame at drag-start; preserves the pointer's offset to the tag as it moves.
+        let grabFrame: Int
     }
 }

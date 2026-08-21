@@ -155,6 +155,79 @@ struct TransitionEditingTests {
         #expect(editor.timeline.tracks[0].clips.count == 2)
     }
 
+    @Test func editingDurationReResolvesTheWindowAsOneUndoableAction() throws {
+        let h = Harness()
+        let editor = h.editor
+        let resolved = try h.addTransition()
+        let before = editor.timeline
+
+        let updated = try #require(try editor.updateTransition(id: resolved.id, .init(durationFrames: 20)))
+        #expect(updated.window.startFrame == 20)
+        #expect(updated.window.endFrame == 40)
+        #expect(editor.timeline.tracks[0].transitions.first?.durationFrames == 20)
+
+        #expect(editor.undo.undoLatest() == "Edit Transition")
+        #expect(editor.timeline == before)
+    }
+
+    @Test func pickingADirectionalStyleSuppliesADirectionAndClearingItDropsOne() throws {
+        let h = Harness()
+        let editor = h.editor
+        let resolved = try h.addTransition()
+
+        try editor.updateTransition(id: resolved.id, .init(style: .wipe))
+        #expect(editor.timeline.tracks[0].transitions.first?.direction == .left)
+
+        try editor.updateTransition(id: resolved.id, .init(direction: .up))
+        #expect(editor.timeline.tracks[0].transitions.first?.direction == .up)
+
+        try editor.updateTransition(id: resolved.id, .init(style: .crossDissolve))
+        #expect(editor.timeline.tracks[0].transitions.first?.direction == nil)
+    }
+
+    @Test func alignmentMovesTheWindowWithoutMovingTheCut() throws {
+        let h = Harness()
+        let editor = h.editor
+        let resolved = try h.addTransition()
+
+        let updated = try #require(try editor.updateTransition(id: resolved.id, .init(alignment: .endAtCut)))
+        #expect(updated.window.cutFrame == 30)
+        #expect(updated.window.startFrame == 20)
+        #expect(updated.window.endFrame == 30)
+    }
+
+    @Test func anEditBeyondTheAvailableHandleIsRefusedAndRegistersNoUndoStep() throws {
+        let h = Harness()
+        let editor = h.editor
+        let resolved = try h.addTransition()
+        let before = editor.timeline
+
+        #expect(throws: TransitionRefusal.self) {
+            try editor.updateTransition(id: resolved.id, .init(durationFrames: 200))
+        }
+        #expect(editor.timeline == before)
+        #expect(editor.undo.undoLatest() == "Add Transition")
+    }
+
+    @Test func anEmptyOrUnchangedEditRegistersNoUndoStep() throws {
+        let h = Harness()
+        let editor = h.editor
+        let resolved = try h.addTransition()
+        let before = editor.timeline
+
+        #expect(try editor.updateTransition(id: resolved.id, .init()) == nil)
+        #expect(try editor.updateTransition(id: resolved.id, .init(durationFrames: 10))?.id == resolved.id)
+        #expect(editor.timeline == before)
+        #expect(editor.undo.undoLatest() == "Add Transition")
+    }
+
+    @Test func editingAnUnknownTransitionIsRefused() throws {
+        let h = Harness()
+        #expect(throws: TransitionRefusal.self) {
+            try h.editor.updateTransition(id: "nope", .init(durationFrames: 12))
+        }
+    }
+
     @Test func transitionsSurviveACodableRoundTrip() throws {
         let h = Harness()
         let editor = h.editor

@@ -20,6 +20,7 @@ struct ExportRunReport {
     let outputSize: CGSize
     let offlineMediaRefs: Set<String>
     let unprocessableMediaRefs: Set<String>
+    var warnings: [String] = []
 }
 
 struct ExportAnalyticsContext {
@@ -257,13 +258,14 @@ final class ExportService {
                 }
             }
             let outputSize = await Self.encodedVideoSize(of: outputURL) ?? prepared.renderSize
+            let sidecarWarning = await ChapterSidecar.writeIfNeeded(markers: timeline.markers, fps: timeline.fps, nextTo: outputURL)
             lastReport = ExportRunReport(
                 outputSize: outputSize,
                 offlineMediaRefs: prepared.result.offlineMediaRefs,
-                unprocessableMediaRefs: prepared.result.unprocessableMediaRefs
+                unprocessableMediaRefs: prepared.result.unprocessableMediaRefs,
+                warnings: sidecarWarning.map { [$0] } ?? []
             )
             setProgress(1)
-            await writeChapterSidecar(timeline: timeline, outputURL: outputURL)
             Log.export.notice(
                 "export ok",
                 telemetry: "Export finished",
@@ -437,13 +439,14 @@ final class ExportService {
                 )
             }
             let outputSize = await Self.encodedVideoSize(of: outputURL) ?? renderSize
+            let sidecarWarning = await ChapterSidecar.writeIfNeeded(markers: timeline.markers, fps: timeline.fps, nextTo: outputURL)
             lastReport = ExportRunReport(
                 outputSize: outputSize,
                 offlineMediaRefs: result.offlineMediaRefs,
-                unprocessableMediaRefs: result.unprocessableMediaRefs
+                unprocessableMediaRefs: result.unprocessableMediaRefs,
+                warnings: sidecarWarning.map { [$0] } ?? []
             )
             setProgress(1)
-            await writeChapterSidecar(timeline: timeline, outputURL: outputURL)
             Log.export.notice("hdr export ok")
             analytics.finish()
         } catch {
@@ -455,21 +458,6 @@ final class ExportService {
                 Log.export.error("hdr export failed: \(Log.detail(error))")
                 analytics.fail()
             }
-        }
-    }
-
-    /// Best-effort chapters list beside a rendered video. A failure here never fails the export.
-    private func writeChapterSidecar(timeline: Timeline, outputURL: URL) async {
-        guard let text = ChapterSidecar.text(markers: timeline.markers, fps: timeline.fps) else { return }
-        do {
-            let url = try await ChapterSidecar.write(text, nextTo: outputURL)
-            Log.export.notice("chapters sidecar written file=\(url.lastPathComponent)")
-        } catch {
-            Log.export.warning(
-                "chapters sidecar failed: \(Log.detail(error))",
-                telemetry: "Export chapters sidecar failed",
-                data: ["error": Log.detail(error)]
-            )
         }
     }
 
