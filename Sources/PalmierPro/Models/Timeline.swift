@@ -302,6 +302,7 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
     var textAnimation: TextAnimation?
     var wordTimings: [WordTiming]?
     var textFillMode: TextFillMode?
+    var textAccent: TextAccent?
 
     // Keyframe tracks for each animatable property. Nil when no animation exists.
     var opacityTrack: KeyframeTrack<Double>?
@@ -328,7 +329,7 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
         case fadeInFrames, fadeOutFrames, fadeInInterpolation, fadeOutInterpolation
         case opacity, transform, crop, edgeRounding, edgeSoftness
         case linkGroupId, captionGroupId, multicamGroupId, textContent, textStyle, textAnimation, wordTimings
-        case textFillMode
+        case textFillMode, textAccent
         case opacityTrack, positionTrack, scaleTrack, rotationTrack, cropTrack, volumeTrack, speedTrack
         case effects, blendMode, audioMix, duckingRole, stabilization
     }
@@ -631,6 +632,7 @@ extension Clip {
             textAnimation: try? c.decode(TextAnimation.self, forKey: .textAnimation),
             wordTimings: try? c.decode([WordTiming].self, forKey: .wordTimings),
             textFillMode: try? c.decode(TextFillMode.self, forKey: .textFillMode),
+            textAccent: try? c.decode(TextAccent.self, forKey: .textAccent),
             opacityTrack: try? c.decode(KeyframeTrack<Double>.self, forKey: .opacityTrack),
             positionTrack: try? c.decode(KeyframeTrack<AnimPair>.self, forKey: .positionTrack),
             scaleTrack: try? c.decode(KeyframeTrack<AnimPair>.self, forKey: .scaleTrack),

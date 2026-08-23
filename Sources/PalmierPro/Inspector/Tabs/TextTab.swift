@@ -189,6 +189,80 @@ struct TextAnimateTab: View {
             )
             if anim.preset.usesHighlight { highlightRow(anim) }
         }
+        if clips.count == 1 { accentGroup }
+    }
+
+    private var accentWords: [String] {
+        TextAccent.tokens(in: clip.textContent ?? "").map(\.text)
+    }
+
+    private var accentColor: TextStyle.RGBA {
+        clip.textAccent?.color ?? TextAnimation.defaultHighlight
+    }
+
+    @ViewBuilder
+    private var accentGroup: some View {
+        let words = accentWords
+        if !words.isEmpty {
+            EditorPanelGroup("Accent") {
+                InspectorRow(
+                    label: "Color",
+                    onReset: { setAccent(color: TextAnimation.defaultHighlight, words: selectedAccentWords) }
+                ) {
+                    ColorField(
+                        displayColor: accentColor.swiftUIColor,
+                        onUserChange: { new in
+                            editor.debouncedCommitClipProperties(clipIds: targetIds, key: "textAccent") {
+                                guard let existing = $0.textAccent else { return }
+                                $0.textAccent = TextAccent(color: TextStyle.RGBA(new), words: existing.words)
+                            }
+                        }
+                    )
+                }
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 56), spacing: AppTheme.Spacing.xs)],
+                    alignment: .leading,
+                    spacing: AppTheme.Spacing.xs
+                ) {
+                    ForEach(Array(words.enumerated()), id: \.offset) { index, word in
+                        accentChip(word: word, index: index)
+                    }
+                }
+                .padding(.horizontal, AppTheme.Spacing.lg)
+                .padding(.bottom, AppTheme.Spacing.sm)
+            }
+        }
+    }
+
+    private var selectedAccentWords: [Int] { clip.textAccent?.words ?? [] }
+
+    private func accentChip(word: String, index: Int) -> some View {
+        let on = clip.textAccent?.covers(index) ?? false
+        return Button {
+            var next = Set(selectedAccentWords)
+            if on { next.remove(index) } else { next.insert(index) }
+            setAccent(color: accentColor, words: Array(next))
+        } label: {
+            Text(word)
+                .font(.system(size: AppTheme.FontSize.xs, weight: AppTheme.FontWeight.medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, AppTheme.Spacing.xxs)
+                .padding(.horizontal, AppTheme.Spacing.xs)
+                .background(
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.xs)
+                        .fill(on ? accentColor.swiftUIColor.opacity(AppTheme.Opacity.medium) : AppTheme.Background.raisedColor)
+                )
+                .foregroundStyle(on ? accentColor.swiftUIColor : AppTheme.Text.secondaryColor)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func setAccent(color: TextStyle.RGBA, words: [Int]) {
+        editor.cancelDebouncedCommit(key: "textAccent")
+        let value: TextAccent? = words.isEmpty ? nil : TextAccent(color: color, words: words)
+        editor.commitClipProperties(clipIds: targetIds) { $0.textAccent = value }
     }
 
     private func setAnim(_ modify: (inout TextAnimation) -> Void) {

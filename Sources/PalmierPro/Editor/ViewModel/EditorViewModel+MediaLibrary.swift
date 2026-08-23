@@ -718,6 +718,7 @@ extension EditorViewModel {
         var words: [WordTiming]? = nil
         var animation: TextAnimation? = nil
         var fillMode: TextFillMode? = nil
+        var accent: TextAccent? = nil
     }
 
     /// Batch variant of `addTextClip` for agent flows.
@@ -776,6 +777,7 @@ extension EditorViewModel {
             clip.wordTimings = spec.words
             clip.textAnimation = spec.animation
             clip.textFillMode = spec.fillMode == .footage ? .footage : nil
+            clip.textAccent = spec.accent
             if batchTimeline != nil {
                 batchTimeline!.tracks[spec.trackIndex].clips.append(clip)
             } else {

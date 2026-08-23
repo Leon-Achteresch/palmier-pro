@@ -98,17 +98,18 @@ fileprivate struct PartialTextSpec {
     let transform: Transform?
     let animation: TextAnimation?
     let fillMode: TextFillMode?
+    let accent: TextAccent?
 }
 
 extension ToolExecutor {
     private static let addTextsAllowedKeys: Set<String> = Set([
         "trackIndex", "startFrame", "endFrame", "content",
-        "style", "transform", "animation", "highlightColor", "fillMode",
+        "style", "transform", "animation", "highlightColor", "fillMode", "accent",
     ])
 
     private static let updateTextAllowedKeys: Set<String> = Set([
         "clipIds", "captionGroupId", "content",
-        "style", "transform", "animation", "highlightColor", "fillMode",
+        "style", "transform", "animation", "highlightColor", "fillMode", "accent",
     ])
 
     func parseTextStylePatch(_ args: [String: Any], path: String) throws -> ParsedTextStylePatch? {
@@ -351,6 +352,43 @@ extension ToolExecutor {
         return anim
     }
 
+    /// Resolves accent words against the clip's own text. Outer nil = key absent (keep whatever is
+    /// there), inner nil = explicit clear. Every occurrence of a listed word is accented.
+    func parseTextAccent(_ args: [String: Any], content: String, path: String) throws -> (TextAccent?, unmatched: [String])? {
+        guard args.keys.contains("accent") else { return nil }
+        if args["accent"] is NSNull { return (nil, []) }
+        guard let dict = args["accent"] as? [String: Any] else {
+            throw ToolError("\(path).accent: expected object or null")
+        }
+        try validateUnknownKeys(dict, allowed: ["color", "words"], path: "\(path).accent")
+        guard let rawWords = dict["words"] as? [Any] else {
+            throw ToolError("\(path).accent.words: expected an array of words")
+        }
+        var requested: [String] = []
+        for (i, raw) in rawWords.enumerated() {
+            guard let word = raw as? String, !word.trimmingCharacters(in: .whitespaces).isEmpty else {
+                throw ToolError("\(path).accent.words[\(i)]: expected a non-empty string")
+            }
+            requested.append(word)
+        }
+        if requested.isEmpty { return (nil, []) }
+        guard let colour = try parseColorHex(dict["color"] as? String, path: "\(path).accent.color") else {
+            throw ToolError("\(path).accent.color: required when accent words are given (e.g. '#FFB300')")
+        }
+        let tokens = TextAccent.tokens(in: content).map { TextAccent.matchKey($0.text) }
+        var indices: Set<Int> = []
+        var unmatched: [String] = []
+        for word in requested {
+            let needle = TextAccent.matchKey(word)
+            let hits = tokens.enumerated().filter { $0.element == needle }.map(\.offset)
+            if hits.isEmpty { unmatched.append(word) } else { indices.formUnion(hits) }
+        }
+        guard !indices.isEmpty else {
+            throw ToolError("\(path).accent.words: none of \(requested.joined(separator: ", ")) appear in the text")
+        }
+        return (TextAccent(color: colour, words: Array(indices)), unmatched)
+    }
+
     private func parseTextFillMode(_ raw: String?, path: String) throws -> TextFillMode? {
         guard let raw else { return nil }
         guard let mode = TextFillMode(rawValue: raw) else {
@@ -473,7 +511,8 @@ extension ToolExecutor {
                 style: style,
                 transform: transform,
                 animation: try parseTextAnimation(preset: entry.string("animation"), highlightColor: entry.string("highlightColor"), path: path),
-                fillMode: try parseTextFillMode(entry.string("fillMode"), path: path)
+                fillMode: try parseTextFillMode(entry.string("fillMode"), path: path),
+                accent: try parseTextAccent(entry, content: content, path: path)?.0
             ))
         }
 
@@ -509,7 +548,8 @@ extension ToolExecutor {
                     style: p.style,
                     transform: p.transform,
                     animation: p.animation,
-                    fillMode: p.fillMode
+                    fillMode: p.fillMode,
+                    accent: p.accent
                 )
             }
 
@@ -559,8 +599,9 @@ extension ToolExecutor {
         let shouldSetAnimation = args.string("animation") != nil
         let highlightOnly = shouldSetAnimation ? nil : try parseColorHex(args.string("highlightColor"), path: "update_text")
         let fillMode = try parseTextFillMode(args.string("fillMode"), path: "update_text")
+        let accentRequested = args.keys.contains("accent")
 
-        guard hasContent || textStylePatch?.hasAnyField == true || transform != nil || shouldSetAnimation || highlightOnly != nil || fillMode != nil else {
+        guard hasContent || textStylePatch?.hasAnyField == true || transform != nil || shouldSetAnimation || highlightOnly != nil || fillMode != nil || accentRequested else {
             throw ToolError("update_text needs at least one text property to apply")
         }
 
@@ -573,6 +614,30 @@ extension ToolExecutor {
         }
 
         var notes: [String] = []
+        // Resolved before the undo group opens: accent words are matched against each clip's own text.
+        var resolvedAccents: [String: TextAccent?] = [:]
+        var staleAccentIds: Set<String> = []
+        if accentRequested {
+            var unmatchedAll: Set<String> = []
+            for id in clipIds {
+                let existing = editor.clipFor(id: id)?.textContent ?? ""
+                let parsed = try parseTextAccent(args, content: content ?? existing, path: "update_text")
+                resolvedAccents[id] = parsed?.0
+                unmatchedAll.formUnion(parsed?.unmatched ?? [])
+            }
+            if !unmatchedAll.isEmpty {
+                notes.append("Accent words not found in every clip: \(unmatchedAll.sorted().joined(separator: ", ")).")
+            }
+        } else if hasContent {
+            staleAccentIds = Set(clipIds.filter { id in
+                guard let clip = editor.clipFor(id: id) else { return false }
+                return clip.textAccent != nil && clip.textContent != content
+            })
+            let stale = staleAccentIds
+            if !stale.isEmpty {
+                notes.append("Content change cleared the word accent on \(stale.count) clip\(stale.count == 1 ? "" : "s") — its word indices no longer match. Re-send 'accent' to restore it.")
+            }
+        }
         if hasContent {
             let timingCleared = clipIds.filter { id in
                 guard let loc = editor.findClip(id: id) else { return false }
@@ -634,6 +699,11 @@ extension ToolExecutor {
                 }
                 if let fillMode {
                     clip.textFillMode = fillMode == .footage ? .footage : nil
+                }
+                if accentRequested {
+                    clip.textAccent = resolvedAccents[clip.id] ?? nil
+                } else if staleAccentIds.contains(clip.id) {
+                    clip.textAccent = nil
                 }
                 if shouldFitToContent {
                     _ = editor.fitTextClipToContentIfNeeded(&clip, canvasW: canvasW, canvasH: canvasH)

@@ -33,7 +33,7 @@ enum TextFrameRenderer {
 
         // Static base is frame-independent → cache it. Entrance reuses it under a transform.
         guard let base = cachedStatic(content: content, style: style, transform: transform,
-                                      boxes: boxes,
+                                      boxes: boxes, accent: clip.textAccent,
                                       fontSize: fontSize, renderSize: renderSize) else { return nil }
         guard let anim, anim.isActive else { return base }
         return applyEntrance(base, TextAnimator.clipEntry(anim, rel: frame - clip.startFrame),
@@ -120,13 +120,13 @@ enum TextFrameRenderer {
     // MARK: - Static
 
     private static func cachedStatic(content: String, style: TextStyle, transform: Transform,
-                                     boxes: LayoutBoxes,
+                                     boxes: LayoutBoxes, accent: TextAccent?,
                                      fontSize: CGFloat, renderSize: CGSize) -> CIImage? {
-        let key = signature(content, style, transform, renderSize)
+        let key = signature(content, style, transform, accent, renderSize)
         if let cached = cache.object(forKey: key) { return cached }
         guard let ctx = beginContext(style: style, backgroundBox: boxes.background, renderSize: renderSize) else { return nil }
         let frame = TextLayout.frame(
-            for: NSAttributedString(string: content, attributes: style.attributes(size: fontSize)),
+            for: accented(content, style: style, fontSize: fontSize, accent: accent),
             in: boxes.text
         )
         CTFrameDraw(frame, ctx)
@@ -185,7 +185,8 @@ enum TextFrameRenderer {
             for (ti, tok) in tokens.enumerated() {
                 guard tok.range.location >= lineRange.location,
                       tok.range.location < lineRange.location + lineRange.length else { continue }
-                let st = TextAnimator.wordState(anim, word: timings[ti], rel: rel, base: style.color)
+                let wordBase = clip.textAccent?.color(forWord: ti, base: style.color) ?? style.color
+                let st = TextAnimator.wordState(anim, word: timings[ti], rel: rel, base: wordBase)
                 guard st.opacity > 0 else { continue }
 
                 let startOff = CTLineGetOffsetForStringIndex(line, tok.range.location, nil)
@@ -282,9 +283,10 @@ enum TextFrameRenderer {
         // Left-anchor so the text reveals rightward in place rather than re-centering as it grows.
         var attrs = style.attributes(size: fontSize)
         attrs[.paragraphStyle] = style.paragraphStyle(size: fontSize, alignment: .left)
-        let fullText = NSAttributedString(string: content, attributes: attrs)
+        let accent = clip.textAccent
+        let fullText = accented(content, attributes: attrs, accent: accent)
         let textFrame = TextLayout.frame(
-            for: NSAttributedString(string: visible, attributes: attrs),
+            for: accented(visible, attributes: attrs, accent: accent),
             in: boxes.text,
             verticallySizedFor: fullText
         )
@@ -449,22 +451,29 @@ enum TextFrameRenderer {
         return out
     }
 
-    private static func words(in content: String) -> [(range: NSRange, text: String)] {
-        let ns = content as NSString
-        let ws = CharacterSet.whitespacesAndNewlines
-        // A surrogate half (emoji etc.) maps to no scalar — treat it as part of a word, not whitespace.
-        func isSpace(_ u: unichar) -> Bool { Unicode.Scalar(u).map(ws.contains) ?? false }
-        var result: [(NSRange, String)] = []
-        var i = 0
-        while i < ns.length {
-            while i < ns.length, isSpace(ns.character(at: i)) { i += 1 }
-            guard i < ns.length else { break }
-            let start = i
-            while i < ns.length, !isSpace(ns.character(at: i)) { i += 1 }
-            let r = NSRange(location: start, length: i - start)
-            result.append((r, ns.substring(with: r)))
+    /// The clip's text with accented words recoloured. Ranges past the string are ignored, so the
+    /// typewriter can pass a prefix and keep the same accent word indices.
+    private static func accented(_ content: String, style: TextStyle, fontSize: CGFloat,
+                                 accent: TextAccent?) -> NSAttributedString {
+        accented(content, attributes: style.attributes(size: fontSize), accent: accent)
+    }
+
+    private static func accented(_ content: String, attributes: [NSAttributedString.Key: Any],
+                                 accent: TextAccent?) -> NSAttributedString {
+        guard let accent, accent.isActive else {
+            return NSAttributedString(string: content, attributes: attributes)
+        }
+        let result = NSMutableAttributedString(string: content, attributes: attributes)
+        let tokens = words(in: content)
+        let colour = accent.color.nsColor
+        for index in accent.words where tokens.indices.contains(index) {
+            result.addAttribute(.foregroundColor, value: colour, range: tokens[index].range)
         }
         return result
+    }
+
+    private static func words(in content: String) -> [(range: NSRange, text: String)] {
+        TextAccent.tokens(in: content)
     }
 
     // MARK: - Shared drawing
@@ -515,9 +524,10 @@ enum TextFrameRenderer {
         CGColor(srgbRed: CGFloat(c.r), green: CGFloat(c.g), blue: CGFloat(c.b), alpha: CGFloat(c.a))
     }
 
-    private static func signature(_ content: String, _ s: TextStyle, _ t: Transform, _ size: CGSize) -> NSString {
+    private static func signature(_ content: String, _ s: TextStyle, _ t: Transform,
+                                  _ accent: TextAccent?, _ size: CGSize) -> NSString {
         var h = Hasher()
-        h.combine(content); h.combine(s)
+        h.combine(content); h.combine(s); h.combine(accent)
         h.combine(t.centerX); h.combine(t.centerY); h.combine(t.width); h.combine(t.height)
         h.combine(size)
         return String(h.finalize()) as NSString

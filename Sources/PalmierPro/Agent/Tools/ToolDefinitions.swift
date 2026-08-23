@@ -1170,7 +1170,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .addTexts,
-            description: "Adds text clips as timeline layers. Omit trackIndex on every entry to create one new top video track; otherwise set trackIndex on every entry. Transform is normalized text-box center/size; center-only auto-fits, all four fields override the box. Use the nested style object for typography, outline, shadow, and background. fillMode 'footage' stencils layers below through the letter shapes. Use add_captions for spoken audio captions. Unknown fields are rejected.",
+            description: "Adds text clips as timeline layers. Use the nested accent object to hold chosen words in a second colour for the whole clip — the keyword treatment quote and tutorial titles rely on. Omit trackIndex on every entry to create one new top video track; otherwise set trackIndex on every entry. Transform is normalized text-box center/size; center-only auto-fits, all four fields override the box. Use the nested style object for typography, outline, shadow, and background. fillMode 'footage' stencils layers below through the letter shapes. Use add_captions for spoken audio captions. Unknown fields are rejected.",
             inputSchema: objectSchema(
                 properties: [
                     "entries": [
@@ -1192,6 +1192,14 @@ enum ToolDefinitions {
                                 "animation": ["type": "string", "enum": TextAnimation.Preset.agentValues, "description": "Animation preset; off clears."],
                                 "highlightColor": ["type": "string", "description": "Active-word hex."],
                                 "fillMode": ["type": "string", "enum": ["color", "footage"], "description": "color = solid typography (default). footage = stencil layers below through the letter shapes."],
+                                "accent": [
+                                    "type": "object",
+                                    "description": "Holds chosen words in a second colour for the whole clip — the gold keyword inside a white quote. Unlike highlightColor, which only tints a word while it animates, this never fades. Every occurrence of a listed word is accented; matching ignores case and punctuation.",
+                                    "properties": [
+                                        "color": ["type": "string", "description": "Accent hex, e.g. '#FFB300'."],
+                                        "words": ["type": "array", "items": ["type": "string"], "description": "Words from this clip's own content to hold in the accent colour."],
+                                    ],
+                                ],
                             ]),
                             "required": ["startFrame", "endFrame", "content"],
                         ],
@@ -1221,6 +1229,14 @@ enum ToolDefinitions {
                     "animation": ["type": "string", "enum": TextAnimation.Preset.agentValues, "description": "Animation preset; off clears."],
                     "highlightColor": ["type": "string", "description": "Active-word hex."],
                     "fillMode": ["type": "string", "enum": ["color", "footage"], "description": "color = solid typography. footage = stencil layers below through the letter shapes."],
+                    "accent": [
+                        "type": "object",
+                        "description": "Holds chosen words in a second colour for the whole clip. Send null to clear it. Words are matched against each clip's own text, ignoring case and punctuation; every occurrence is accented. Changing content without re-sending accent clears it, because the stored word positions no longer match.",
+                        "properties": [
+                            "color": ["type": "string", "description": "Accent hex, e.g. '#FFB300'."],
+                            "words": ["type": "array", "items": ["type": "string"], "description": "Words to hold in the accent colour."],
+                        ],
+                    ],
                 ]),
                 required: []
             )
