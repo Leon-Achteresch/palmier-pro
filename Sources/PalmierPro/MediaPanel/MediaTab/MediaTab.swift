@@ -36,6 +36,7 @@ struct MediaTab: View {
 
     @State private var mediaPanelHeight: CGFloat = 600
     @State private var showMatteSheet = false
+    @State private var showRecorderSheet = false
 
     enum ViewMode: String, CaseIterable {
         case folder, flat, grouped
@@ -171,6 +172,9 @@ struct MediaTab: View {
         .sheet(isPresented: $showMatteSheet) {
             MatteSheet(isPresented: $showMatteSheet)
         }
+        .sheet(isPresented: $showRecorderSheet) {
+            VideoRecorderSheet(isPresented: $showRecorderSheet)
+        }
     }
 
     private var swapBanner: some View {
@@ -301,6 +305,7 @@ struct MediaTab: View {
         return HStack(spacing: AppTheme.Spacing.xs) {
             toolbarButton(title: "Import", systemImage: "plus", action: importMedia)
                 .tourAnchor(.importButton)
+            toolbarButton(title: "Record", systemImage: "video") { showRecorderSheet = true }
             if showGenerate {
                 toolbarButton(title: "Generate", systemImage: "sparkles", filled: true, accentStyle: AnyShapeStyle(AppTheme.aiGradient), action: toggleGenerationPanel)
                     .tourAnchor(.generateButton)

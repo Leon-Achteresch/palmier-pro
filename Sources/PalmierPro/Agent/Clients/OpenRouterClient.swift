@@ -54,7 +54,7 @@ struct OpenRouterClient: AgentClient {
                     "function": [
                         "name": tool.name,
                         "description": tool.description,
-                        "parameters": tool.inputSchema,
+                        "parameters": sanitizeSchema(tool.inputSchema),
                     ],
                 ]
             }
@@ -77,6 +77,10 @@ struct OpenRouterClient: AgentClient {
         }
 
         try await OpenRouterSSE.parse(bytes: bytes, continuation: continuation)
+    }
+
+    private func sanitizeSchema(_ schema: [String: Any]) -> [String: Any] {
+        GeminiSchemaSanitizer.applies(to: model.id) ? GeminiSchemaSanitizer.sanitize(schema) : schema
     }
 
     /// Anthropic models bill cached prefixes only with an explicit breakpoint; other providers cache on their own.
@@ -195,8 +199,7 @@ enum OpenRouterSSE {
                   let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
 
             if let error = event["error"] as? [String: Any] {
-                let message = error["message"] as? String ?? "OpenRouter stream error"
-                continuation.finish(throwing: AgentStreamError.upstream(message))
+                continuation.finish(throwing: AgentStreamError.upstream(error, fallback: "OpenRouter stream error"))
                 return
             }
             if let usage = event["usage"] as? [String: Any] {

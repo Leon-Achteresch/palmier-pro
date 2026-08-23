@@ -403,6 +403,13 @@ enum AppTheme {
         static let controlWidth: CGFloat = 116
     }
 
+    enum Recorder {
+        static let sheetWidth: CGFloat = 420
+        static let previewHeight: CGFloat = 236
+        static let controlWidth: CGFloat = 200
+        static let indicatorSize: CGFloat = 8
+    }
+
     // MARK: - Shadows
 
     struct ShadowStyle {

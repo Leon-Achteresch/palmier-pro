@@ -191,12 +191,39 @@ enum AgentStreamError: LocalizedError {
         if status == 401 || status == 403 { return .missingKey }
         guard let data = body.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let error = json["error"] as? [String: Any],
-              let message = error["message"] as? String
+              let error = json["error"] as? [String: Any]
         else {
             return .upstream(body.isEmpty ? "OpenRouter error (HTTP \(status))" : String(body.prefix(500)))
         }
+        return .upstream(error, fallback: "OpenRouter error (HTTP \(status))")
+    }
+
+    /// OpenRouter hides the real cause in error.metadata; a bare "Provider returned error" is useless to the user.
+    static func upstream(_ error: [String: Any], fallback: String) -> AgentStreamError {
+        var message = error["message"] as? String ?? fallback
+        let metadata = error["metadata"] as? [String: Any]
+        if let provider = metadata?["provider_name"] as? String, !provider.isEmpty {
+            message += " (\(provider))"
+        }
+        if let detail = metadata?["raw"].map(rawDetail), !detail.isEmpty {
+            message += ": \(detail)"
+        }
         return .upstream(message)
+    }
+
+    private static func rawDetail(_ raw: Any) -> String {
+        if let text = raw as? String { return String(text.prefix(500)) }
+        if let object = raw as? [String: Any] {
+            if let nested = object["error"] as? [String: Any], let message = nested["message"] as? String {
+                return String(message.prefix(500))
+            }
+            if let message = object["message"] as? String { return String(message.prefix(500)) }
+            if let data = try? JSONSerialization.data(withJSONObject: object),
+               let text = String(data: data, encoding: .utf8) {
+                return String(text.prefix(500))
+            }
+        }
+        return ""
     }
 }
 
