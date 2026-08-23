@@ -60,6 +60,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case removeWords = "remove_words"
     case removeSilence = "remove_silence"
     case detectBeats = "detect_beats"
+    case assembleMontage = "assemble_montage"
     case measureLoudness = "measure_loudness"
     case mixAudio = "mix_audio"
 
@@ -1124,6 +1125,27 @@ enum ToolDefinitions {
                     "endSeconds": ["type": "number", "description": "Optional. Return only beats at or before this source-media second."],
                 ],
                 required: ["mediaRef"]
+            )
+        ),
+        AgentTool(
+            name: .assembleMontage,
+            description: "Cuts a run of shots to a music bed in one undoable action — the travel reel, sizzle, recap, or hype edit where the picture changes on the beat. Use it instead of chaining detect_beats with add_clips: this tool detects the beats, lays every shot on the grid, and places the bed itself, so no cut drifts off the music.\n\nShots run in the order you pass them, back to back with no gaps, starting at startFrame. The bed lands on a NEW audio track at the bottom, so nothing already on the timeline is overwritten, and each shot's own sound is left out — a montage runs on the music. Omit trackIndex and the picture gets a new video track on top; give one and its landing region is cleared like add_clips.\n\nenergy shapes the cut rate, which is what separates a montage from a slideshow: 'flat' cuts on every beat; 'build' starts on wide holds and tightens to a single beat by the last shot; 'buildAndRelease' tightens the same way, then holds the final shot wide again as a payoff. maxHoldBeats is the widest hold those curves use. Set bookend to repeat the first shot as the closing one, the hero-shot bracket that opens and pays off a reel.\n\nA source shorter than its slot is held for fewer beats and reported; one that cannot fill a single beat is skipped and reported. The grid is never bent to fit — that is the whole point. Returns the cut frames, the detected BPM, the placed clip ids, and the bed's clip id. Needs music with an audible pulse; speech or ambience is refused.",
+            inputSchema: objectSchema(
+                properties: [
+                    "mediaRefs": [
+                        "type": "array",
+                        "items": ["type": "string"],
+                        "description": "Video/image asset ids from get_media, in cut order. At least two. Stills have no length limit; a clip is used from its start.",
+                    ],
+                    "musicRef": ["type": "string", "description": "Audio (or video with audio) asset id for the bed. Its beats define the grid."],
+                    "trackIndex": ["type": "integer", "description": "Optional video track for the picture. Omit to add a new track on top."],
+                    "startFrame": ["type": "integer", "description": "Timeline frame where the montage and the bed begin (default 0)."],
+                    "grid": ["type": "string", "enum": ["beat", "downbeat"], "description": "'beat' (default) for fast montage rhythms; 'downbeat' cuts on bar starts, which reads calmer and more musical."],
+                    "energy": ["type": "string", "enum": MontagePlanner.Energy.allCases.map(\.rawValue), "description": "Cut-rate curve across the run (default flat)."],
+                    "maxHoldBeats": ["type": "integer", "description": "Widest hold the build curves use, in grid steps (1–16, default 4). Ignored by 'flat'."],
+                    "bookend": ["type": "boolean", "description": "Repeat the first shot as the last one, so the reel opens and closes on the same hero image."],
+                ],
+                required: ["mediaRefs", "musicRef"]
             )
         ),
         AgentTool(

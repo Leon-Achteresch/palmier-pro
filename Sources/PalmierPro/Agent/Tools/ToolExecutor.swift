@@ -223,6 +223,7 @@ final class ToolExecutor {
 
     private func run(_ tool: ToolName, _ editor: EditorViewModel, _ args: [String: Any]) async throws -> ToolResult {
         switch tool {
+        case .assembleMontage: return try await assembleMontage(editor, args)
         case .getTimeline:   return try getTimeline(editor, args)
         case .readProjectContext: return try await readProjectContext(editor, args)
         case .getMedia:      return try getMedia(editor, args)

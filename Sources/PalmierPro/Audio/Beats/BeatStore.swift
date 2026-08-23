@@ -60,6 +60,17 @@ final class BeatStore {
         return task
     }
 
+    /// Installs an analysis that is already in hand, exactly as a cache hit would, so callers of
+    /// `detect` get it back without loading the Core ML model.
+    func seed(_ analysis: BeatAnalysis, for asset: MediaAsset) async {
+        let url = asset.url.standardizedFileURL
+        let tag = await fileTagLoader(url)
+        guard asset.url.standardizedFileURL == url else { return }
+        analyses[asset.id] = analysis
+        fileTags[asset.id] = tag
+        onBeatsReady?()
+    }
+
     @discardableResult
     func detect(for asset: MediaAsset, force: Bool = false) -> Task<BeatAnalysis, Error> {
         let key = asset.id
