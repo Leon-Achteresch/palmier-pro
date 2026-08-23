@@ -7,11 +7,13 @@ enum TransitionStyle: String, Codable, Sendable, CaseIterable {
     case wipe
     case slide
     case push
+    case whipPan
+    case filmBurn
 
     var requiresDirection: Bool {
         switch self {
-        case .wipe, .slide, .push: true
-        case .crossDissolve, .dipToBlack, .dipToWhite: false
+        case .wipe, .slide, .push, .whipPan: true
+        case .crossDissolve, .dipToBlack, .dipToWhite, .filmBurn: false
         }
     }
 
@@ -23,12 +25,16 @@ enum TransitionStyle: String, Codable, Sendable, CaseIterable {
         case .wipe: "Wipe"
         case .slide: "Slide"
         case .push: "Push"
+        case .whipPan: "Whip Pan"
+        case .filmBurn: "Film Burn"
         }
     }
 }
 
 enum TransitionDirection: String, Codable, Sendable, CaseIterable {
     case left, right, up, down
+
+    var isHorizontal: Bool { self == .left || self == .right }
 }
 
 enum TransitionAlignment: String, Codable, Sendable, CaseIterable {

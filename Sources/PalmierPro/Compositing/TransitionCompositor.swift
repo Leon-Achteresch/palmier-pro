@@ -27,6 +27,10 @@ enum TransitionCompositor {
             return slide(a, b, t: t, direction: direction, renderRect: renderRect)
         case .push:
             return push(a, b, t: t, direction: direction, renderRect: renderRect)
+        case .whipPan:
+            return whipPan(a, b, t: t, direction: direction, renderRect: renderRect)
+        case .filmBurn:
+            return filmBurn(a, b, t: t, renderRect: renderRect)
         }
     }
 
@@ -107,6 +111,54 @@ enum TransitionCompositor {
         let incoming = translated(b, by: incomingOffset(direction: direction, t: t, renderRect: renderRect))
         let outgoing = translated(a, by: outgoingOffset(direction: direction, t: t, renderRect: renderRect))
         return incoming.composited(over: outgoing).cropped(to: renderRect)
+    }
+
+    /// Push geometry on a smoothstep ramp — slow at both ends, fastest across the cut — with the
+    /// smear that hides the seam peaking at the same moment.
+    private static func whipPan(_ a: CIImage, _ b: CIImage, t: Double, direction: TransitionDirection?, renderRect: CGRect) -> CIImage {
+        guard let direction else { return dissolve(a, b, t: t, renderRect: renderRect) }
+        let eased = t * t * (3 - 2 * t)
+        let travelled = push(a, b, t: eased, direction: direction, renderRect: renderRect)
+        let span = direction.isHorizontal ? renderRect.width : renderRect.height
+        let radius = span * whipBlurFraction * sin(.pi * t)
+        return motionBlurred(travelled, radius: radius, direction: direction, renderRect: renderRect)
+    }
+
+    private static let whipBlurFraction = 0.06
+
+    private static func motionBlurred(_ image: CIImage, radius: Double, direction: TransitionDirection, renderRect: CGRect) -> CIImage {
+        guard radius >= 1 else { return image.cropped(to: renderRect) }
+        let filter = CIFilter(name: "CIMotionBlur")
+        filter?.setValue(image.clampedToExtent(), forKey: kCIInputImageKey)
+        filter?.setValue(radius, forKey: kCIInputRadiusKey)
+        filter?.setValue(direction.isHorizontal ? 0 : Double.pi / 2, forKey: kCIInputAngleKey)
+        return (filter?.outputImage ?? image).cropped(to: renderRect)
+    }
+
+    /// Warm bloom washing over a dissolve, brightest across the cut — the light-leak look.
+    private static func filmBurn(_ a: CIImage, _ b: CIImage, t: Double, renderRect: CGRect) -> CIImage {
+        let base = dissolve(a, b, t: t, renderRect: renderRect)
+        let intensity = pow(sin(.pi * t), 1.5) * filmBurnPeak
+        guard intensity > 0.001 else { return base }
+        guard let leak = burnField(intensity: intensity, renderRect: renderRect) else { return base }
+        let filter = CIFilter(name: "CIAdditionCompositing")
+        filter?.setValue(leak, forKey: kCIInputImageKey)
+        filter?.setValue(base, forKey: kCIInputBackgroundImageKey)
+        return (filter?.outputImage ?? base).cropped(to: renderRect)
+    }
+
+    private static let filmBurnPeak = 0.85
+
+    private static func burnField(intensity: Double, renderRect r: CGRect) -> CIImage? {
+        let filter = CIFilter(name: "CIRadialGradient")
+        let centre = CIVector(x: r.minX + r.width * 0.72, y: r.minY + r.height * 0.62)
+        let reach = max(r.width, r.height)
+        filter?.setValue(centre, forKey: "inputCenter")
+        filter?.setValue(0.0, forKey: "inputRadius0")
+        filter?.setValue(reach * 0.85, forKey: "inputRadius1")
+        filter?.setValue(CIColor(red: intensity, green: intensity * 0.52, blue: intensity * 0.16), forKey: "inputColor0")
+        filter?.setValue(CIColor(red: 0, green: 0, blue: 0, alpha: 0), forKey: "inputColor1")
+        return filter?.outputImage?.cropped(to: r)
     }
 
     private static func translated(_ image: CIImage, by offset: CGPoint) -> CIImage {

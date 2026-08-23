@@ -110,6 +110,31 @@ struct TransitionRenderTests {
         #expect(!CompositorFixtures.isRed(frame.at(20, 45)), "left should hold clip B: \(frame.at(20, 45))")
     }
 
+    @Test func whipPanSmearsTheSeamThatPushLeavesHard() async throws {
+        func seamContrast(_ f: Frame) -> Int {
+            let left = f.at(160, 45), right = f.at(180, 45)
+            return abs(left.r - right.r) + abs(left.g - right.g) + abs(left.b - right.b)
+        }
+        let pushed = try await Self.render(
+            Self.timeline(Self.transition(style: .push, direction: .right)), frame: 30
+        )
+        let whipped = try await Self.render(
+            Self.timeline(Self.transition(style: .whipPan, direction: .right)), frame: 30
+        )
+        #expect(
+            seamContrast(whipped) < seamContrast(pushed) / 2,
+            "whip seam \(seamContrast(whipped)) should smear well below push seam \(seamContrast(pushed))"
+        )
+    }
+
+    @Test func filmBurnAddsAWarmBloomOverTheDissolve() async throws {
+        let plain = try await Self.render(Self.timeline(Self.transition()), frame: 30)
+        let burnt = try await Self.render(Self.timeline(Self.transition(style: .filmBurn)), frame: 30)
+        let a = plain.at(230, 68), b = burnt.at(230, 68)
+        #expect(b.r > a.r + 20, "burn should lift red \(b) over dissolve \(a)")
+        #expect(b.r - b.b > a.r - a.b, "burn should warm the frame: \(b) vs \(a)")
+    }
+
     @Test func aStaleTransitionNeverAffectsTheRender() async throws {
         var timeline = Self.timeline(Self.transition())
         timeline.tracks[0].clips[1].startFrame = 40
@@ -118,3 +143,4 @@ struct TransitionRenderTests {
         #expect(CompositorFixtures.isRed(frame.tl), "unresolvable transition must not render: \(frame.tl)")
     }
 }
+

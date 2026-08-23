@@ -468,7 +468,7 @@ enum ToolDefinitions {
                     "toClipId": ["type": "string", "description": "The incoming clip — the one that starts at the cut."],
                     "style": [
                         "type": "string",
-                        "description": "crossDissolve blends the two shots; dipToBlack / dipToWhite fade through a colour field (a beat between scenes); wipe pushes a hard edge across the frame; slide brings the incoming shot in over the outgoing one; push moves both together like a filmstrip.",
+                        "description": "crossDissolve blends the two shots; dipToBlack / dipToWhite fade through a colour field (a beat between scenes); wipe pushes a hard edge across the frame; slide brings the incoming shot in over the outgoing one; push moves both together like a filmstrip; whipPan flings both across the frame under a heavy directional smear that hides the cut (the in-camera whip pan, rendered); filmBurn dissolves through a warm light-leak bloom.",
                         "enum": TransitionStyle.allCases.map(\.rawValue),
                     ],
                     "direction": [
