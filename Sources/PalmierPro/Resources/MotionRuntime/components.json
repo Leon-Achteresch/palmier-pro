@@ -796,5 +796,475 @@
   "@/components/remocn/x-followers-overview": [
     "SAMPLE_FOLLOWERS",
     "XFollowersOverview"
+  ],
+  "@/components/beui/action-swap-blur": [
+    "ActionSwapBlurButton",
+    "ActionSwapBlurText",
+    "ActionSwapBlurIcon"
+  ],
+  "@/components/beui/action-swap-cascade": [
+    "ActionSwapCascadeButton",
+    "ActionSwapCascadeText",
+    "ActionSwapCascadeIcon"
+  ],
+  "@/components/beui/action-swap-roll": [
+    "ActionSwapRollButton",
+    "ActionSwapRollText",
+    "ActionSwapRollIcon"
+  ],
+  "@/components/beui/action-swap": [
+    "ActionSwapText",
+    "ActionSwapIcon",
+    "ActionSwapButton"
+  ],
+  "@/components/beui/agents/agent-activity/activity-row": [
+    "ActivityRow"
+  ],
+  "@/components/beui/agents/agent-activity": [
+    "AgentActivity"
+  ],
+  "@/components/beui/agents/agent-disclosure": [
+    "AgentDisclosure"
+  ],
+  "@/components/beui/agents/ai-sidebar": [
+    "AISidebar"
+  ],
+  "@/components/beui/agents/approval-card": [
+    "ApprovalCard"
+  ],
+  "@/components/beui/agents/loading-states/reasoning-text": [
+    "ReasoningText"
+  ],
+  "@/components/beui/agents/loading-states/thinking-shimmer": [
+    "ThinkingShimmer"
+  ],
+  "@/components/beui/agents/message-bubble": [
+    "MessageBubble",
+    "MessageBubbleContent",
+    "MessageBubbleGroup",
+    "MessageBubbleCollapsible"
+  ],
+  "@/components/beui/agents/message-context": [
+    "MessageSideContext"
+  ],
+  "@/components/beui/agents/message-scroller": [
+    "MessageScroller"
+  ],
+  "@/components/beui/agents/message": [
+    "Message",
+    "MessageGroup",
+    "MessageAvatar",
+    "MessageContent",
+    "MessageHeader",
+    "MessageFooter",
+    "MessageMarker",
+    "MessageTyping"
+  ],
+  "@/components/beui/agents/prompt-input": [
+    "PromptInput"
+  ],
+  "@/components/beui/agents/todo-list": [
+    "TodoList"
+  ],
+  "@/components/beui/animated-badge": [
+    "AnimatedBadge"
+  ],
+  "@/components/beui/animated-number": [
+    "AnimatedNumber"
+  ],
+  "@/components/beui/animated-sidebar": [
+    "AnimatedSidebarProvider",
+    "AnimatedSidebar",
+    "AnimatedSidebarTrigger",
+    "AnimatedSidebarClose",
+    "AnimatedSidebarRail",
+    "AnimatedSidebarInset",
+    "AnimatedSidebarHeader",
+    "AnimatedSidebarContent",
+    "AnimatedSidebarFooter",
+    "AnimatedSidebarGroup",
+    "AnimatedSidebarGroupLabel",
+    "AnimatedSidebarGroupContent",
+    "AnimatedSidebarMenu",
+    "AnimatedSidebarMenuItem",
+    "AnimatedSidebarMenuSub",
+    "AnimatedSidebarMenuSubItem",
+    "AnimatedSidebarMenuSubButton",
+    "AnimatedSidebarMenuButton"
+  ],
+  "@/components/beui/animated-toast-stack": [
+    "AnimatedToastStack"
+  ],
+  "@/components/beui/attachment-upload": [
+    "AttachmentUpload"
+  ],
+  "@/components/beui/availability-scheduler/copy-menu": [
+    "CopyMenu"
+  ],
+  "@/components/beui/availability-scheduler/day-row": [
+    "DayRow"
+  ],
+  "@/components/beui/availability-scheduler/icon-button": [
+    "IconButton"
+  ],
+  "@/components/beui/availability-scheduler": [
+    "AvailabilityScheduler"
+  ],
+  "@/components/beui/availability-scheduler/time-select": [
+    "TimeSelect"
+  ],
+  "@/components/beui/bloom-menu": [
+    "BloomMenu"
+  ],
+  "@/components/beui/bottom-sheet": [
+    "BottomSheet"
+  ],
+  "@/components/beui/bounce-sidebar": [
+    "BounceSidebar"
+  ],
+  "@/components/beui/bouncy-accordion": [
+    "BouncyAccordion"
+  ],
+  "@/components/beui/button/base": [
+    "Button",
+    "ButtonLink"
+  ],
+  "@/components/beui/button/magnetic": [
+    "MagneticButton"
+  ],
+  "@/components/beui/button/stateful": [
+    "StatefulButton"
+  ],
+  "@/components/beui/center-morph-modal": [
+    "CenterMorphModal",
+    "CenterMorphModalTrigger",
+    "CenterMorphModalClose",
+    "CenterMorphModalContent"
+  ],
+  "@/components/beui/checkbox": [
+    "Checkbox"
+  ],
+  "@/components/beui/chromatic-text-reveal": [
+    "ChromaticTextReveal"
+  ],
+  "@/components/beui/combobox/content": [
+    "ComboboxContent"
+  ],
+  "@/components/beui/combobox/context": [
+    "ComboboxContext",
+    "ComboboxGroupContext",
+    "Combobox"
+  ],
+  "@/components/beui/combobox/list": [
+    "ComboboxList",
+    "ComboboxGroup",
+    "ComboboxLabel",
+    "ComboboxItem",
+    "ComboboxEmpty",
+    "ComboboxSeparator"
+  ],
+  "@/components/beui/combobox/trigger": [
+    "ComboboxTrigger",
+    "ComboboxValue",
+    "ComboboxInput"
+  ],
+  "@/components/beui/command-palette": [
+    "CommandPalette"
+  ],
+  "@/components/beui/context-menu": [
+    "ContextMenu",
+    "ContextMenuTrigger",
+    "ContextMenuContent",
+    "ContextMenuItem",
+    "ContextMenuCheckboxItem",
+    "ContextMenuRadioGroup",
+    "ContextMenuRadioItem",
+    "ContextMenuLabel",
+    "ContextMenuSeparator",
+    "ContextMenuShortcut"
+  ],
+  "@/components/beui/cylinder-carousel": [
+    "CylinderCarousel"
+  ],
+  "@/components/beui/dock": [
+    "Dock",
+    "DockItem",
+    "DockSeparator"
+  ],
+  "@/components/beui/drawer": [
+    "Drawer"
+  ],
+  "@/components/beui/dynamic-island": [
+    "DynamicIsland",
+    "DynamicIslandView"
+  ],
+  "@/components/beui/expandable-action-bar": [
+    "ExpandableActionBar"
+  ],
+  "@/components/beui/expandable-control": [
+    "ExpandableButton",
+    "ExpandableChip"
+  ],
+  "@/components/beui/expandable-tabs": [
+    "ExpandableTabs"
+  ],
+  "@/components/beui/expanding-arrow-button": [
+    "ExpandingArrowButton"
+  ],
+  "@/components/beui/feedback-widget": [
+    "FeedbackWidget"
+  ],
+  "@/components/beui/file-upload": [
+    "FileUpload"
+  ],
+  "@/components/beui/hold-action-button": [
+    "HoldActionButton"
+  ],
+  "@/components/beui/infinite-masonry": [
+    "InfiniteMasonry"
+  ],
+  "@/components/beui/input": [
+    "Input"
+  ],
+  "@/components/beui/knockout-bracket": [
+    "KnockoutBracket",
+    "TEAMS",
+    "ROUNDS",
+    "THIRD_PLACE"
+  ],
+  "@/components/beui/knockout-wheel": [
+    "KnockoutWheel",
+    "TEAMS",
+    "ROUNDS"
+  ],
+  "@/components/beui/loader": [
+    "Loader"
+  ],
+  "@/components/beui/magnetic": [
+    "Magnetic"
+  ],
+  "@/components/beui/marquee": [
+    "Marquee"
+  ],
+  "@/components/beui/morphing-modal": [
+    "MorphingModal"
+  ],
+  "@/components/beui/morphing-search": [
+    "MorphingSearch"
+  ],
+  "@/components/beui/morphing-tabs": [
+    "MorphingTabs"
+  ],
+  "@/components/beui/not-found/glitch": [
+    "NotFoundGlitch"
+  ],
+  "@/components/beui/not-found/magnetic": [
+    "NotFoundMagnetic"
+  ],
+  "@/components/beui/not-found/shared": [
+    "NOT_FOUND_DEFAULTS",
+    "NotFoundActions",
+    "NotFoundStage"
+  ],
+  "@/components/beui/not-found/spotlight": [
+    "NotFoundSpotlight"
+  ],
+  "@/components/beui/not-found/stacked": [
+    "NotFoundStacked"
+  ],
+  "@/components/beui/not-found/terminal": [
+    "NotFoundTerminal"
+  ],
+  "@/components/beui/notification-stack": [
+    "NotificationStack"
+  ],
+  "@/components/beui/number-ticker": [
+    "NumberTicker"
+  ],
+  "@/components/beui/otp-input": [
+    "OTPInput"
+  ],
+  "@/components/beui/overflow-actions": [
+    "OverflowActions"
+  ],
+  "@/components/beui/parallax": [
+    "Parallax"
+  ],
+  "@/components/beui/popover-morph": [
+    "MorphPopover",
+    "MorphPopoverTrigger",
+    "MorphPopoverContent"
+  ],
+  "@/components/beui/popover": [
+    "Popover",
+    "PopoverTrigger",
+    "PopoverContent"
+  ],
+  "@/components/beui/prediction-market": [
+    "PredictionMarket"
+  ],
+  "@/components/beui/preview-rail": [
+    "PreviewRail"
+  ],
+  "@/components/beui/project-folder": [
+    "ProjectFolder"
+  ],
+  "@/components/beui/pull-to-refresh": [
+    "PullToRefresh"
+  ],
+  "@/components/beui/radio": [
+    "RadioGroup",
+    "RadioGroupItem"
+  ],
+  "@/components/beui/range-slider-bubble": [
+    "BubbleSlider"
+  ],
+  "@/components/beui/range-slider-fluid": [
+    "FluidSlider"
+  ],
+  "@/components/beui/range-slider-ruler": [
+    "RulerSlider"
+  ],
+  "@/components/beui/range-slider-wave": [
+    "WaveSlider"
+  ],
+  "@/components/beui/range-slider": [
+    "RangeSlider"
+  ],
+  "@/components/beui/scroll-progress": [
+    "ScrollProgress"
+  ],
+  "@/components/beui/scroll-reveal": [
+    "ScrollReveal"
+  ],
+  "@/components/beui/scroll-to": [
+    "ScrollTo"
+  ],
+  "@/components/beui/select-morph": [
+    "MorphSelect",
+    "MorphSelectValue",
+    "MorphSelectTrigger",
+    "MorphSelectContent",
+    "MorphSelectItem"
+  ],
+  "@/components/beui/select": [
+    "Select",
+    "SelectTrigger",
+    "SelectValue",
+    "SelectContent",
+    "SelectItem"
+  ],
+  "@/components/beui/shader-background": [
+    "SHADER_BACKGROUND_VARIANTS",
+    "ShaderBackground"
+  ],
+  "@/components/beui/shared-layout-bg": [
+    "SharedLayoutBg"
+  ],
+  "@/components/beui/signup-form": [
+    "SignUpForm"
+  ],
+  "@/components/beui/slide-action-button": [
+    "SlideActionButton"
+  ],
+  "@/components/beui/smooth-scroll": [
+    "SmoothScroll"
+  ],
+  "@/components/beui/swap": [
+    "MultiChainSwap"
+  ],
+  "@/components/beui/swap/controls": [
+    "FlipButton",
+    "ActionButton",
+    "DestinationRow"
+  ],
+  "@/components/beui/swap/field": [
+    "Field"
+  ],
+  "@/components/beui/swap/quote-row": [
+    "QuoteRow"
+  ],
+  "@/components/beui/swap/token-badges": [
+    "ChainChip",
+    "ChainDot",
+    "TokenDot"
+  ],
+  "@/components/beui/swap/token-picker": [
+    "TokenPicker"
+  ],
+  "@/components/beui/swipeable-list": [
+    "SwipeableList"
+  ],
+  "@/components/beui/switch": [
+    "Switch"
+  ],
+  "@/components/beui/table/editable-cell": [
+    "EditableCell"
+  ],
+  "@/components/beui/table": [
+    "Table"
+  ],
+  "@/components/beui/table/row-handle": [
+    "RowHandle"
+  ],
+  "@/components/beui/table/skeleton-rows": [
+    "SkeletonRows"
+  ],
+  "@/components/beui/table/table-header": [
+    "TableHeader"
+  ],
+  "@/components/beui/table/table-menu": [
+    "TableMenu"
+  ],
+  "@/components/beui/tabs": [
+    "Tabs",
+    "TabsList",
+    "TabsTrigger",
+    "TabsContent"
+  ],
+  "@/components/beui/text-cascade": [
+    "TextCascade"
+  ],
+  "@/components/beui/text-reveal": [
+    "TextReveal"
+  ],
+  "@/components/beui/text-scramble": [
+    "TextScramble"
+  ],
+  "@/components/beui/text-shimmer": [
+    "TextShimmer"
+  ],
+  "@/components/beui/theme-toggle": [
+    "ThemeToggle"
+  ],
+  "@/components/beui/tilt-card": [
+    "TiltCard"
+  ],
+  "@/components/beui/tooltip": [
+    "Tooltip"
+  ],
+  "@/components/beui/wallet-card/account-avatar": [
+    "AccountAvatar"
+  ],
+  "@/components/beui/wallet-card/account-switcher": [
+    "AccountSwitcher"
+  ],
+  "@/components/beui/wallet-card/actions": [
+    "WalletActions"
+  ],
+  "@/components/beui/wallet-card/balance-delta": [
+    "BalanceDelta"
+  ],
+  "@/components/beui/wallet-card/copy-button": [
+    "CopyButton"
+  ],
+  "@/components/beui/wallet-card": [
+    "WalletCard"
+  ],
+  "@/components/beui/wallet-card/search-bar": [
+    "SearchBar"
+  ],
+  "@/components/beui/wheel-picker": [
+    "WheelPicker"
   ]
 }

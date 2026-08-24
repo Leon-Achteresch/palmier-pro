@@ -280,6 +280,25 @@ struct MotionSceneRenderingTests {
         _ = try await bake(scene)
     }
 
+    @Test func rendersAPrebuiltBeuiComponent() async throws {
+        let scene = try MotionScene(
+            width: 160, height: 120, fps: 30, durationInFrames: 3,
+            source: """
+            import { TiltCard } from "@/components/beui/tilt-card"
+            import { AbsoluteFill } from "remotion"
+
+            export default function Scene() {
+              return (
+                <AbsoluteFill>
+                  <TiltCard>beui</TiltCard>
+                </AbsoluteFill>
+              )
+            }
+            """
+        ).validated()
+        _ = try await bake(scene)
+    }
+
     /// The catalog is what the agent authors against, so a build that drops it must fail loudly.
     @Test func shipsTheRemocnComponentCatalog() async throws {
         let url = try #require(BundledResource.url("MotionRuntime/components.json"))
@@ -288,6 +307,8 @@ struct MotionSceneRenderingTests {
         )
         #expect(catalog.count > 100)
         #expect(catalog["@/components/remocn/typewriter"] == ["Typewriter"])
+        #expect(catalog["@/components/beui/tilt-card"] == ["TiltCard"])
+        #expect(catalog.keys.filter { $0.hasPrefix("@/components/beui/") }.count > 90)
     }
 
     @Test func rejectsAnUnknownImport() async throws {

@@ -72,10 +72,14 @@ final class ToolExecutor {
         }
         activateMCPSessionIfNeeded(source: source, toolName: tool.rawValue)
 
-        // project tools act on AppState before editor is available
+        // project-independent tools act before editor is available
         switch tool {
-        case .manageProject:
-            let result = await manageProject(args)
+        case .manageProject, .describeTools, .readSkill:
+            let result: ToolResult = switch tool {
+            case .manageProject: await manageProject(args)
+            case .describeTools: describeTools(args)
+            default: readSkill(args)
+            }
             captureToolAnalytics(
                 toolName: tool.rawValue,
                 source: source,
@@ -105,7 +109,7 @@ final class ToolExecutor {
         }
         let before = editor.timelines
         let idsBefore = currentIdUniverse(editor)
-        let result: ToolResult
+        var result: ToolResult
         Log.agent.notice(
             "tool start name=\(tool.rawValue)",
             telemetry: "Agent tool started",
@@ -118,6 +122,9 @@ final class ToolExecutor {
             result = .error(err.message)
         } catch {
             result = .error(error.localizedDescription)
+        }
+        if result.isError {
+            result = result.appendingText("\n\nFull docs: describe_tools with names=[\"\(tool.rawValue)\"].")
         }
         feedbackState.record(result, for: tool)
         let elapsed = started.duration(to: .now).seconds
@@ -292,9 +299,27 @@ final class ToolExecutor {
         case .reviewTimeline: return try await reviewTimeline(editor, args)
         case .manageReferences: return try await manageReferences(editor, args)
         case .readSkill:     return readSkill(args)
+        case .describeTools: return describeTools(args)
         case .manageProject:
             return await manageProject(args)
         }
+    }
+
+    func describeTools(_ args: [String: Any]) -> ToolResult {
+        let names = args.stringArray("names")
+        let catalog = ToolDefinitions.mcpServer
+        guard !names.isEmpty else {
+            let index = catalog.map { "- \($0.name.rawValue): \($0.brief)" }.joined(separator: "\n")
+            return .ok(index)
+        }
+        var sections: [String] = []
+        for raw in names {
+            guard let tool = catalog.first(where: { $0.name.rawValue == raw }) else {
+                return .error("Unknown tool: \(raw). Call describe_tools with no names for the full list.")
+            }
+            sections.append("# \(raw)\n\(tool.description)")
+        }
+        return .ok(sections.joined(separator: "\n\n"))
     }
 
     func readSkill(_ args: [String: Any]) -> ToolResult {

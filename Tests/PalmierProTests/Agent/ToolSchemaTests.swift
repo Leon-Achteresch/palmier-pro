@@ -9,6 +9,13 @@ import Testing
         schema["properties"] as? [String: [String: Any]] ?? [:]
     }
 
+    @Test func everyToolHasABoundedBrief() {
+        for tool in allTools {
+            #expect(!tool.brief.isEmpty, "\(tool.name.rawValue) needs a brief")
+            #expect(tool.brief.count <= 400, "\(tool.name.rawValue) brief is not brief (\(tool.brief.count) chars)")
+        }
+    }
+
     @Test func everyTopLevelPropertyHasDescription() {
         for tool in allTools {
             for (name, prop) in properties(of: tool.inputSchema) {

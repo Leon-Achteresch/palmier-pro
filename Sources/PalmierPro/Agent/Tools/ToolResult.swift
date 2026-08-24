@@ -17,6 +17,13 @@ struct ToolResult: Sendable {
     static func error(_ message: String) -> ToolResult {
         ToolResult(content: [.text(message)], isError: true)
     }
+
+    func appendingText(_ text: String) -> ToolResult {
+        guard case .text(let existing) = content.last else {
+            return ToolResult(content: content + [.text(text)], isError: isError)
+        }
+        return ToolResult(content: content.dropLast() + [.text(existing + text)], isError: isError)
+    }
 }
 
 extension ToolResult {

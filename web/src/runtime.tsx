@@ -55,6 +55,11 @@ const remocnModules = import.meta.glob("./components/remocn/*.{tsx,ts}", { eager
   Record<string, unknown>
 >
 
+const beuiModules = import.meta.glob("./components/beui/**/*.{tsx,ts}", { eager: true }) as Record<
+  string,
+  Record<string, unknown>
+>
+
 const PalmierAPI = { ...Palmier, AbsoluteFill, Img }
 
 const UI: Record<string, unknown> = {}
@@ -82,6 +87,16 @@ for (const [path, mod] of Object.entries(remocnModules)) {
   }
   for (const [key, value] of Object.entries(mod)) {
     if (!(key in REMOCN)) REMOCN[key] = value
+  }
+}
+
+for (const [path, mod] of Object.entries(beuiModules)) {
+  const name = path.replace("./components/beui/", "").replace(/\.(tsx|ts)$/, "")
+  const names = name.endsWith("/index") ? [name, name.replace(/\/index$/, "")] : [name]
+  for (const variant of names) {
+    for (const alias of [`@/components/beui/${variant}`, `./components/beui/${variant}`, `components/beui/${variant}`]) {
+      MODULES[alias] = mod
+    }
   }
 }
 

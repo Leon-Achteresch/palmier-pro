@@ -95,10 +95,12 @@ enum ToolName: String, CaseIterable, Sendable {
     case sendFeedback = "send_feedback"
     case readSkill = "read_skill"
     case readProjectContext = "read_project_context"
+    case describeTools = "describe_tools"
 }
 
 struct AgentTool: @unchecked Sendable {
     let name: ToolName
+    let brief: String
     let description: String
     let inputSchema: [String: Any]
 }
@@ -107,6 +109,7 @@ enum ToolDefinitions {
     static let all: [AgentTool] = [
         AgentTool(
             name: .getTimeline,
+            brief: "Read the active timeline: settings, tracks, clips with stable ids, gaps, transitions, markers, and canGenerate. Call at the start of every session and re-read after external changes — all clip/track ids used by edit tools come from here. Window with startFrame/endFrame on long timelines.",
             description: "Always call at the start of a session. Returns project settings (fps, resolution, totalFrames, durationSeconds), tracks with a stable trackId, their current index (what every trackIndex parameter takes), type, and clips, plus canGenerate (if false, generation/upscale tools will fail — tell the user to sign in to Palmier and subscribe, or to add their own OpenRouter/ElevenLabs API key in Settings, before attempting them). When the project has a linked source/brand folder, linkedContext reports its path — explore it with read_project_context. Clip ids are accepted by clip mutation tools; trackId is accepted by manage_tracks. A video track with cut transitions carries transitions: [{transitionId, style, direction, alignment, durationFrames, frames, cutFrame, fromClipId, toClipId}] — frames is the span the transition plays over, and the clips themselves keep their own start/end (add_transition, remove_clips). A timeline with markers also reports markers: [{markerId, frame, kind, color, name?, note?, done?}] — the notes pinned to a frame, edited with manage_markers. When auto-ducking is on, ducking: {enabled, depthDb, attackMs, releaseMs, holdMs} reports it; the duck is computed at mix time, so it never shows up as clip volume. An audio clip whose duckingRole was overridden reports that role.\n\nEvery clip occupies frames: [start, end) — timeline frames, end exclusive, duration = end − start. gaps on a track lists its empty [start, end) spans; no gaps key means contiguous. A video clip's linked audio partner is folded into it as audio: {id, track, …} carrying only what deviates (volumeDb, effects, differing trims); the partner is not repeated on its own track, which instead reports linkedClips (its folded count). Address the audio side by its nested id.\n\nFields equal to their defaults are omitted: mediaType 'video', sourceClipType = mediaType, speed 1, volumeDb 0, opacity 1, edgeRounding 0, edgeSoftness 0, trims/fades 0, identity transform/crop, default textStyle, track muted/hidden false. Text clips never report trims. Keyframe tracks that animate nothing are shown as what they are: identity tracks are dropped, constant ones appear as the static field (e.g. crop: {left: 0.31}). A graded clip carries `color` — its grade in apply_color's own vocabulary, pasteable to other clips via apply_color's color parameter. Other effects appear as effects: [{type, params}], the exact shape apply_effect accepts.\n\nCaption clips (sharing a captionGroupId) come back per track as captionGroups summaries: clipCount, frameRange, shared style, and a textPreview — individual caption clips and their ids are NOT listed. That summary is all you need to restyle (update_text with captionGroupId) or judge coverage; the spoken words live in get_transcript. Only when you must touch individual caption clips (retime one, delete one, fix one word's style), re-read with captionDetail:true — ideally windowed — to get [clipId, startFrame, endFrame, text] rows, capped at 200 per group. Caption clips whose properties deviate from the group always appear individually in clips.",
             inputSchema: objectSchema(
                 properties: [
@@ -118,6 +121,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .readProjectContext,
+            brief: "List or read files in the project's linked source/brand folder — product copy, design tokens, colors, logos. Use when get_timeline reports linkedContext, before generating or styling to match the brand. Paths are relative to the linked root.",
             description: "Read the project's linked source/brand folder (set in the Inspector under Context). Use this when get_timeline reports linkedContext — to pull product copy, design tokens, colors, typography, component structure, logos, and other corporate-design cues before generating or styling. action='list' walks a relative path (default '.') up to maxDepth; skips junk like node_modules/.git. action='read' returns text for source/token files or the image bytes for common image formats. Paths are relative to the linked root and cannot escape it.",
             inputSchema: objectSchema(
                 properties: [
@@ -130,6 +134,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .inspectTimeline,
+            brief: "Render the composited preview at one frame or sampled frames — transforms, effects, text, and captions applied — with visible clip ids per frame. Use to verify edits landed; inspect_media shows the raw source asset instead.",
             description: "See the composited timeline — what the user actually sees in the preview at a given frame: all video tracks stacked with their transforms, opacity, crop, edge softness, edge rounding, and keyframes applied, plus text and caption overlays baked in. Use this to verify your edits landed (a PIP's position, a title's placement, layer order) — inspect_media shows the raw source asset, not the cut.\n\nFrames are project frames (from get_timeline). Pass a single startFrame for one composited frame; add endFrame to sample maxFrames evenly across [startFrame, endFrame) for a transition or sequence. Frames past content render black. Each image carries its frame number burned into the top-left (f157), and the metadata lists, per rendered frame, the clip ids visible on screen top-down (caption clips as their captionGroupId) — so what you see maps straight back to the clips to edit.",
             inputSchema: objectSchema(
                 properties: [
@@ -141,6 +146,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .createTimeline,
+            brief: "Create a new timeline (empty, or a full copy of another via 'from') and switch to it — the versioning primitive for alternate cuts. Every id in a copy is new, so re-read get_timeline before editing.",
             description: "Creates a timeline and switches to it — every read and edit tool now targets it. Without 'from', the new timeline is empty and inherits fps/resolution from the previously active one. With 'from', it's a full copy of that timeline — the versioning primitive: copy, then edit the copy (\"a tighter cut\", \"a 9:16 version\") while the original stays intact; every clip and track id in the copy is NEW, so re-read get_timeline before editing. Undoable.\n\nUse timelines to organize a project: alternate versions, sections assembled separately, or reusable groups. A timeline can be placed inside another as a single clip (add_clips with the timelineId as mediaRef); it then appears as a clip with mediaType 'sequence'.",
             inputSchema: objectSchema(
                 properties: [
@@ -151,6 +157,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .setActiveTimeline,
+            brief: "Switch which timeline all read/edit tools target — also how you enter a nested timeline (a sequence clip's mediaRef). Always re-read get_timeline after: previous ids are no longer valid.",
             description: "Switches the active timeline — the one every read and edit tool targets and the one the user sees. get_media lists the project's timelines (with timelineId). Always re-read get_timeline after switching; clip and track ids from the previous timeline are no longer valid targets.\n\nTo edit the contents of a nested timeline (a clip with mediaType 'sequence'), switch to its mediaRef.",
             inputSchema: objectSchema(
                 properties: [
@@ -161,6 +168,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .setProjectSettings,
+            brief: "Change project fps, resolution, or aspect ratio; existing clips re-fit and frame positions rescale automatically. Use aspectRatio or quality presets, or explicit width+height — not both.",
             description: "Change the project's frame rate, resolution, or aspect ratio. Pass fps, explicit width+height, aspectRatio, or quality. aspectRatio accepts presets or a custom width:height value and preserves the current short-edge resolution unless quality is also supplied. Explicit width/height can't be combined with aspectRatio or quality. The timeline's existing clips are re-fitted automatically: auto-fit transforms recalculate for the new canvas size, and all frame positions/durations rescale when fps changes. Undoable.",
             inputSchema: objectSchema(
                 properties: [
@@ -174,6 +182,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .exportProject,
+            brief: "Queue an export: video (H.264/H.265/ProRes), xml for Premiere, fcpxml for Resolve/FCP, or a .palmier package. Runs in the background and returns a jobId — track progress or cancel with manage_exports.",
             description: "Queues an export from the current project using the same modes as the Export dialog. mode defaults to video. video renders H.264, H.265, or ProRes; xml writes XMEML timeline XML; fcpxml writes FCPXML; palmier writes a self-contained .palmier project package. For timeline interchange, pick the format by the target editor: Premiere Pro -> xml; DaVinci Resolve or Final Cut Pro -> fcpxml (fcpxml also carries text, transforms, crop, opacity, and keyframes that xml cannot). Video exports render edge softness and edge rounding, Palmier project exports preserve them, and xml/fcpxml interchange omits them. Omit outputPath to write a unique file to ~/Downloads. Existing direct outputPath files are overwritten by default to match the UI save flow; pass overwrite=false to refuse. Every mode returns status=started or status=queued with a jobId and destination path. Use manage_exports to check progress, warnings/results, or cancel by jobId; agent exports post a system notification on completion or failure.",
             inputSchema: objectSchema(
                 properties: [
@@ -189,6 +198,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .manageExports,
+            brief: "List export jobs (progress, warnings, results) or cancel one by exact jobId from export_project. Cancel only on user request or to pull back a misconfigured export — never infer a job is stuck from elapsed time.",
             description: "Lists or cancels exports for the current project. action=list returns newest first with jobId, filename, path, status, progress percent, and any warnings/result. action=cancel requires the exact jobId returned by export_project or list; a waiting job is removed from the queue and an active job begins canceling. Cancel only when the user asks, or to undo an export just queued with incorrect settings. Never infer that an export is stuck from elapsed time alone.",
             inputSchema: objectSchema(
                 properties: [
@@ -200,6 +210,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .getMedia,
+            brief: "The library inventory: assets, folders, and timelines. Call before referencing anything — every mediaRef in other tools is an asset id from here. Filter by ids to cheaply poll a generation placeholder; generationStatus absent means the asset is ready.",
             description: "The library inventory: media assets, folders, and timelines. Call before referencing any asset — every mediaRef in other tools comes from the asset ids returned here. Assets report name, type, durationSeconds, width/height/fps, hasAudio, folder path, and (for AI-generated assets) the generation prompt as a content hint. generationStatus appears only while an async generation/import is unresolved (preparing | generating | downloading | failed) — its absence means the asset is ready.\n\nFilters: ids (poll specific placeholders cheaply), folder (a path; includes subfolders), pending:true (only unresolved generations/imports). Filtered reads return just the matching assets; unfiltered reads also include folders (as paths) and timelines.",
             inputSchema: objectSchema(
                 properties: [
@@ -215,6 +226,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .inspectMedia,
+            brief: "Look at one raw source asset from get_media: image plus EXIF, sampled video frames, audio/video transcription (word timestamps on request), Lottie frames. Use before placing or editing media; inspect_timeline shows the composited cut instead. Use overview=true then windows for long media.",
             description: "Look at a media asset before referencing or editing it. Images: the image plus dimensions and EXIF. Video: sample frames plus a transcription of the audio track. Audio: transcription. Lottie: frames sampled evenly across the animation (over gray), plus framerate and duration — use this to verify a Lottie you wrote looks and moves right. Transcription is sentence-level segments — [text, start, end] tuples, capped at 400 — in source seconds, or project frames when clipId is set. When capped, pass the returned nextStartSeconds as startSeconds for the next page.\n\nLong media: pass overview=true for a one-image storyboard, read the segments, then re-call with startSeconds/endSeconds to zoom — windowed calls only transcribe that span, so they are fast.",
             inputSchema: objectSchema(
                 properties: [
@@ -232,6 +244,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .searchMedia,
+            brief: "Search already-imported library media by content: visual (caption-style scene descriptions) and spoken (quoted or paraphrased words). Hits are source-second ranges that pass straight into add_clips as source. An index object explains incomplete visual results — report it, don't poll.",
             description: "Search the media library by content: what's on screen (visual) and what's said (spoken). Visual matching is semantic and on-device — phrase the query like an image caption ('a wide shot of a harbor at sunset'), not keywords; covers videos and stills. Spoken matching layers exact keywords over on-device semantic matching of transcript segments — quote the words said, or paraphrase them; transcripts are created automatically while indexing (and by inspect_media and add_captions), so coverage grows as indexing completes. The two groups rank independently and are never blended. Scores are uncalibrated — use them for ordering only.\n\nHits are source-second ranges (image hits have no time range). To place exactly that moment, pass [startSeconds, endSeconds] straight to add_clips as source — no unit conversion.\n\nAn `index` object appears only while it can explain missing results (status: indexing | modelNotInstalled | downloadingModel | preparing | disabled | failed, with indexedAssets vs indexableAssets). When present, moments may be incomplete — report that instead of concluding the footage doesn't exist, and don't poll in a loop. No index key means visual search was complete. Spoken results work regardless.",
             inputSchema: objectSchema(
                 properties: [
@@ -245,6 +258,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .importMedia,
+            brief: "Import external media into the library from an HTTPS url, local path (referenced in place), inline base64 bytes, or a generated solid-color matte. URL imports run in the background — poll get_media until generationStatus clears. Free; only mov/mp4/m4v, common audio, and png/jpg/tiff/heic are accepted.",
             description: "Imports external media into the project's library — the bridge for assets coming from other MCP servers (stock libraries, music services, web search) or local files the user already has. The 'source' object must set exactly one of: url (HTTPS only — downloaded in the background, the dominant case; max 1 GB), path (absolute local file path — referenced in place and not copied into the project; may also be a directory, which is imported recursively, mirroring its subfolder structure as media folders), bytes (base64-encoded inline data — max ~15 MB of base64 ≈ 11 MB binary; use url/path for anything larger), or matte (a generated solid-color PNG). For url, type is inferred from the URL path's file extension unless source.mimeType is set as an override (needed for signed URLs whose path has no usable extension). For bytes, source.mimeType is required.\n\nSupported types and extensions: video (mov, mp4, m4v), audio (mp3, wav, aac, m4a, aiff, aifc, caf, flac), image (png, jpg, jpeg, tiff, heic). Anything else is rejected — the caller must transcode externally.\n\nURL imports run in the background and return {mediaRef, status:'downloading'} — poll get_media with ids:[mediaRef] until generationStatus clears, then the asset is usable in add_clips. Path, directory, bytes, and matte imports finish inline with status:'ready'. Costs nothing.",
             inputSchema: objectSchema(
                 properties: [
@@ -279,6 +293,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .searchStockMedia,
+            brief: "Search free royalty-free stock photos/videos on Pexels and Pixabay — for footage the user doesn't have; search_media only covers imported media. Results are not imported: pass a hit's downloadUrl to import_media. Needs a Pexels or Pixabay API key in Settings.",
             description: "Search free, royalty-free stock photos and videos on Pexels and Pixabay (both licensed for commercial use without attribution). Use this when the user asks for stock footage, B-roll, background images, or filler media they don't have in their library — search_media only covers media already imported. Requires a free Pexels or Pixabay API key in Settings → Models; the error names the missing key if none is configured.\n\nReturns items with a downloadUrl — nothing is imported yet. To bring a result into the project, pass its downloadUrl to import_media as source.url (add source.mimeType 'image/jpeg' or 'video/mp4' if the URL has no usable extension), then poll get_media until the download finishes. Results are page-based; increase page for more. Videos are mp4, photos jpg, sized for editing (largest available rendition).",
             inputSchema: objectSchema(
                 properties: [
@@ -293,6 +308,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .captureFrame,
+            brief: "Capture one frame as a full-res PNG asset: timelineFrame for the composited timeline image, or mediaRef+sourceSeconds for a raw source frame — exactly one mode. The returned mediaRef feeds add_clips, generate_video first/last frames, or generate_image references.",
             description: "Capture one video frame as a full-resolution PNG media asset. Use timelineFrame to capture the active timeline's final composited image, including transforms, crop, edge softness, edge rounding, color, effects, text, and captions. Use mediaRef with sourceSeconds to capture an unedited frame directly from a source video instead. Pass the asset's durationSeconds as sourceSeconds to capture its final decodable frame. Exactly one mode is allowed. The returned mediaRef is ready for add_clips, generate_video startFrameMediaRef/endFrameMediaRef, generate_image references, or inspect_media. Every call creates one new undoable media asset.",
             inputSchema: objectSchema(
                 properties: [
@@ -305,6 +321,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .organizeMedia,
+            brief: "Reorganize the library in one undoable action: create folders, move, rename, and delete assets, timelines, and folders (folders by path, not id). Deleting an asset also removes every clip referencing it — check the receipt's clipsRemoved.",
             description: "Reorganizes the library in one undoable action: create folders, move items into folders, rename items, delete items. An item is a media asset id (from get_media), a timelineId, or a folder path like 'B-roll/Sunset' — the tool tells them apart. Folders are always addressed by path, never by id; destination paths are created if missing. Arrays apply in order (createFolders, moves, renames, deletes), but item references resolve against the library as it was before the call — only 'into' destinations may name folders the same call creates.\n\nDeleting an asset also removes every clip referencing it (reported as clipsRemoved). Deleting a folder deletes its subfolders and assets; timelines inside move to the root instead. Deleting a timeline leaves nest clips referencing it rendering black (a warning reports how many); the last remaining timeline can't be deleted. Returns only what actually happened — createdFolders, moved, renamed, deleted, clipsRemoved, warnings.",
             inputSchema: objectSchema(
                 properties: [
@@ -351,6 +368,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .manageProxies,
+            brief: "Manage half-resolution proxy media for smooth playback of heavy footage — status, generate, cancel, remove, enable/disable. Use when playback is choppy or sources are 4K. Export and measurements always use the full-res original; poll action=status instead of guessing from elapsed time.",
             description: "Manages half-resolution proxy media for smooth editing of heavy footage. A proxy is an H.264 twin (half the source's display size, capped at 960px wide) stored inside the project package; the preview player uses it while proxies are enabled. Export, capture_frame, and inspect_color always read the full-resolution original, so a proxy never affects delivered quality or measurements.\n\nUse it when the user reports choppy playback or is working with 4K/large source files. action=status lists every video asset with its proxy state (none | queued | generating | ready | failed) — call it to check progress instead of guessing from elapsed time. action=generate queues transcodes in the background (two at a time) for assetIds, or for every eligible video asset when assetIds is omitted; the call returns immediately with a receipt, so poll action=status for completion. action=cancel drops queued and in-flight jobs. action=remove deletes proxies and frees the space. action=enable / action=disable switch playback between proxy and original media in one undoable step; enabling also auto-generates proxies for newly imported video. Audio always plays from the original file.",
             inputSchema: objectSchema(
                 properties: [
@@ -374,6 +392,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .addClips,
+            brief: "Place media (or a timelineId, for nesting) on the timeline. Overwrites whatever it lands on, like dragging onto a track — use insert_clips to splice without losing clips, duplicate_clips to repeat an already-treated clip. Omit trackIndex on all entries to auto-create tracks; video with audio spawns a linked audio clip.",
             description: "Places one or more media assets on the timeline as a single undoable action. Each entry's asset type must be compatible with its target track (video/image are interchangeable across video/image tracks; audio requires an audio track). When a video asset with audio is placed on a video track, a linked audio clip is automatically created on an audio track (an existing one if available, otherwise a new one). The whole batch is one undo step.\n\ntrackIndex is optional. Omit it on all entries and the tool auto-creates the needed tracks — one shared video track for visual entries (above existing visuals) and one shared audio track for audio entries (appended below existing audio, so linked dialogue on A1 stays put and music/VO land on A2+). To target existing tracks, set trackIndex on every entry. Mixing (some entries specify, others omit) is rejected — split into two calls.\n\nTracks work as layers: clips on the SAME track are sequential — if a new clip's range overlaps an existing clip on that track, the existing clip is trimmed/split/removed to make room, matching the UI's drag-onto-track overwrite behavior.\n\nNESTING: mediaRef may also be a timelineId — the timeline is placed as a single live nested clip (mediaType 'sequence'), with a linked audio clip when the child has audio. Duration defaults to the child's full length; source and endFrame work as for video. Cycles (a timeline containing itself) and empty timelines are rejected.",
             inputSchema: objectSchema(
                 properties: [
@@ -398,6 +417,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .insertClips,
+            brief: "Splice media in at one point and ripple everything after it right — nothing is overwritten, unlike add_clips. Use to add footage mid-sequence; use add_clips for empty space or deliberate overwrite. trackIndex is required, and linked audio and sync-locked tracks shift together.",
             description: "Inserts one or more media assets at a single point and RIPPLES: every clip at or after atFrame is pushed right to open a gap, so nothing is overwritten. This is the non-destructive counterpart to add_clips (which clears the landing region, trimming/splitting/removing whatever's there). Use insert_clips to splice footage in without losing existing clips; use add_clips to fill empty space or deliberately overwrite.\n\nEntries are laid end-to-end starting at atFrame on the target track (entry[0] at atFrame, entry[1] immediately after, ...). The push equals the sum of the entries' durations and is applied to the target track, every sync-locked track, AND the audio track any auto-created linked audio lands on — so a clip and its linked audio stay aligned. As in add_clips, a video asset with audio spawns a linked audio clip. One undoable action; one bad entry rejects the whole call with no partial state.\n\ntrackIndex is required — ripple needs an existing track to push. For placement into empty space, use add_clips.\n\nAs in add_clips, mediaRef may be a timelineId to splice in a nested timeline.",
             inputSchema: objectSchema(
                 properties: [
@@ -422,6 +442,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .moveClips,
+            brief: "Move clips to a new track and/or start frame in one undoable action. Destination overlaps are overwritten as in add_clips; linked partners follow with their offset preserved. Multicam clips must move as a whole group.",
             description: "Moves one or more clips to a new track and/or frame position. Single undoable action. Each move specifies the clip ID and at least one of toTrack (must be compatible with the clip's media type) and toFrame. Overlap on the destination is resolved as in add_clips (existing clips on the destination track are trimmed/split/removed). Linked partners follow the named clip: startFrame propagates as a delta to preserve l-cut / j-cut offsets; tracks stay with the named clip. Multicam clips must move as a whole group; partial group moves and camera lane changes are refused.",
             inputSchema: objectSchema(
                 properties: [
@@ -444,6 +465,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .removeClips,
+            brief: "Delete clips and/or cut transitions by id. A linked clip takes its whole group (video + paired audio) with it; passing transitionIds turns those cuts back into hard cuts. For removing a span and closing the gap, use ripple_delete_ranges instead.",
             description: "Removes clips and/or cut transitions by ID as a single undoable action. Any clip that belongs to a link group (e.g. a video with its paired audio) takes its whole group with it, matching the UI's linked-delete behavior. Pass transitionIds (from get_timeline's per-track transitions) to take a transition off a cut and leave the clips as a hard cut — removing either neighbouring clip drops its transitions anyway. At least one of clipIds or transitionIds must be non-empty.",
             inputSchema: objectSchema(
                 properties: [
@@ -462,6 +484,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .addTransition,
+            brief: "Put a transition (dissolve, dip, wipe, push, whip pan, film burn, …) on the cut between two adjacent clips on one video track. Never moves clips — it borrows source handles, and fails naming the missing frames when handles are too short rather than silently shortening. Remove via remove_clips transitionIds.",
             description: "Puts a real transition on the cut between two clips that already sit back-to-back on the same video track — the outgoing clip's end frame must equal the incoming clip's start frame. One call, one undoable action, one transition.\n\nA transition never moves clips or changes their duration. It plays by borrowing handles: the outgoing clip keeps rolling past the cut and the incoming clip starts early, so both need unused source material (trimEndFrame on the outgoing clip, trimStartFrame on the incoming one, from get_timeline). Alignment decides how much of each: 'centered' (default) splits the duration across the cut and needs about half from each side, 'startAtCut' runs entirely into the incoming clip and needs only outgoing tail handle, 'endAtCut' runs entirely before the cut and needs only incoming head handle. Still images and Lottie have unlimited handles.\n\nWhen handles are too short the call fails and reports exactly how many source frames are missing — shorten the transition, change alignment, or trim the clips back first. It is never silently shortened. Also refused when: the cut already carries a transition, the span overlaps another transition on that track, either clip has a fade on that edge, or either clip uses a blend mode. Nested (sequence) and text clips are not supported.\n\nRemove one with remove_clips using transitionIds. get_timeline lists each track's transitions with their id, span, and cut frame.",
             inputSchema: objectSchema(
                 properties: [
@@ -492,6 +515,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .manageTracks,
+            brief: "Reorder, configure (mute, hide, sync-lock), or remove tracks in one undoable action; index 0 renders on top. Prefer stable trackId selectors from get_timeline. Removing a track deletes all its clips; multicam tracks can't be removed.",
             description: "Reorders, configures, or removes tracks in one undoable action. Prefer stable trackId selectors; numeric indexes use the order at call time. Index 0 renders on top, and reorder destinations must stay within the track's video/audio zone. Arrays run reorder → set → remove. Returns receipts and the resulting track order. Tracks holding multicam clips can't be removed or sync-unlocked.",
             inputSchema: objectSchema(
                 properties: [
@@ -532,6 +556,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .manageMarkers,
+            brief: "List, add, update, and remove timeline markers — review notes, todos, and chapter markers that feed the export chapter sidecar (name them and start at frame 0). Markers never change the cut; batch every change into one call.",
             description: "Reads and edits the active timeline's markers — the notes a filmmaker pins to a frame: standard markers for review notes, chapter markers for the export chapter list, todo markers for open work (done tracks whether it's handled). Markers annotate the timeline; they never change the cut, so no clip moves.\n\nCall with no arguments to list every marker with its stable markerId. add/update/remove run in that order as ONE undoable action, and one call is the whole change: pass every marker at once rather than one call per marker. frame is a project frame within [0, totalFrames]; an out-of-range frame, an unknown markerId, or an unknown kind/color rejects the whole call and changes nothing. name is what a chapter list or review note shows; note carries the longer text.\n\nChapter markers drive a YouTube-style '<timestamp> <name>' sidecar written next to a video export, so building a chapter list means adding chapter markers before export_project — name them, and start at frame 0 for a valid list. Returns the resulting marker set plus per-request receipts; an update that matches the marker's current state is reported as unchanged instead of as an edit.",
             inputSchema: objectSchema(
                 properties: [
@@ -576,6 +601,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .splitClips,
+            brief: "Insert cut points into clips — by {clipId, atFrame} pairs or by trackIndex + frames. Only adds boundaries: nothing trims, shifts, or leaves a gap (unlike ripple_delete_ranges). Linked A/V partners split together at the same frame.",
             description: "Splits clips into two at one or more cut points, all in a single undoable action. A split only inserts a boundary — it never trims media or moves clips, so unlike ripple_delete_ranges nothing shifts and there's no gap to close.\n\nTwo modes — pass exactly one:\n• splits: an array of {clipId, atFrame} (project frames). Use when you know the clip IDs.\n• trackIndex + frames: cut one track at the given project frames; each frame is matched to whichever clip on that track contains it. Pairs naturally with get_transcript / get_timeline project frames.\n\nEvery frame must fall strictly between a clip's start and end. Multiple cuts on the SAME clip are allowed — pass all the frames at once and each is resolved against the current sub-clips. Duplicate cut points are ignored. Linked audio/video partners are split at the same frame so A/V stays in sync, and the right halves are regrouped into their own link pair. One bad cut point rejects the whole call with no partial state.",
             inputSchema: objectSchema(
                 properties: [
@@ -602,6 +628,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .rippleDeleteRanges,
+            brief: "Cut frame ranges out and close the gaps in one call — the fast path for non-word-aligned cuts; prefer remove_words for transcript words and remove_silence for dead air. trackIndex mode takes project-frame ranges spanning multiple clips; clipId mode cuts within one clip. Linked A/V and sync-locked tracks stay aligned.",
             description: "Cuts one or more ranges out and closes the gaps in one undoable action — the fast path for filler-word/dead-air removal. Replaces hand-cranked split_clips → remove_clips → move_clips loops: pass every range at once.\n\nTwo modes — pass exactly one of clipId or trackIndex:\n• trackIndex (preferred for transcript-driven cuts): ranges are PROJECT frames and may span any number of clips on that track. get_transcript returns a clips array with nested words in project frames — collect every cut across the whole timeline and pass them in ONE call, no per-clip splitting and no re-reading the timeline between cuts. units must be 'frames'.\n• clipId: ranges are cut within that single clip only, clamped to its visible span. Allows units 'seconds' (source-media seconds, e.g. inspect_media WITHOUT a clipId or search_media hits); 'frames' = project frames. Use when you already have one clip's per-word timestamps.\n\nOverlapping ranges merge. Linked audio/video partners of every touched clip are cut on the same span so A/V stays in sync. Remaining clips shift left to close every gap; sync-locked tracks shift along to preserve alignment (their content isn't cut). Refuses without changing anything if a sync-locked track can't absorb the shift (e.g. it would move past frame 0). The refusal names the blocking track (e.g. \"V2\") — map it to its index via get_timeline and pass that index in ignoreSyncLockedTracks to cut anyway, leaving that track's clips in place. Returns the anchor track's post-cut layout (clip ids/frames) so you don't need to re-read.",
             inputSchema: objectSchema(
                 properties: [
@@ -624,6 +651,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .setClipProperties,
+            brief: "Set static clip values on one or more clips: trims, duration, speed, volume, opacity, fades, edges, transform, blend mode, audioMix, duckingRole. Not for multi-clip layouts (apply_layout), animation (set_keyframes), edge trims/slips (trim_clips), or text (update_text). Setting a static value clears that property's keyframes.",
             description: "Apply the same generic clip property values to one or more clips in a single undoable action. Pass any combination of durationFrames, trimStartFrame, trimEndFrame, speed, volumeDb, opacity, fades, edgeRounding, edgeSoftness, transform, blendMode (video/image clips only), or audioMix (audio clips only). For text content, typography, captions, and text animation, use update_text.\n\nNOT for preview layout — split screen, picture-in-picture, grid, sidebar, and any multi-clip canvas arrangement belong to apply_layout, which sets transform and crop together. Do not use transform here (or set_keyframes position/scale/crop) to build those layouts.\n\nAll values apply to every clip in clipIds; for per-clip differences, make separate calls. trimStartFrame/trimEndFrame are offsets from the source media, not the timeline. speed 1.0 is normal, <1.0 slows (clip gets longer on the timeline), >1.0 speeds up; it is refused (and reported as skipped) while the clip carries a set_keyframes 'speed' curve. volumeDb is −60 through +15 dB; 0 dB keeps source level and −60 dB is mute. opacity is 0.0–1.0. fadeInFrames/fadeOutFrames are clip-relative lengths; 0 clears that fade, and their sum must fit within the resulting clip duration. Fades multiply existing opacity or volume keyframes instead of replacing them: visual/text clips fade opacity, while audio clips fade gain. Fades are per-clip and don't propagate to linked media — include both the visual clip id and its nested audio.id from get_timeline to fade picture and sound together. edgeRounding and edgeSoftness are 0.0–1.0, where 1 reaches half the shorter visible edge. transform is for rare single-clip tweaks only — 0–1 normalized canvas coords, partial merge; rotation is clockwise degrees; flipHorizontal/flipVertical mirror across the axis.\n\nFor moves and start-frame changes, use move_clips. For animated values (keyframes), use set_keyframes — setting volumeDb, opacity, or transform.rotation here clears any existing keyframe track on that property.\n\nTiming changes (durationFrames, trimStartFrame, trimEndFrame, speed) on a linked clip carry over to its linked partner so audio/video stay in sync — same as the timeline UI. Per-clip fields (volumeDb, opacity, fades, edgeRounding, edgeSoftness, transform, blendMode) don't propagate. trim and speed are skipped for text partners.\n\naudioMix is audio-clip-only per-clip processing — pan, 3-band EQ, and a compressor — applied BEFORE the clip's volume and fades, in preview and export alike. It merges into whatever the clip already carries, so you can tweak one band without restating the rest; audioMix.reset:true clears it. Address a video clip's sound through its nested audio.id from get_timeline. Use measure_loudness to check the result against a delivery target.\n\nduckingRole is audio-clip-only and steers auto-ducking: 'dialog' ducks the beds, 'bed' ducks under speech, 'exempt' opts out, 'auto' (default) decides from on-device speech detection. Use it to correct a misread clip; mix_audio turns ducking on and levels the mix.\n\nTiming fields (trims, durationFrames, speed) are refused on multicam clips — they would slip the clip out of sync; property fields stay editable, and angle changes go through change_cam.",
             inputSchema: objectSchema(
                 properties: [
@@ -713,6 +741,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .setKeyframes,
+            brief: "Animate clips with keyframes — position, scale, rotation, opacity, crop, volume, and speed ramps — with the full easing vocabulary (named, bezier, spring, split ease), multi-property tracks, stagger, and repeat. Frames are clip-relative. Use set_clip_properties for static values, apply_layout for multi-clip framing.",
             description: "Set animated keyframes on clips — the tool for animation: moves, pushes-in, spins, fades, reveals, ducking. By default replaces the existing keyframe track for each property you pass (empty array clears it); properties you don't pass are untouched. mode 'merge' instead upserts the given rows into the existing track — use it to adjust or add single keyframes without resending the whole animation.\n\nAnimate several properties at once with `tracks` ({property: rows}) — one atomic, single-undo action, so a push-in that ramps scale, position, and opacity together is ONE call, not three. `property`+`keyframes` still sets a single track. Target one clip with `clipId` or give the same animation to several with `clipIds`; add `stagger` (frames) to offset each subsequent clip's keyframes for cascading, wave-like motion across layers.\n\nProperties and their value layouts:\n  • volumeDb `[frame, decibels]` — −60 through +15 dB; 0 dB keeps source level and −60 dB is mute\n  • opacity `[frame, value]` — value 0.0–1.0\n  • rotation `[frame, degrees]` — clockwise degrees\n  • position `[frame, topLeftX, topLeftY]` — TOP-LEFT corner in 0–1 normalized canvas coords. NOT the center. (Default static transform centers a full-canvas clip, so top-left of the static is (0, 0); a centered half-size clip has top-left (0.25, 0.25).)\n  • scale `[frame, width, height]` — clip's normalized width and height in 0–1 canvas coords (1.0 = fills the canvas axis). NOT a scale factor.\n  • crop `[frame, top, right, bottom, left]` — side insets in 0–1 of the source media.\n  • speed `[frame, multiplier]` — SPEED RAMPING / time remapping. 1.0 is source rate, 0.3 is 30% slow motion, 4.0 is 4× fast; range 0.1–10. Video, audio, and motion clips only.\nMotion keyframes (position/scale/rotation) override the static `transform` value when active.\n\nFrames are CLIP-RELATIVE offsets (0 = first frame of the clip), so keyframes follow the clip when it moves. Rows are sorted by frame internally and the LAST row for any duplicate frame wins. Values must be finite numbers. Each row is `[frame, ...values, ease?]` where ease describes the curve OUT of that keyframe (the segment it starts). It accepts a named easing, a cubic-bezier array, or an easing object — the same vocabulary as motion.js:\n  • named — smooth (default; symmetric in-out, natural drifts and Ken Burns), easeOut (decelerating arrival; THE default for elements entering or moving to a target), easeIn (accelerating exit), easeInOut, linear (mechanical moves, volume ramps, continuous spins), hold (freeze until the next keyframe), sineIn/sineOut/sineInOut (gentlest curves), circIn/circOut/circInOut, expoIn/expoOut (sharpest; the modern motion-design standard for punchy reveals)/expoInOut, backIn/backOut (overshoot and settle; snappy pops)/backInOut, elasticIn/elasticOut (springy oscillation)/elasticInOut, bounceIn/bounceOut/bounceInOut, anticipate (pulls back, then shoots forward), spring (bounce 0.25), steps (4 steps)\n  • [x1, y1, x2, y2] — custom cubic bezier with CSS semantics (x1/x2 within 0–1, y unbounded for overshoot/undershoot), e.g. [0.32, 0, 0.67, 0]\n  • {type: 'spring', bounce: 0–1} — physical spring resolved over the segment's duration; bounce 0 glides in critically damped, 1 is maximally bouncy. Motion.js physics form {type: 'spring', stiffness, damping, mass} is accepted and mapped onto the segment duration.\n  • {type: 'steps', count: 1–100} — stepped/typewriter motion\n  • {type: 'cubicBezier', points: [x1, y1, x2, y2]} — object form of the bezier array\n  • {type: 'back', overshoot: 0–10, direction: 'in'|'out'|'inOut'} — back easing with adjustable overshoot (default direction 'out', default overshoot 1.70158 ≈ 10% past the target; 3 ≈ 20%)\n  • {type: 'elastic', amplitude: 1–5, period: 0.05–2, direction: 'in'|'out'|'inOut'} — elastic with adjustable strength (amplitude) and oscillation wavelength (period, default 0.3; smaller = more wobbles)\n  • {out: …, in: …} — SPLIT EASE, the After-Effects model: the segment departs on the 'out' curve and blends into the 'in' curve at the next keyframe. Each side takes any form above (except 'hold' for in). Example: {out: 'easeIn', in: {type: 'back', overshoot: 2.5}} accelerates away and overshoots into the landing. Either side may be omitted (defaults to smooth).\n\nrepeat unrolls the given rows into baked cycles before writing: {count: 2–50, type: 'loop' | 'reverse' | 'mirror', gapFrames?}. 'loop' restarts each cycle from the first value (with a 1-frame jump when gapFrames is 0); 'reverse' and 'mirror' ping-pong back and forth with time-mirrored easing (identical once baked). gapFrames adds rest between cycles. The result is ordinary keyframes, individually editable afterwards. Requires mode 'replace' and applies to every passed track.\n\nSPEED RAMPING: a `speed` track retimes the clip WITHOUT changing how long it sits on the timeline — the curve redistributes WHICH source frames play, so nothing after it ripples. A 100% → 30% → 100% ramp is three rows on one clip. The curve overrides the clip's constant speed (set_clip_properties refuses `speed` while a curve exists; clear the curve with an empty array to get it back). Because the mapping is the integral of the multiplier, a slow-motion section needs LESS source material and a fast section needs MORE: the call is refused up front when the curve would run past the media, and the error names exactly how many source frames are missing. Speed-ramped clips can't carry transitions on their edges (handles stop being linear) and multicam clips are refused outright. Playback and export split the curve into piecewise-constant segments; audio follows the same segments with spectral pitch correction rather than being muted.",
             inputSchema: objectSchema(
                 properties: [
@@ -761,6 +790,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .trimClips,
+            brief: "Trim one clip by edge: normal (leaves a gap), ripple (later clips close up), or slip (slide the source range in a fixed slot) — the edge-relative edits set_clip_properties' absolute trims can't express. scope audioOnly/videoOnly makes J/L cuts without unlinking. Clamped edits are reported; multicam clips refused.",
             description: "Trim one clip by dragging an edge or sliding its source range — the three edits a timeline offers that set_clip_properties' absolute trims can't express.\n\nmode:\n• normal (default) — moves the edge and leaves the surrounding clips alone, so trimming a right edge shorter opens a gap.\n• ripple — moves the edge and shifts everything after it on that track and on sync-locked tracks, so the cut closes up with no gap. This is how you tighten or extend a scene without re-positioning every later clip by hand.\n• slip — keeps the clip's position and length and slides WHICH part of the source plays (needs unused head/tail material). Use it to re-frame a take that's timed right but starts on the wrong moment. Don't pass 'edge' for a slip.\n\ndeltaFrames is in timeline frames and always signed by direction: positive moves the edge (or the source window) to the RIGHT, negative to the LEFT. So a right edge with +30 makes the clip 30 frames longer; a left edge with +30 makes it start 30 frames later (30 frames shorter).\n\nEdits are clamped to available source material, to a 1-frame minimum length, and to room on sync-locked tracks; the receipt says exactly how many frames were applied and notes any clamping. Linked audio follows by default (propagateToLinked). Multicam clips are refused — their timing is owned by the group. Nothing to change returns a no-op receipt instead of a fake success.\n\nscope makes the J/L cut on a normal trim: 'both' (default) trims picture and linked audio together; 'audioOnly' rolls only the audio side of the link group, 'videoOnly' only the picture side — the link is preserved either way, so the pair still moves and selects as one. Pass the picture clip id with scope 'audioOnly' to slide the sound edit off the cut (J-cut when the audio starts early, L-cut when it runs long). A scoped trim that lacks source handle, addresses a lane no linked clip occupies, or targets ripple/slip mode is refused whole.",
             inputSchema: objectSchema(
                 properties: [
@@ -784,6 +814,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .duplicateClips,
+            brief: "Copy existing clips to new positions keeping every treatment — trims, effects, grade, keyframes. The tool for repeating a treated clip; add_clips places raw media and would lose all that. Copies overwrite what they land on and get new independent ids.",
             description: "Copy existing clips to new positions, keeping everything about them — trims, speed, volume, fades, transform, crop, effects, grade, and keyframes. This is the tool for repeating a treated clip (a stinger on every beat, a lower third on each speaker, a B-roll insert reused later); add_clips only places raw media and would lose all of that.\n\nEach placement is {clipId, toFrame, toTrack?}; toTrack defaults to the clip's own track. Copies OVERWRITE what they land on, exactly like add_clips — check the gaps in get_timeline (or insert with insert_clips first) if you need to keep what's there. Linked audio comes along at the same offset unless includeLinked is false. Copies are independent: they get new ids (returned as newClipIds) and never rejoin the original's multicam group. One undoable action for the whole batch.",
             inputSchema: objectSchema(
                 properties: [
@@ -806,6 +837,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .copyAttributes,
+            brief: "Paste one clip's look onto others — all attribute groups by default, or a subset (color, keyframes, transform, textStyle, …). Timing and position never change. Use instead of re-sending the same apply_color/apply_effect/set_keyframes payload per clip.",
             description: "Paste one clip's look onto other clips — the 'make these match' tool. Copies only the attributes you name; timing, media, track, and position are never touched.\n\nattributes defaults to the full look: transform, crop, opacity, volume, fades, edges, effects, color, keyframes, blendMode. Pass a subset to be surgical (e.g. ['color'] to spread a grade, ['keyframes'] to reuse an animation, ['transform','crop'] to repeat a framing). 'textStyle' is opt-in and needs text clips on both sides. Attribute groups: transform (position/scale/rotation/flip), crop, opacity (static), volume (static), fades (lengths + interpolation, clamped to each target's length), edges (rounding + softness), effects (non-color stack), color (the grade), keyframes (all seven animation tracks including the speed curve, trimmed to each target's length; a speed curve is skipped on targets without the source material for it), blendMode, textStyle (style + fill mode + text animation), audioMix (pan + EQ + compressor chain).\n\nUse this instead of re-sending the same apply_color/apply_effect/set_keyframes payload per clip: it's one undoable action and it can't drift between clips. The source clip is skipped if it appears in toClipIds.",
             inputSchema: objectSchema(
                 properties: [
@@ -822,6 +854,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .managePresets,
+            brief: "The app-wide preset library: save, list, apply, rename, delete looks (grades), effect stacks, and text styles that outlive a project. Within one project copy_attributes is faster. The library is shared across projects, so delete is NOT undoable — confirm with the user first.",
             description: "The user's app-wide preset library — saved looks (color grades), effect stacks, and text styles that outlive a single project. Use it when the user asks to save a look/style \"for later\", to reuse \"my\" look, or to apply the same treatment in a new project. Within one project, copy_attributes is the faster route: it needs no library entry.\n\nkinds: 'look' is the color grade (everything apply_color writes), 'effects' is the non-color effect stack (apply_effect), 'textStyle' is a text clip's style, fill mode, and text animation. action='list' returns every preset with a stable presetId, name, kind, and its payload in the same vocabulary get_timeline uses (look → `color`, effects → effects: [{type, params}], textStyle → textStyle). The six built-in looks are listed with builtIn:true; they can be applied but not renamed or deleted.\n\naction='save' captures the named kind from sourceClipId — it fails when that clip carries nothing of that kind, and a name already in use gets a numeric suffix (reported in notes). action='apply' writes the preset onto clipIds in one undoable action with exactly the semantics of copy_attributes: a look replaces the target's whole color grade and leaves its other effects alone, an effect stack replaces the target's non-color effects and leaves its grade alone, and a text style needs text clips on the receiving end. action='rename' and action='delete' take presetId. The library is shared across projects, so deleting is not undoable — confirm with the user first.",
             inputSchema: objectSchema(
                 properties: [
@@ -845,6 +878,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .linkClips,
+            brief: "Link clips so they move and trim together, or unlink them for independent editing (the step before a manual J/L cut). Unlink always frees the whole link group; link needs 2+ clips and refuses multicam members.",
             description: "Links clips so they move, trim, and slip together, or unlinks them so they can be edited apart. Imported video and its audio are linked from the start.\n\nUnlink is what makes a J/L-cut possible: unlink the pair, then move or trim the audio past the picture cut so sound leads or lags the image. Link is for binding elements that should travel as one — a title with its background bar, music with the montage it was cut to.\n\naction 'unlink' always covers the whole link group of every id you pass (reported in the receipt), so you never end up with half a group linked. 'link' needs at least two clips and refuses multicam clips, whose sync is owned by their group.",
             inputSchema: objectSchema(
                 properties: [
@@ -856,6 +890,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .manageNest,
+            brief: "Pack clips into a nested timeline (one compound clip to move, grade, and reuse) or decompose one back in place. Edit the contents via set_active_timeline on the child. Decompose drops carrier-level looks (grade, fades, keyframes); captions and multicam are refused.",
             description: "Packs clips into a nested timeline (a compound clip) or unpacks one back onto the timeline.\n\nNesting turns a run of clips into ONE clip you can move, trim, grade, fade, animate, and reuse as a unit — the way to treat a built sequence (an intro, a montage, a multi-layer composite) as a single element without re-doing the arrangement. The clips leave the timeline and live in a new child timeline; linked video/audio carrier clips take their place at the same frames. Edit the contents later with set_active_timeline on the returned timelineId — changes there show up in every carrier.\n\ndecompose does the reverse for one nest clip: the child's clips are laid back out in place. Group-level looks applied to the carrier (its opacity, crop, effects, fades, keyframes) have no per-clip equivalent and are dropped, so decompose after grading a nest loses that grade — undo restores it.\n\nCaption clips and multicam clips are refused; both depend on staying on the top-level timeline.",
             inputSchema: objectSchema(
                 properties: [
@@ -866,6 +901,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .swapClipMedia,
+            brief: "Point existing clips at different source media while keeping every edit decision — trims, effects, grade, keyframes. For replacing a take or a placeholder with the final asset; relink_media is for reconnecting offline files instead. Same media kind required.",
             description: "Points existing clips at different source media while keeping every edit decision — position, length, trims, speed, volume, fades, transform, crop, effects, grade, and keyframes all stay. Use it to swap a take for a better one, replace a placeholder or generated clip with the final asset, or push a re-render through a composite that's already built.\n\nThe replacement must be the same media kind as the clip (video for video, audio for audio, image for image). Trims are kept by default, so a shorter replacement can leave the tail reading empty — the receipt warns when that happens; pass resetTrim:true to start the clip at the new source's first frame instead. A clip's linked partner sharing the same media is repointed with it. Undoable.",
             inputSchema: objectSchema(
                 properties: [
@@ -878,6 +914,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .relinkMedia,
+            brief: "Reconnect offline media whose file moved: repoint one asset by exact path, or scan a folder to match all offline assets by filename. Edits the media library, not the timeline, and is NOT undoable. To deliberately change footage, use swap_clip_media.",
             description: "Reconnects offline media — assets whose file moved, was renamed, or lives on a volume that wasn't mounted. get_media marks these; until they're relinked, they render black/silent and export incomplete.\n\nTwo modes: 'mediaRef'+'filePath' repoints one asset at an exact file, or 'searchFolder' walks a folder recursively and matches every offline asset by filename (the bulk fix after moving a footage folder). The replacement must be the same media kind.\n\nThis edits the project's media library, NOT the timeline: clips, edits, and effects are untouched, and it is NOT undoable. To point a clip at DIFFERENT footage on purpose, use swap_clip_media.",
             inputSchema: objectSchema(
                 properties: [
@@ -889,6 +926,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .cutoutSubject,
+            brief: "Cut the subject out of a clip via on-device segmentation — no green screen; everything else turns transparent, and an optional background lands on a track below in the same action. The compositing entry point; quality 'subject' is best but too slow for playback, so switch to it before export. remove:true strips the key.",
             description: "Cuts the subject out of a clip — the person (or the salient foreground object) stays, everything else becomes transparent so lower tracks show through. No green screen needed; the mask comes from on-device segmentation, per frame, and follows the subject as it moves.\n\nThis is the entry point for compositing a shot: cut the subject out, put something else behind them, then animate. Pass 'background' and the tool also drops that media on a new track below, spanning the same frames, in the SAME undoable action — one call for the whole 'replace the background' move. Without 'background', whatever already sits on lower tracks shows through.\n\nAfter cutting out, treat the clip like any other layer:\n• set_keyframes position/scale/rotation to push in, drift, or parallax the subject against the new background\n• apply_effect with animated params (blur, glow, grain, vignette) for the cinematic pass — blur the background clip, not the subject, to fake depth of field\n• copy_attributes to give every shot in the sequence the same treatment\n\nquality trades speed for accuracy: 'fast' and 'balanced' (default) use people segmentation and stay editable in real time; 'subject' uses the heavy any-object model — much better edges on non-people, but far too slow for playback, so switch to it right before export. feather softens the cut edge (0–1), expand grows (+) or shrinks (−) the mask to fix haloing or clipped hair. keep:'background' inverts the whole thing: the subject is removed and the background survives.\n\nFrames where the model finds nothing are left untouched rather than turning transparent, so a missed detection never blanks the shot — check the result with inspect_timeline. Pass remove:true to strip the key again. The key is a normal effect ('key.subject') in the clip's stack, so apply_effect can animate feather/expand afterwards.",
             inputSchema: objectSchema(
                 properties: [
@@ -920,6 +958,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .stabilizeClips,
+            brief: "Smooth handheld shake on video clips; the analysis runs as a background job — call again with the same arguments to poll, never restarted. Stabilization crops in to hide edges; warn the user when the reported crop exceeds ~15% and offer lower smoothing.",
             description: "Smooths handheld camera shake on video clips. Palmier Pro measures the camera path between consecutive source frames on-device (Vision), low-passes it, and stores the per-frame correction on the clip — the media is never re-encoded, so the edit, trims, and grade stay exactly as they are. The correction zooms in slightly to hide the edges it swings past; the receipt reports that crop as a percentage, so warn the user when it is large (over ~15%) and offer a lower smoothing.\n\nsmoothing 0-1 (default 0.5) is how locked-off the result looks: low keeps the operator's intent and crops little, high fights every wobble and crops more. Changing smoothing re-runs the analysis.\n\nAnalysis runs as a background job, so the first call usually returns status 'analyzing' with a jobId and no crop yet; the timeline picks the result up on its own. Call stabilize_clips again with the SAME clipIds and smoothing to poll — a running job is reported, never restarted or duplicated, and a finished one returns status 'ready' with cropPercent and the analyzed source range. A job that failed (offline media, an unreadable source) is retried by that same call, and the receipt carries 'retriedAfterFailure' with the reason it failed, so a repeated failure is always visible rather than silently looping. A cached analysis (same media, same source range, same smoothing) returns 'ready' immediately.\n\nOnly video clips qualify: images, text, adjustment layers, nested timelines, audio, and multicam members are refused. Pass remove:true to strip stabilization and go back to the original framing. Requesting and removing are undoable in one step each; the background bake itself is not a separate undo entry.",
             inputSchema: objectSchema(
                 properties: [
@@ -932,6 +971,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .applyLayout,
+            brief: "Arrange clips into a named multi-video layout — split screen, PIP, grids, sidebar — computing every transform and crop in one action. Always use this, not set_clip_properties transforms, for multi-clip canvas arrangements. Place new media or re-frame existing clips; anchor/anchorX/anchorY bias the crop.",
             description: "Arrange multiple clips into a common multi-video layout (split screen, picture-in-picture, grid) in one undoable action — the fast path for composing several videos in one frame. Use this instead of hand-setting transforms and screenshot-checking alignment with inspect_timeline.\n\nYou pick a named layout and assign a clip to each of its slots; the tool computes every transform and crop so each clip FILLS its region edge-to-edge WITHOUT stretching — the source is cropped to the slot's shape (cover), like a layout template the videos are dropped into. Pass fit='fit' to letterbox the whole source inside its slot instead (no crop, may leave bars) — use only when the full frame must stay visible (e.g. a screen recording).\n\nThe crop is centered by default. When that chops off something important (a face cropped at the forehead, a subject off to one side), bias which part survives: 'anchor' is a coarse shortcut ('top' keeps the top, etc.), while anchorX/anchorY (0–1) give continuous control for in-between framing — e.g. anchorY 0.35 moves the crop only slightly toward the top, not all the way. To nudge framing after the fact, call apply_layout again with adjusted anchorX/anchorY (clipIds mode re-crops in place).\n\nTwo modes (don't mix across slots):\n• Place new clips: give each slot a 'mediaRef' (from get_media) plus top-level startFrame (default 0) and endFrame. Creates one stacked video track per slot at that time range; for PIP the inset is placed on top automatically. Video clips bring their linked audio.\n• Re-layout existing clips: give each slot 'clipIds' — one or more existing clips, all framed into that slot (handy when a track holds several sequential takes). Only transforms/crop change — timing and tracks are untouched (so existing track order decides stacking).\n\nEvery slot of the chosen layout must be filled. Layouts and their slot names:\n  • full — main\n  • side_by_side — left, right\n  • top_bottom — top, bottom\n  • pip_bottom_right / pip_bottom_left / pip_top_right / pip_top_left — main, inset\n  • grid_2x2 / grid_3x3 / grid_4x4 — equal cells named rNcN, counting from the TOP-LEFT: row 1 is the top row, column 1 is the left column. So r1c1 is top-left, a 3x3's middle is r2c2, and a 3x3's bottom-right is r3c3\n  • main_sidebar — main (70%), sidebar (30%)\n  • three_up — left, center, right",
             inputSchema: objectSchema(
                 properties: [
@@ -976,6 +1016,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .syncClips,
+            brief: "Align clips to a reference by timecode or audio cross-correlation — dual-system sound and pre-multicam alignment. Targets shift on the timeline; weak audio matches are refused, and multicam members are refused (their group owns sync).",
             description: "Align one or more clips to a reference clip by shifting targets on the timeline — use for dual-system sound (camera + external audio) or multicam. Default mode 'auto' aligns by embedded source timecode when both files carry one (exact, confidence 1.0), falling back to audio cross-correlation otherwise (seeded by capture dates when present); force a method with mode. referenceClipId stays put unless a target would land before frame 0, in which case the whole group shifts right together (reported as shiftedFrames). Returns offsetFrames, confidence (0–1), and method (timecode|audio) per target; refuses weak audio matches. Refused on multicam clips — a group's members are already aligned by its sync maps (manage_multicam).",
             inputSchema: objectSchema(
                 properties: [
@@ -991,6 +1032,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .manageMulticam,
+            brief: "Create a multicam group from session media (synced program video track plus one audio track per mic) or ungroup one. Member kinds: angle (scratch audio), mic (program audio), both. Angle switching then goes through change_cam.",
             description: "Create or ungroup a multicam group. create syncs session media into ordinary stamped timeline clips: one program video track, one audio track per mic, and angle switches through change_cam. Use member kind angle for scratch-camera audio, mic for program audio, and both for a camera whose audio should play. Pin offsetSeconds when correlation cannot align a member. ungroup strips stamps and leaves clips in place.",
             inputSchema: objectSchema(
                 properties: [
@@ -1029,6 +1071,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .changeCam,
+            brief: "Switch a multicam group's angle over frame ranges — full-frame or into a PiP/split/grid layout with multiple angles. Batched entries are one undo step; ranges where an angle wasn't recording clamp or skip. Get angle labels from get_multicam first.",
             description: "Switch a multicam group's camera angle over timeline frame ranges, full-frame or in a multi-angle layout. Batched entries are one undo step. Ranges where an angle was not recording clamp or skip. Returns switched count, optional clamps/skips/overlayClipIds, and program rows over the touched span.\n\nEach entry is EITHER {range, angle} — full-frame switch — or {range, layout, angles} — PiP/split/grid: angles fill the layout's slots in order (first = the full-frame program slot; fewer angles than slots leaves cells empty), extra angles land as synced overlay clips above the program. A later full-frame entry over the same range clears the layout. Overlay clips are ordinary group clips — restyle with set_clip_properties/apply_layout, remove with remove_clips.",
             inputSchema: objectSchema(
                 properties: [
@@ -1057,6 +1100,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .getMulticam,
+            brief: "Read a multicam group: members with angle labels and offsets, the program cut as run-length [angle, start, end) rows, and occupied tracks. Use before change_cam to learn angle labels, or to review the cut as one program.",
             description: "Read a multicam group: members (angleLabel, kind, offsetSeconds, confidence, which is master), the current program cut as run-length [angle, startFrame, endFrame) rows in timeline frames, and the track indexes the group occupies. Use it to learn angle labels before change_cam, or to review the cut as one program instead of piecing it together from get_timeline's clips. Window long timelines with startFrame/endFrame.",
             inputSchema: objectSchema(
                 properties: [
@@ -1069,11 +1113,13 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .undo,
+            brief: "Revert the latest action from the shared undo history (user or agent). After undoing, ids and frames from the reverted action may be invalid — re-read get_timeline or get_transcript before editing again. Takes no arguments.",
             description: "Reverts the latest action from the editor's shared undo history, whether the user or agent made it. Call only when that latest action should be reversed. For example, verify a cut with get_transcript, then undo if it overshot and retry with corrected ranges. After undoing, ids and frames returned by the reverted action may be invalid; re-read with get_timeline or get_transcript before editing again. Takes no arguments.",
             inputSchema: objectSchema()
         ),
         AgentTool(
             name: .getTranscript,
+            brief: "The spoken transcript of the current timeline in project frames, post-edit, with stable global word indices — the input for text-based editing. Pass indices to remove_words to cut; use granularity='segments' for cheap reading. Unlike inspect_media, this reflects trims, speed, and cuts.",
             description: "Returns the spoken transcript of the CURRENT timeline in project frames — the post-edit caption track in one call. Unlike inspect_media (which transcribes one source asset in isolation, in source seconds), this walks every audio/video clip on the timeline, maps each word through that clip's trim/speed/position, and concatenates in timeline order. Deleted ranges are gone by construction, so after cuts this always reflects what's actually audible — no stale results, no per-clip frame math. The app chooses cloud only when the signed-in account has enough credits for the uncached request; otherwise it uses local transcription and reports the resolved transcriptionSource in the response.\n\nReturns clips in timeline order, each with its words as compact [index, text, startFrame] rows (a word runs to the next word's start; the last word to its clip's end). Speakers, when identified, arrive as run-length turns: speakers = [[firstWordIndex, name], ...]. The index is a stable, global, 0-based position in timeline order; pass it straight to remove_words to cut that word (the intuitive path for text-based editing). Indices stay global even when scoped with clipId or paged with a window. Capped at 10000 words; page with startFrame/endFrame using nextStartFrame.\n\nFor comprehension rather than cutting — summarizing, finding a topic, take selection on long media — pass granularity='segments': sentence rows [firstWordIndex, text, start, end] at a fraction of the tokens, whose firstWordIndex jumps you back into word mode for the cut window.\n\nUse for transcript-driven edits (filler-word / dead-air removal, locating a quote, take selection) and to verify what remains after cutting. To cut, prefer remove_words (give it the indices); drop to ripple_delete_ranges only for non-word-aligned spans.",
             inputSchema: objectSchema(
                 properties: [
@@ -1087,6 +1133,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .removeWords,
+            brief: "Cut speech by the word, Descript-style — the primary text-based edit for fillers and flubbed lines. Pass get_transcript indices (words) or exact filler tokens (matches); it resolves frames, trims pauses, cuts linked A/V, and closes gaps. One track per call; indices shift after each run, so re-read get_transcript.",
             description: "Cut speech by the word, Descript-style — the primary tool for text-based editing (filler words, flubbed sentences, dropped retakes, tightening a ramble). Pass words for precise get_transcript indices/ranges, or matches for exact filler tokens like \"um\" and \"uh\". This resolves them to frames, removes the surrounding pause so survivors don't end up double-spaced, merges adjacent removals, cuts linked A/V partners, and closes the gaps. You never deal in frame numbers — that's the whole point versus ripple_delete_ranges.\n\nWorkflow: call get_transcript, read it as prose, then pass the indices of the words to drop. Omit language by default; remove_words reuses the previous get_transcript source so cloud/local word indices stay aligned. Words across multiple clips on ONE track are handled in a single undoable action, and any linked A/V partner (e.g. the video paired with this audio) is cut automatically. Edit one track at a time: if your indices span multiple unlinked tracks (e.g. two separate mics), the call is refused — cut each track in its own call, or link the tracks into one unit first. After it runs, indices have shifted — re-read get_transcript before another remove_words.\n\nWhen to use which: words for selective edits after reading the transcript; matches for removing every exact filler token; ripple_delete_ranges only for spans that aren't word-aligned. Verify reworded retakes and sub-frame seam fragments against the word list, not a summary.",
             inputSchema: objectSchema(
                 properties: [
@@ -1112,11 +1159,13 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .removeSilence,
+            brief: "Remove dead air — quiet, speech-free sections — across the timeline and ripple-close the gaps, in one undoable action. Handles pauses; remove_words handles fillers, ripple_delete_ranges handles arbitrary spans. No transcript needed; takes no arguments.",
             description: "Remove dead air — quiet, speech-free sections — from the timeline's audio, ripple-closing the gaps. Sections come from on-device speech detection (the same spans marked red on waveforms): non-speech runs whose level sits well below the recording's own speech level, so music beds and loud ambience are never cut, and speech-boundary slop keeps the cuts from feeling clipped. Cuts linked A/V partners and honors sync lock; the whole pass is one undoable action.\n\nUse this to tighten pacing (long pauses, dead space between takes) before or instead of word-level edits: remove_silence handles pauses, remove_words handles fillers and flubbed lines. No transcript needed. If it reports no dead air, speech analysis may still be running in the background — wait a moment and retry. Takes no arguments.",
             inputSchema: objectSchema(properties: [:], required: [])
         ),
         AgentTool(
             name: .detectBeats,
+            brief: "Detect beats, downbeats, and BPM in an asset's audio, on-device and free. Times are source seconds. Use for hand-built beat-synced cuts; assemble_montage does the whole beat-cut workflow in one call.",
             description: "Detect musical beats and downbeats in a media asset's audio, on-device. Returns beats and downbeats in SOURCE seconds (multiply by fps for frame values, same convention as search_media hits) plus estimated bpm. Downbeats mark bar starts — cut on downbeats for edits that land musically; beats are fine for faster montage rhythms.\n\nUse for beat-synced editing: snapping cuts to a music bed, building montages where clip boundaries hit the beat, or timing text/caption entrances to the bar. To place a cut at a beat B on a clip, the timeline frame is startFrame + (B × fps − trimStartFrame) / speed. Works on music; speech or ambience returns few or no beats. Runs locally — no subscription needed.",
             inputSchema: objectSchema(
                 properties: [
@@ -1129,6 +1178,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .assembleMontage,
+            brief: "Cut a run of shots to a music bed on the beat grid in one undoable action — detects beats, lays shots back-to-back, and places the bed on a new audio track. Use instead of chaining detect_beats + add_clips. Needs music with an audible pulse; shots that can't fill a beat are skipped and reported.",
             description: "Cuts a run of shots to a music bed in one undoable action — the travel reel, sizzle, recap, or hype edit where the picture changes on the beat. Use it instead of chaining detect_beats with add_clips: this tool detects the beats, lays every shot on the grid, and places the bed itself, so no cut drifts off the music.\n\nShots run in the order you pass them, back to back with no gaps, starting at startFrame. The bed lands on a NEW audio track at the bottom, so nothing already on the timeline is overwritten, and each shot's own sound is left out — a montage runs on the music. Omit trackIndex and the picture gets a new video track on top; give one and its landing region is cleared like add_clips.\n\nenergy shapes the cut rate, which is what separates a montage from a slideshow: 'flat' cuts on every beat; 'build' starts on wide holds and tightens to a single beat by the last shot; 'buildAndRelease' tightens the same way, then holds the final shot wide again as a payoff. maxHoldBeats is the widest hold those curves use. Set bookend to repeat the first shot as the closing one, the hero-shot bracket that opens and pays off a reel.\n\nA source shorter than its slot is held for fewer beats and reported; one that cannot fill a single beat is skipped and reported. The grid is never bent to fit — that is the whole point. Returns the cut frames, the detected BPM, the placed clip ids, and the bed's clip id. Needs music with an audible pulse; speech or ambience is refused.",
             inputSchema: objectSchema(
                 properties: [
@@ -1150,6 +1200,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .measureLoudness,
+            brief: "Measure the real mix as export would deliver it: integrated LUFS and true peak, for the timeline or one clip, with the gain delta to a platform target. Read-only, no undo step; decoding a long timeline takes a while. mix_audio applies levels instead of just measuring.",
             description: "Measure delivered loudness the way a platform will: ITU-R BS.1770-4 integrated LUFS and 4x-oversampled true peak (dBTP) over the real mix — every audio clip with its pan/EQ/compression, volume, fades, and track mutes applied, exactly what export writes.\n\nUse it before delivery, when the user asks whether a cut is loud enough (\"is this ready for YouTube?\"), or to compare a clip against the program. Pass a target to get the gain to apply: deltaDb is what to add, and it lands on the timeline through set_clip_properties volumeDb (or per clip audioMix.compressor.makeupGainDb). truePeakAfterTargetDbtp warns when that gain would push peaks past the platform ceiling — compress or lower peaks instead of pushing gain.\n\nScope 'timeline' measures the whole program (window it with startFrame/endFrame); scope 'clip' measures one audio clip alone, ignoring everything else on the timeline. Silence returns integratedLufs null. This decodes the audio, so a long timeline takes a while; it changes nothing and creates no undo step.",
             inputSchema: objectSchema(
                 properties: [
@@ -1171,6 +1222,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .mixAudio,
+            brief: "Build a base mix for the whole timeline: classify clips (dialog/bed/sfx), level them to a platform target, and enable auto-ducking — replaces per-clip measure_loudness + set_clip_properties chains. Call with dryRun:true first to preview the plan without changing anything; applying is one undoable action.",
             description: "Build a professional base mix for the whole timeline in one pass: classify every audio clip (dialog / bed / sfx) from on-device speech detection, level each one to its place against a delivery target, and switch on auto-ducking so music and ambience drop under speech.\n\nUse this when the user asks to \"mix the audio\", \"balance the levels\", \"make the music duck under the voice\", or to get a cut delivery-ready before export. It replaces hand-chaining measure_loudness + set_clip_properties per clip.\n\nplatform picks the targets: youtube (program −14 LUFS, dialog −16), podcast (−16 / −18), film (−23 / −25). Beds land 12 dB under dialog and sfx 4 dB under it, so the balance survives a later master move. Clip gain is written as volumeDb; ducking stays non-destructive automation computed at mix time, so editing a music clip's volume afterwards still composes with the duck.\n\nCall it with dryRun:true first to see the classification and the gains it would apply without changing anything. Applying is ONE undoable action. Clips whose volume is keyframed, clips marked duckingRole 'exempt', and silent clips are reported as skipped, never re-levelled. The receipt's `mix` array carries one row per audio clip — role, roleSource, measured LUFS, target, and the gain applied — alongside the usual changed-clip delta. When automatic classification is wrong, fix it with set_clip_properties duckingRole and run again. This decodes all the audio twice (before and after), so a long timeline takes a while.",
             inputSchema: objectSchema(
                 properties: [
@@ -1192,6 +1244,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .addTexts,
+            brief: "Add text clips as timeline layers — titles, quotes, keyword accents (a second colour that never fades) — with full typography, animation presets, and footage fill. Use add_captions for spoken-audio captions instead; manage_motion_scene for complex animated graphics.",
             description: "Adds text clips as timeline layers. Use the nested accent object to hold chosen words in a second colour for the whole clip — the keyword treatment quote and tutorial titles rely on. Omit trackIndex on every entry to create one new top video track; otherwise set trackIndex on every entry. Transform is normalized text-box center/size; center-only auto-fits, all four fields override the box. Use the nested style object for typography, outline, shadow, and background. fillMode 'footage' stencils layers below through the letter shapes. Use add_captions for spoken audio captions. Unknown fields are rejected.",
             inputSchema: objectSchema(
                 properties: [
@@ -1232,6 +1285,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .updateText,
+            brief: "Update existing text clips or a whole caption group (captionGroupId): content, partial style patch, transform, animation, accent words. The style object only changes what you pass. Changing content without re-sending accent clears the accent.",
             description: "Updates text clips or a captionGroupId. The nested style object is a partial patch: omitted values stay unchanged. Use it for typography, color, outline, shadow, and background. fillMode 'footage' stencils layers below through the glyphs. Content and layout-affecting style changes auto-fit the box unless transform includes box geometry; rotation alone keeps auto-fit. Static rotation uses clockwise degrees and clears rotation keyframes. Unknown fields are rejected.",
             inputSchema: objectSchema(
                 properties: mergedProperties([
@@ -1265,6 +1319,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .addCaptions,
+            brief: "Transcribe the timeline's spoken audio and create styled caption clips on their own track — no targeting needed. Returns a captionGroupId; restyle later with update_text. Uses cloud transcription only when the account has credits, otherwise local.",
             description: "Transcribes the timeline's spoken audio and creates styled caption text clips on their own track — no targeting needed; it finds the spoken content itself. The app uses cloud only when the signed-in account has enough credits for the uncached request; otherwise it uses local transcription. Cloud auto-detects language. Per-word animations are timed from the transcript. Returns the caption group summary (captionGroupId, clipCount, frameRange, shared style, textPreview) — restyle it later with update_text and that captionGroupId.",
             inputSchema: objectSchema(
                 properties: mergedProperties([
@@ -1287,7 +1342,8 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .manageMotionScene,
-            description: "Author animated motion graphics as React code and render them into the media library as an alpha video clip. Use this for animated titles, lower thirds, kinetic typography, logo reveals, UI/product demos, dashboards, chart animations, and anything that should look like a real app interface moving — especially when combined with a device mockup via apply_layout. Do NOT use it for plain static captions or simple text overlays; add_texts is cheaper and editable in the Inspector.\n\nThe scene is a single TSX module that must `export default` a React component. Animate with Motion (`import { motion } from \"motion/react\"`) — its declarative props (initial/animate/transition, variants, stagger) all render frame-accurately because rendering drives a virtual clock rather than wall time. The full shadcn/ui set is importable (`import { Button } from \"@/components/ui/button\"`, also card, dialog, table, chart, badge, tabs, progress, sidebar, …) plus `lucide-react` icons and any Tailwind utility class including arbitrary values like `w-[347px]`. `PalmierMotion.useSceneTime()` returns seconds and `PalmierMotion.useSceneFrame()` the frame index, for values you must compute per frame such as counters. Give the root element a transparent or explicit background: the render preserves alpha, so anything you do not paint stays see-through over the clips beneath.\n\nThe scene is rendered before it is saved, so a syntax error, a bad import or a component that throws comes back as a tool error and nothing is added to the project. Rendering is deterministic — Math.random and Date are seeded — so the same source always yields the same frames. action='create' returns a mediaRef to place with add_clips; action='update' re-renders in place and every clip already on the timeline picks up the new version. Read a scene back (source plus sampled frames) with inspect_media.\n\nThe 'web' runtime also ships a large prebuilt animation library (remocn): typewriters and kinetic type, animated line-drawn icons, cursors and carets, animated UI (dialogs, menus, toasts, sliders, charts), chat/terminal/product mock flows, WebGL shader backdrops, and film-style transitions. Import them by module, e.g. `import { Typewriter } from \"@/components/remocn/typewriter\"`. Call action='components' FIRST when you plan to use one — it returns the full catalog as module path → exported component names; guessing names fails the render. These components are authored against the Remotion API, which this runtime implements: `import { useCurrentFrame, useVideoConfig, interpolate, spring, Easing, AbsoluteFill, Sequence } from \"remotion\"` works, and `@/lib/remocn-ui` (useTypewriter, easings, springs, color helpers) is importable too. Google-font imports resolve to the system stack instead of downloading.",
+            brief: "Author motion graphics as React/Motion TSX and render them into the library as an alpha video — kinetic type, logo reveals, animated UI, dashboards. For plain static text use add_texts. Prefer rebuilding the linked project's real components (read_project_context) with mock data; otherwise use the prebuilt remocn/beui libraries — call action='components' first. A failing render adds nothing.",
+            description: "Author animated motion graphics as React code and render them into the media library as an alpha video clip. Use this for animated titles, lower thirds, kinetic typography, logo reveals, UI/product demos, dashboards, chart animations, and anything that should look like a real app interface moving — especially when combined with a device mockup via apply_layout. Do NOT use it for plain static captions or simple text overlays; add_texts is cheaper and editable in the Inspector.\n\nThe scene is a single TSX module that must `export default` a React component. Animate with Motion (`import { motion } from \"motion/react\"`) — its declarative props (initial/animate/transition, variants, stagger) all render frame-accurately because rendering drives a virtual clock rather than wall time. The full shadcn/ui set is importable (`import { Button } from \"@/components/ui/button\"`, also card, dialog, table, chart, badge, tabs, progress, sidebar, …) plus `lucide-react` icons and any Tailwind utility class including arbitrary values like `w-[347px]`. `PalmierMotion.useSceneTime()` returns seconds and `PalmierMotion.useSceneFrame()` the frame index, for values you must compute per frame such as counters. Give the root element a transparent or explicit background: the render preserves alpha, so anything you do not paint stays see-through over the clips beneath.\n\nThe scene is rendered before it is saved, so a syntax error, a bad import or a component that throws comes back as a tool error and nothing is added to the project. Rendering is deterministic — Math.random and Date are seeded — so the same source always yields the same frames. action='create' returns a mediaRef to place with add_clips; action='update' re-renders in place and every clip already on the timeline picks up the new version. Read a scene back (source plus sampled frames) with inspect_media.\n\nComponent sourcing, in order: when the project has a linked source folder (get_timeline linkedContext), rebuild the project's REAL components in the scene — read their source, tokens, and styles with read_project_context and recreate them faithfully in TSX with representative mock data — so product demos show the actual product. Otherwise use the prebuilt libraries: remocn (typewriters and kinetic type, animated line-drawn icons, cursors and carets, animated UI, chat/terminal/product mock flows, WebGL shader backdrops, film-style transitions) under `@/components/remocn/*`, and beui (motion-first UI: tilt cards, spring buttons and CTAs, marquees, tabs/docks/sidebars, morphing modals and popovers, text/number animations, toasts, sliders, wheel pickers, carousels, loaders, shader backgrounds, plus agent/chat UI under `@/components/beui/agents/*`) under `@/components/beui/*`, e.g. `import { TiltCard } from \"@/components/beui/tilt-card\"`. Call action='components' FIRST when you plan to use prebuilt components — it returns the full catalog as module path → exported component names; guessing names fails the render. These components are authored against the Remotion API, which this runtime implements: `import { useCurrentFrame, useVideoConfig, interpolate, spring, Easing, AbsoluteFill, Sequence } from \"remotion\"` works, and `@/lib/remocn-ui` (useTypewriter, easings, springs, color helpers) is importable too. Google-font imports resolve to the system stack instead of downloading.",
             inputSchema: objectSchema(
                 properties: [
                     "action": ["type": "string", "enum": ["create", "update", "components"], "description": "'create' adds a new scene to the media library. 'update' replaces an existing one in place and re-renders it. 'components' takes no other parameters and returns the prebuilt remocn animation catalog for the 'web' runtime."],
@@ -1310,6 +1366,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .addAdjustmentLayers,
+            brief: "Add media-less clips whose grade and effects apply to everything rendered below them for their span — grade a whole section at once instead of pasting onto every clip. Grade them with apply_color/apply_effect like normal clips; opacity is the mix strength.",
             description: "Adds adjustment layers: clips that carry no media and apply their grade and effects to EVERYTHING rendered below them for the frames they span — the way to grade a whole sequence, a section, or a stack of stacked layers at once instead of pasting the same grade onto every clip. Grade one with apply_color and apply_effect exactly like a normal clip; its opacity is the mix strength between the graded and the ungraded picture (1 = full effect). An adjustment layer with no effects renders nothing.\n\nOmit trackIndex on every entry to create one new top video track (affects every existing track); otherwise set it on every entry and the layer affects only the tracks below that one. Entries overwrite whatever they land on, like add_clips. Adjustment layers have no source media: trims into source, speed, transitions, and audio don\'t apply — move, trim edges, split, delete, copy_attributes, and keyframes work as on any clip.",
             inputSchema: objectSchema(
                 properties: [
@@ -1332,6 +1389,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .applyColor,
+            brief: "Author or refine a color grade with named controls — exposure, wheels, curves, hue curves, LUTs — the colorist path, distinct from apply_effect (looks/FX). Merges onto the current grade unless reset:true; pass a clip's `color` object back to copy a grade. Iterate with inspect_color.",
             description: "Author/refine a color grade on video/image clips with named controls — the colorist path, distinct from apply_effect (looks/FX). Returns the clips with their resulting grade as a `color` object — the same object get_timeline shows; pass one back via the `color` parameter to copy a grade between clips (replaces the whole grade). MERGES with the clip's current grade: only the params you pass change, the rest are preserved, so you can nudge one knob at a time (pass reset:true to start from neutral). Applies as live, editable color.* effects; non-color effects untouched. Iterate: apply_color → inspect_color(clipId, reference) → read the gap → adjust → repeat. Undoable. All knobs optional. Color WHEELS use HUE (0–360°, standard) + AMOUNT per tonal zone — to push shadows teal, set shadowsHue 180 and shadowsAmount ~0.15. CURVES (master + per-channel R/G/B) give precise tone shaping — per-channel curves are tone-selective (e.g. pull the blue curve down in the highlights to tame a bright sky). HUE CURVES do secondary/qualified correction — target a source hue and shift its hue/saturation/lightness (e.g. desaturate greens, warm the skin) without a mask; pair with inspect_color's hueHistogram to find which hues are present. LUT applies a .cube film-look pack on top of the grade.",
             inputSchema: objectSchema(
                 properties: [
@@ -1398,6 +1456,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .applyEffect,
+            brief: "Apply non-color effects (blur, glow, distort, warp, corner pin, mesh warp, occlusion, subject reveal) as an editable stack; params take static numbers or keyframe rows for animation. Merges by type — unmentioned effects stay. Grading belongs to apply_color.",
             description: """
             Apply non-color effects (blur, sharpen, stylize, distort, detail, key) to video/image/text clips as a live, \
             editable effect stack — the looks/FX path, distinct from apply_color (grading). MERGES: each effect \
@@ -1490,6 +1549,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .inspectColor,
+            brief: "Measure color scopes — levels, clipping, tonal tilt, saturation, hue histogram — of a graded clip (clipId) or raw asset (mediaRef), plus the rendered frame. Pass a reference asset to get the subject-reference gap mapped onto apply_color knobs. Read-only; the grade-by-numbers loop with apply_color.",
             description: "Measure color scopes of a timeline clip's current graded look (clipId) OR a raw media asset (mediaRef) — black/white points, % clipping, mean & per-channel levels, shadow/mid/highlight color tilt, saturation, warm-cool / green-magenta balance, and a saturation-weighted hueHistogram (12 bins of 30° from 0°/red — shows which hues are present, e.g. an orange cluster = skin, a cyan/blue cluster = sky) — and return the rendered frame too. Use this to grade by the numbers instead of eyeballing, to find hues to target with apply_color's hueCurves, or to measure footage/references before grading. clipId applies the clip's effects (graded look); mediaRef measures the raw asset. Pass a reference image/video id to also measure it and get the subject−reference GAP plus hints that map onto apply_color knobs. The loop: apply_color → inspect_color(clipId, reference) → read the gap → adjust → repeat until the gap is small.",
             inputSchema: objectSchema(
                 properties: [
@@ -1502,6 +1562,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .denoiseAudio,
+            brief: "Remove background noise from audio clips with an on-device speech-enhancement model. strength is a dry/wet mix (default 0.6 — full strength can sound thin). The bake runs in the background and the timeline updates itself; enabled:false removes it.",
             description: "Remove background noise from audio clips using an on-device speech-enhancement model (DeepFilterNet3). strength is a dry/wet mix 0-1: 0 leaves the audio untouched, 1 is fully denoised. Full strength can sound thin or over-gated on real-world recordings, so the default is 0.6. The bake runs in the background — the timeline updates automatically when it finishes; no need to poll. Pass enabled:false to turn denoise off. Undoable.",
             inputSchema: objectSchema(
                 properties: [
@@ -1514,6 +1575,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .listModels,
+            brief: "List available AI models and their capabilities and constraints. Always call before generate_video/transition/image/audio or upscale_media so the chosen model supports what you need. loaded=false means the catalog hasn't synced — do not conclude no models exist.",
             description: "Lists AI models with their capabilities (durations, aspect ratios, resolutions, first/last frame support, reference support, voices/category for audio, and configurable settings for upscalers). Models with usesOwnApiKey:true run directly on the user's own provider key (OpenRouter for image/video, ElevenLabs for audio) and are billed there instead of in Palmier credits. Always call before generate_video, generate_transition, generate_image, generate_audio, or upscale_media so the model you pick actually supports the constraints you need. For transitions, pick a video model with supportsFirstFrame and supportsLastFrame. Returns { models, loaded } — if loaded=false the catalog hasn't synced yet (e.g. user not signed in); the models array may be empty even when models exist, so do not conclude no models are available. Retry after the user signs in.",
             inputSchema: objectSchema(
                 properties: [
@@ -1523,6 +1585,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .generateVideo,
+            brief: "Start an async AI video generation (text, image-to-video, video-to-video, references, lip sync). Returns a placeholder asset id immediately; poll get_media until ready. Costs real money and is not undoable — confirm with the user and check list_models first.",
             description: "Starts an async AI video generation. Returns a placeholder asset ID immediately; generation runs in the background and the asset becomes usable in add_clips once ready. Costs real money and is not undoable.",
             inputSchema: objectSchema(
                 properties: [
@@ -1545,6 +1608,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .generateTransition,
+            brief: "Generate an AI video transition between two consecutive shots in one call — captures both boundary frames, generates with a first+last-frame model, and fills the gap. Prefer over chaining capture_frame + generate_video + add_clips. Costs real money; the generation itself is not undoable.",
             description: "Creates an AI video transition between two consecutive shots on a video track in one call. Pass afterClipId (the clip that ends where the transition should begin). Captures the last composited timeline frame of that shot as the first frame and the first frame of the following shot as the last frame, generates with a first+last-frame video model, places the placeholder into the gap, and retimes it to fill the gap when ready. If the clips are already contiguous, opens a gap first (duration defaults to 4s, snapped to the model). If a gap already exists after afterClipId, uses that gap as-is (max 15s). Prefer this over manually chaining capture_frame + generate_video + add_clips. Costs real money; generation itself is not undoable, but the gap open and timeline placement are.",
             inputSchema: objectSchema(
                 properties: [
@@ -1562,6 +1626,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .generateImage,
+            brief: "Start an async AI image generation, optionally with reference images. Returns a placeholder asset id immediately; poll get_media until ready. Costs real money and is not undoable — check list_models first.",
             description: "Starts an async AI image generation. Returns a placeholder asset ID immediately; generation runs in the background. Costs real money and is not undoable.",
             inputSchema: objectSchema(
                 properties: [
@@ -1579,6 +1644,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .generateAudio,
+            brief: "Start an async AI audio generation: TTS, music, sound effects, video-to-audio scoring, voice cleanup, dubbing. Returns a placeholder asset id; most results land in the library for add_clips. Costs real money and is not undoable — check list_models type='audio' first.",
             description: "Starts an async AI audio generation or transformation. Returns a placeholder asset ID immediately; the asset appears in get_media and becomes usable in add_clips once ready. TTS converts text into speech. Generative audio models create dialogue, music, or sound effects from a prompt, video, or supported image/audio references. Voice Cleanup isolates speech from background audio. Dubbing translates source speech while preserving speaker delivery; pass targetLanguage. For models whose inputs include audio or video, provide sourceMediaRef. Video-to-audio scoring models also accept videoSourceStartFrame+videoSourceEndFrame and place the result on the timeline automatically. Other results land in the media library for placement with add_clips. Use list_models with type='audio' to inspect inputs, category, voices, reference caps, and limits. Models marked usesOwnApiKey run directly on the user's own ElevenLabs key and are billed by ElevenLabs, not in Palmier credits; they need no Palmier account. Costs real money and is not undoable.",
             inputSchema: objectSchema(
                 properties: [
@@ -1605,6 +1671,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .upscaleMedia,
+            brief: "Enhance an existing video or image with an AI upscaler — resolution, frame interpolation, restoration. Returns a placeholder asset id; poll get_media. Costs real money and is not undoable — call list_models type='upscale' first and use its exact setting ids.",
             description: "Enhances an existing video or image with an AI upscaler. It can change resolution, interpolate video frame rate, or apply model-specific restoration settings. Returns a placeholder asset ID immediately; the result appears in get_media once ready. Call list_models with type='upscale' first and use its exact setting IDs and values. Costs real money and is not undoable.",
             inputSchema: objectSchema(
                 properties: [
@@ -1621,6 +1688,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .sendFeedback,
+            brief: "Report an agent limitation or bug to the Palmier team. Sends immediately with no user confirmation — write in English, paraphrase everything, and never include verbatim user text, paths, or project content. At most once per distinct issue.",
             description: "Report an agent limitation or bug to the Palmier team so they can improve the product. Use when you can't do what the user asked because a capability or tool is missing or behaves wrong, the result is clearly off, or the user is plainly hitting a rough edge. This sends directly — there is no user confirmation step — so write the report in English and PARAPHRASE in your own words: translate non-English user text to English, and never include verbatim user messages, prompts, file paths, media, transcript text, or any project content. App/OS version and your recent tool names are attached automatically. Use sparingly: at most once per distinct issue.",
             inputSchema: objectSchema(
                 properties: [
@@ -1634,6 +1702,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .reviewTimeline,
+            brief: "Read-only quality review of the active timeline: pacing metrics, black gaps, cut-to-beat alignment (after detect_beats), and frames to render for a visual pass. It never looks at pixels — do the capture_frame rubric pass before calling a review complete. Pass referenceId to compare against a stored reference.",
             description: "Read-only quality review of the active timeline. Reports pacing metrics (shot count, average/median shot seconds, per-third pacing), gaps that render black on the primary video track, and cut-to-beat alignment when detect_beats results are cached for the timeline's audio (run detect_beats on the music first, then call this). findings lists concrete issues with frame evidence. capture lists frames to render with capture_frame plus rubric questions — this tool never looks at pixels, so always do that visual pass to judge text readability, framing, and shot-to-shot consistency before calling a review complete. Pass referenceId (from manage_references) to compare pacing and BPM against a stored reference video; compare its look values via inspect_color. Makes no changes and creates no undo entries.",
             inputSchema: objectSchema(
                 properties: [
@@ -1643,6 +1712,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .manageReferences,
+            brief: "Maintain the app-wide reference-video library: analyze a video's pacing/BPM/loudness/color fingerprint, list profiles, or remove one. Use a referenceId with review_timeline for pacing comparison. Analysis decodes the whole file and can take a while.",
             description: "Maintain Palmier's app-wide library of reference videos — examples of the pacing, rhythm, and look the user wants their edits to match. Profiles are stored per-user and available in every project. Set action to: 'analyze' to fingerprint a video (shot pacing per third, BPM, loudness, color) and store it — pass mediaRef for project media or an absolute path for any video file, with an optional name; 'list' for all stored profiles; 'remove' with referenceId to delete one. Analysis decodes the whole video and can take a while on long files. Use a stored referenceId with review_timeline to compare the current edit's pacing, and inspect_color to compare its look against the profile's look values.",
             inputSchema: objectSchema(
                 properties: [
@@ -1680,6 +1750,7 @@ enum ToolDefinitions {
 
     static let readSkill = AgentTool(
         name: .readSkill,
+        brief: "List the user's installed skills, or load one skill's full playbook by id and follow it. Before starting a task that matches a listed skill's description, load that skill first.",
         description: "Load the full instructions for one of the user's installed skills — playbooks for specific editing tasks (motion design, brand packages, recurring formats). Call without arguments to list available skills as `- id: description` lines; call with `id` to load one skill's full procedure, then follow it. Before starting a task that matches a listed skill's description, load and follow that skill.",
         inputSchema: objectSchema(
             properties: [
@@ -1691,6 +1762,7 @@ enum ToolDefinitions {
     /// MCP server only
     static let manageProject = AgentTool(
         name: .manageProject,
+        brief: "List, open, create, or close Palmier projects for this MCP session. Open/create only retargets this session; close always completes a final save first. Never deletes projects or files.",
         description: "List, open, create, or close Palmier projects for this MCP session. Set `action` to: `list` for known projects plus session-active and visible state; `open` with a name, id from list, or .palmier path; `create` with an optional name and initial fps/aspectRatio/quality; or `close` to save and close the session project, optionally targeting another open project by name/id/path. Opening or creating changes only this session's target. Closing always completes a final save first. This tool never deletes projects or files.",
         inputSchema: objectSchema(
             properties: [
@@ -1713,8 +1785,23 @@ enum ToolDefinitions {
         )
     )
 
-    static var mcpServer: [AgentTool] { all + [manageProject, readSkill] }
-    static var inAppAgent: [AgentTool] { all + [readSkill] }
+    static let describeTools = AgentTool(
+        name: .describeTools,
+        brief: "Load the full documentation for one or more tools by name — behaviors, refusal conditions, and workflows the brief listings omit. Call before first using a complex tool and whenever a call fails; batch every tool a planned workflow needs. No names lists all tools.",
+        description: "Tool listings in this server are deliberately brief. This tool returns the full documentation for the named tools — detailed behavior, edge cases, refusal conditions, and multi-tool workflows. Call it with every tool a planned workflow needs in one batch, before first use of a complex tool in a session, and whenever a call fails or is refused. With no names it returns the index of all tools with their brief descriptions.",
+        inputSchema: objectSchema(
+            properties: [
+                "names": [
+                    "type": "array",
+                    "items": ["type": "string"],
+                    "description": "Tool names exactly as listed, e.g. [\"set_keyframes\", \"apply_color\"]. Omit to list all tools.",
+                ],
+            ]
+        )
+    )
+
+    static var mcpServer: [AgentTool] { all + [manageProject, readSkill, describeTools] }
+    static var inAppAgent: [AgentTool] { all + [readSkill, describeTools] }
 
     private static func textBoxTransformProperties() -> [String: [String: Any]] {
         [

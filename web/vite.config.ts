@@ -5,22 +5,30 @@ import path from "node:path"
 import fs from "node:fs"
 
 /// The scene catalog the agent reads before authoring: module path to the components it exports.
-function remocnCatalog(): Plugin {
-  const source = path.resolve(__dirname, "./src/components/remocn")
+function componentCatalog(): Plugin {
   const output = path.resolve(__dirname, "../Sources/PalmierPro/Resources/MotionRuntime/components.json")
+  const libraries = [
+    { dir: path.resolve(__dirname, "./src/components/remocn"), prefix: "@/components/remocn", minimum: 100 },
+    { dir: path.resolve(__dirname, "./src/components/beui"), prefix: "@/components/beui", minimum: 90 },
+  ]
   return {
-    name: "palmier-remocn-catalog",
+    name: "palmier-component-catalog",
     enforce: "post",
     closeBundle() {
       const catalog: Record<string, string[]> = {}
-      for (const file of fs.readdirSync(source).sort()) {
-        if (!file.endsWith(".tsx")) continue
-        const code = fs.readFileSync(path.join(source, file), "utf8")
-        const exports = [...code.matchAll(/^export (?:function|const) ([A-Z]\w*)/gm)].map((match) => match[1])
-        if (exports.length > 0) catalog[`@/components/remocn/${file.replace(/\.tsx$/, "")}`] = exports
-      }
-      if (Object.keys(catalog).length < 100) {
-        throw new Error(`remocn catalog looks incomplete (${Object.keys(catalog).length} modules)`)
+      for (const { dir, prefix, minimum } of libraries) {
+        let modules = 0
+        for (const file of fs.readdirSync(dir, { recursive: true }).map(String).sort()) {
+          if (!file.endsWith(".tsx")) continue
+          const code = fs.readFileSync(path.join(dir, file), "utf8")
+          const exports = [...code.matchAll(/^export (?:function|const) ([A-Z]\w*)/gm)].map((match) => match[1])
+          if (exports.length === 0) continue
+          catalog[`${prefix}/${file.replace(/\.tsx$/, "").replace(/\/index$/, "")}`] = exports
+          modules += 1
+        }
+        if (modules < minimum) {
+          throw new Error(`${prefix} catalog looks incomplete (${modules} modules)`)
+        }
       }
       fs.writeFileSync(output, JSON.stringify(catalog, null, 2))
     },
@@ -59,7 +67,7 @@ function classicScript(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), viteSingleFile(), classicScript(), remocnCatalog()],
+  plugins: [react(), viteSingleFile(), classicScript(), componentCatalog()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

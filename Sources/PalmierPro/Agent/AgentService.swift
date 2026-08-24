@@ -497,7 +497,7 @@ final class AgentService {
         }
         await SkillStore.shared.reloadInBackground()
         let tools = ToolDefinitions.inAppAgent.map {
-            AnthropicToolSchema(name: $0.name.rawValue, description: $0.description, inputSchema: $0.inputSchema)
+            AnthropicToolSchema(name: $0.name.rawValue, description: $0.brief, inputSchema: $0.inputSchema)
         }
 
         loop: while !Task.isCancelled {
