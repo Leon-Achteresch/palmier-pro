@@ -93,5 +93,8 @@ enum NestFlattener {
         clip.rotationTrack = clip.rotationTrack?.rebased(by: headCut, fallback: 0)
         clip.cropTrack = clip.cropTrack?.rebased(by: headCut, fallback: clip.crop)
         clip.speedTrack = clip.speedTrack?.rebased(by: headCut, fallback: clip.speed)
+        clip.setBlurKeyframeTrack(
+            clip.blurKeyframeTrack?.rebased(by: headCut, fallback: clip.staticBlurRadius)
+        )
     }
 }

@@ -15,12 +15,20 @@ final class ToolHarness {
 
     let presetRoot: URL
 
-    init(timeline: Timeline = Fixtures.timeline(), exportQueue: ExportQueue = ExportQueue()) {
+    init(
+        timeline: Timeline = Fixtures.timeline(),
+        exportQueue: ExportQueue = ExportQueue(),
+        visualSearchModel: any VisualSearchModelLoading = VisualModelLoader.shared
+    ) {
         let editor = EditorViewModel()
         editor.timeline = timeline
         self.editor = editor
         self.exportQueue = exportQueue
-        self.executor = ToolExecutor(editor: editor, exportQueue: exportQueue)
+        self.executor = ToolExecutor(
+            editor: editor,
+            exportQueue: exportQueue,
+            visualSearchModel: visualSearchModel
+        )
         presetRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("palmier-presets-\(UUID().uuidString)", isDirectory: true)
         executor.presetStore = PresetStore(rootURL: presetRoot)
@@ -95,6 +103,27 @@ struct ToolExecutorSmokeTests {
         let result = await h.runRaw("nonexistent_tool")
         #expect(result.isError)
         #expect(ToolHarness.textOf(result).contains("Unknown tool"))
+    }
+
+    @Test func autofilledBlankArgsAreTreatedAsOmitted() async {
+        // OpenAI models fill omitted optional params with "" or null.
+        let scrubbed = ToolExecutor.droppingAutofilledBlanks(from: [
+            "reference": "",
+            "mediaRef": NSNull(),
+            "clipId": "C026AE24",
+            "atFrame": 45_788,
+        ])
+        #expect(scrubbed.keys.sorted() == ["atFrame", "clipId"])
+
+        // End to end: blank reference/mediaRef must not be looked up as ids.
+        let h = ToolHarness()
+        let result = await h.runRaw(
+            "inspect_color",
+            args: ["clipId": "", "mediaRef": "", "reference": ""]
+        )
+        #expect(result.isError)
+        #expect(ToolHarness.textOf(result).contains("Provide either clipId"))
+        #expect(!ToolHarness.textOf(result).contains("not found"))
     }
 
     @Test func getTimelineReturnsParseableJSON() async throws {
@@ -422,7 +451,10 @@ struct ToolExecutorReadOnlyTests {
         #expect(shared?["mediaType"] as? String == "text")
         #expect((shared?["textStyle"] as? [String: Any])?["fontName"] as? String == "Avenir")
         let sharedTransform = shared?["transform"] as? [String: Any]
-        #expect(sharedTransform?["centerY"] as? Double == 0.85)
+        #expect(sharedTransform?["x"] as? Double == 0.5)
+        #expect(sharedTransform?["y"] as? Double == 0.85)
+        #expect(sharedTransform?["centerX"] == nil)
+        #expect(sharedTransform?["centerY"] == nil)
         #expect(sharedTransform?["width"] == nil)
         #expect(sharedTransform?["height"] == nil)
 
@@ -572,6 +604,24 @@ struct ToolExecutorReadOnlyTests {
         let timelines = json?["timelines"] as? [[String: Any]]
         #expect(timelines?.count == 1)
         #expect(timelines?.first?["active"] as? Bool == true)
+    }
+
+    @Test func getMediaIdentifiesEnhanceableDrafts() async throws {
+        let h = ToolHarness()
+        let asset = h.makeAsset(name: "Draft")
+        var input = GenerationInput(
+            prompt: "Draft", model: "flux-3", duration: 8,
+            aspectRatio: "16:9", resolution: "720p", draft: true
+        )
+        input.backendJobId = "draft-job"
+        input.resultURLs = ["video", "cache"]
+        asset.generationInput = input
+        h.editor.updateManifestMetadata(for: [asset])
+
+        let json = try await h.runOK("get_media", args: ["ids": [asset.id]]) as? [String: Any]
+        let result = (json?["assets"] as? [[String: Any]])?.first
+        #expect(result?["draft"] as? Bool == true)
+        #expect(result?["canEnhanceDraft"] as? Bool == true)
     }
 
     @Test func getMediaRoundsFloatingPointNumbersToThreeDecimalPlaces() async throws {
@@ -1296,6 +1346,133 @@ struct ToolExecutorClipTests {
         #expect(h.editor.clipFor(id: clipId)?.edgeSoftness == 0.25)
     }
 
+    @Test func setClipPropertiesSetsStaticCropAndClearsCropTrack() async throws {
+        let (h, clipId) = await setupClipForKeyframes()
+        _ = await h.runRaw("set_keyframes", args: [
+            "clipId": clipId, "property": "crop",
+            "keyframes": [[0, 0.1, 0.1, 0.1, 0.1]],
+        ])
+        let result = await h.runRaw("set_clip_properties", args: [
+            "clipIds": [clipId],
+            "crop": ["left": 0.2, "top": 0.1, "right": 0.15, "bottom": 0.05],
+        ])
+        #expect(result.isError == false, "\(ToolHarness.textOf(result))")
+        let clip = try #require(h.editor.clipFor(id: clipId))
+        #expect(clip.crop == Crop(left: 0.2, top: 0.1, right: 0.15, bottom: 0.05))
+        #expect(clip.cropTrack == nil)
+        #expect(clip.cropAt(frame: clip.startFrame) == clip.crop)
+    }
+
+    @Test func setClipPropertiesCropMergesOmittedEdges() async throws {
+        let (h, asset) = await setupWithVideoTrack()
+        let clipId = await addedClip(in: h, asset: asset)
+        h.editor.timeline.tracks[0].clips[0].crop = Crop(left: 0.1, top: 0.2, right: 0.3, bottom: 0.4)
+        _ = await h.runRaw("set_clip_properties", args: [
+            "clipIds": [clipId], "crop": ["left": 0.25],
+        ])
+        let clip = try #require(h.editor.clipFor(id: clipId))
+        #expect(clip.crop == Crop(left: 0.25, top: 0.2, right: 0.3, bottom: 0.4))
+    }
+
+    @Test func setClipPropertiesCropMergesOmittedEdgesFromKeyedCrop() async throws {
+        let (h, clipId) = await setupClipForKeyframes()
+        _ = await h.runRaw("set_keyframes", args: [
+            "clipId": clipId, "property": "crop",
+            "keyframes": [[0, 0.1, 0.2, 0.3, 0.15]],
+        ])
+        let result = await h.runRaw("set_clip_properties", args: [
+            "clipIds": [clipId], "crop": ["left": 0.25],
+        ])
+        #expect(result.isError == false, "\(ToolHarness.textOf(result))")
+        let clip = try #require(h.editor.clipFor(id: clipId))
+        #expect(clip.crop == Crop(left: 0.25, top: 0.1, right: 0.2, bottom: 0.3))
+        #expect(clip.cropTrack == nil)
+    }
+
+    @Test func setClipPropertiesCropKeepsPlayheadMergeWhenTimingClampsCropTrack() async throws {
+        let (h, clipId) = await setupClipForKeyframes()
+        h.editor.currentFrame = 20
+        _ = await h.runRaw("set_keyframes", args: [
+            "clipId": clipId, "property": "crop",
+            "keyframes": [
+                [0, 0, 0, 0, 0, "linear"],
+                [40, 0.5, 0.5, 0.5, 0.5, "linear"],
+            ],
+        ])
+        let result = await h.runRaw("set_clip_properties", args: [
+            "clipIds": [clipId],
+            "durationFrames": 30,
+            "crop": ["left": 0.2],
+        ])
+        #expect(result.isError == false, "\(ToolHarness.textOf(result))")
+        let clip = try #require(h.editor.clipFor(id: clipId))
+        #expect(clip.crop == Crop(left: 0.2, top: 0.25, right: 0.25, bottom: 0.25))
+        #expect(clip.cropTrack == nil)
+        #expect(clip.durationFrames == 30)
+    }
+
+    @Test func setClipPropertiesCropAllZerosRestoresFullSource() async throws {
+        let (h, asset) = await setupWithVideoTrack()
+        let clipId = await addedClip(in: h, asset: asset)
+        h.editor.timeline.tracks[0].clips[0].crop = Crop(left: 0.2, top: 0.1, right: 0.2, bottom: 0.1)
+        _ = await h.runRaw("set_clip_properties", args: [
+            "clipIds": [clipId],
+            "crop": ["left": 0, "top": 0, "right": 0, "bottom": 0],
+        ])
+        #expect(h.editor.clipFor(id: clipId)?.crop.isIdentity == true)
+    }
+
+    @Test func setClipPropertiesRejectsCropOnNonVisualClips() async {
+        let clip = Fixtures.clip(id: "audio", mediaType: .audio, start: 0, duration: 30)
+        let h = ToolHarness(timeline: Fixtures.timeline(tracks: [Fixtures.audioTrack(clips: [clip])]))
+        let result = await h.runRaw("set_clip_properties", args: [
+            "clipIds": [clip.id], "crop": ["left": 0.2],
+        ])
+        #expect(result.isError)
+        #expect(ToolHarness.textOf(result).contains("visual clips"))
+        #expect(h.editor.clipFor(id: clip.id)?.crop.isIdentity == true)
+    }
+
+    @Test func setClipPropertiesRejectsCropThatHidesTheSource() async throws {
+        let (h, asset) = await setupWithVideoTrack()
+        let clipId = await addedClip(in: h, asset: asset)
+        let result = await h.runRaw("set_clip_properties", args: [
+            "clipIds": [clipId], "crop": ["left": 0.5, "right": 0.5],
+        ])
+        #expect(result.isError)
+        #expect(ToolHarness.textOf(result).contains("visible"))
+        #expect(h.editor.clipFor(id: clipId)?.crop.isIdentity == true)
+    }
+
+    @Test func setClipPropertiesRejectsNegativeCropInset() async throws {
+        let (h, asset) = await setupWithVideoTrack()
+        let clipId = await addedClip(in: h, asset: asset)
+        let result = await h.runRaw("set_clip_properties", args: [
+            "clipIds": [clipId], "crop": ["top": -0.1],
+        ])
+        #expect(result.isError)
+        #expect(ToolHarness.textOf(result).contains("top"))
+    }
+
+    @Test func setClipPropertiesRejectsUnknownCropKey() async throws {
+        let (h, asset) = await setupWithVideoTrack()
+        let clipId = await addedClip(in: h, asset: asset)
+        let result = await h.runRaw("set_clip_properties", args: [
+            "clipIds": [clipId], "crop": ["anchorX": 0.5],
+        ])
+        #expect(result.isError)
+        #expect(ToolHarness.textOf(result).contains("anchorX"))
+    }
+
+    @Test func setClipPropertiesCropDoesNotPropagateToLinkedPartner() async throws {
+        let (h, videoId, audioId) = await setupLinkedPair()
+        _ = await h.runRaw("set_clip_properties", args: [
+            "clipIds": [videoId], "crop": ["left": 0.2],
+        ])
+        #expect(h.editor.clipFor(id: videoId)?.crop.left == 0.2)
+        #expect(h.editor.clipFor(id: audioId)?.crop.isIdentity == true)
+    }
+
     @Test func setClipPropertiesSetsFadesWithoutClearingKeyframes() async throws {
         let (h, clipId) = await setupClipForKeyframes()
         _ = await h.runRaw("set_keyframes", args: [
@@ -1932,16 +2109,37 @@ struct ToolExecutorTextFolderTests {
 
     // MARK: - add_texts
 
-    @Test func updateTextSchemaExposesIndependentTextScale() throws {
-        let tool = try #require(ToolDefinitions.mcpServer.first { $0.name == .updateText })
-        let properties = try #require(tool.inputSchema["properties"] as? [String: [String: Any]])
-        let style = try #require(properties["style"])
+    @Test func textSchemasExposeAlignmentRelativePositionWithoutBoxDimensions() throws {
+        let updateTool = try #require(ToolDefinitions.mcpServer.first { $0.name == .updateText })
+        let updateProperties = try #require(updateTool.inputSchema["properties"] as? [String: [String: Any]])
+        let style = try #require(updateProperties["style"])
         let styleProperties = try #require(style["properties"] as? [String: [String: Any]])
 
         #expect((styleProperties["widthScale"]?["minimum"] as? NSNumber)?.doubleValue == 0.1)
         #expect((styleProperties["widthScale"]?["maximum"] as? NSNumber)?.doubleValue == 10)
         #expect((styleProperties["heightScale"]?["minimum"] as? NSNumber)?.doubleValue == 0.1)
         #expect((styleProperties["heightScale"]?["maximum"] as? NSNumber)?.doubleValue == 10)
+        #expect((styleProperties["blur"]?["maximum"] as? NSNumber)?.doubleValue == 100)
+
+        let updateTransform = try #require(updateProperties["transform"]?["properties"] as? [String: [String: Any]])
+        #expect(Set(updateTransform.keys) == ["x", "y", "rotation", "rotationX", "rotationY"])
+
+        let addTool = try #require(ToolDefinitions.mcpServer.first { $0.name == .addTexts })
+        let addProperties = try #require(addTool.inputSchema["properties"] as? [String: [String: Any]])
+        let entries = try #require(addProperties["entries"])
+        let items = try #require(entries["items"] as? [String: Any])
+        let entryProperties = try #require(items["properties"] as? [String: [String: Any]])
+        let addStyle = try #require(entryProperties["style"]?["properties"] as? [String: [String: Any]])
+        #expect(addStyle["blur"] != nil)
+        let addTransform = try #require(entryProperties["transform"]?["properties"] as? [String: [String: Any]])
+        #expect(Set(addTransform.keys) == ["x", "y", "rotation", "rotationX", "rotationY"])
+
+        let captionsTool = try #require(ToolDefinitions.mcpServer.first { $0.name == .addCaptions })
+        let captionsProperties = try #require(captionsTool.inputSchema["properties"] as? [String: [String: Any]])
+        let captionsStyle = try #require(captionsProperties["style"]?["properties"] as? [String: [String: Any]])
+        #expect(captionsStyle["blur"] != nil)
+        let captionsTransform = try #require(captionsProperties["transform"]?["properties"] as? [String: [String: Any]])
+        #expect(Set(captionsTransform.keys) == ["x", "y", "rotation", "rotationX", "rotationY"])
     }
 
     @Test func addTextsCreatesNewTrackWhenIndexOmitted() async throws {
@@ -1979,6 +2177,118 @@ struct ToolExecutorTextFolderTests {
         let clip = h.editor.timeline.tracks[0].clips[0]
         #expect(clip.textContent == "Caption")
         #expect(clip.textStyle?.fontSize == 48)
+    }
+
+    @Test func addTextsPositionsXAtTheSelectedAlignmentEdge() async throws {
+        let h = ToolHarness()
+        _ = h.editor.insertTrack(at: 0, type: .video)
+
+        let result = await h.runRaw("add_texts", args: [
+            "entries": [[
+                "trackIndex": 0,
+                "startFrame": 0,
+                "endFrame": 60,
+                "content": "Left anchored",
+                "style": ["alignment": "left"],
+                "transform": ["x": 0.1],
+            ]]
+        ])
+
+        #expect(result.isError == false, "\(ToolHarness.textOf(result))")
+        let clip = try #require(h.editor.timeline.tracks[0].clips.first)
+        #expect(abs(clip.transform.topLeft.x - 0.1) < 0.0001)
+        #expect(clip.transform.centerY == 0.5)
+
+        let payload = try #require(
+            JSONSerialization.jsonObject(with: Data(ToolHarness.textOf(result).utf8)) as? [String: Any]
+        )
+        let transform = try #require(
+            (payload["clips"] as? [[String: Any]])?.first?["transform"] as? [String: Any]
+        )
+        #expect(abs((transform["x"] as? Double ?? -1) - 0.1) < 0.0001)
+        #expect(transform["y"] as? Double == 0.5)
+        #expect(transform["centerX"] == nil)
+        #expect(transform["centerY"] == nil)
+        #expect(transform["width"] == nil)
+        #expect(transform["height"] == nil)
+    }
+
+    @Test func addTextsAllowsYWithoutChangingTheDefaultHorizontalCenter() async throws {
+        let h = ToolHarness()
+        _ = h.editor.insertTrack(at: 0, type: .video)
+
+        let result = await h.runRaw("add_texts", args: [
+            "entries": [[
+                "trackIndex": 0,
+                "startFrame": 0,
+                "endFrame": 60,
+                "content": "Vertically placed",
+                "transform": ["y": 0.8],
+            ]]
+        ])
+
+        #expect(result.isError == false, "\(ToolHarness.textOf(result))")
+        let clip = try #require(h.editor.timeline.tracks[0].clips.first)
+        #expect(clip.transform.centerX == 0.5)
+        #expect(clip.transform.centerY == 0.8)
+    }
+
+    @Test func updateTextAutoFitsContentAtRequestedAnchor() async throws {
+        var clip = Fixtures.clip(id: "title", mediaRef: "", mediaType: .text, start: 0, duration: 60)
+        clip.textContent = "I"
+        var style = TextStyle()
+        style.alignment = .right
+        clip.textStyle = style
+        clip.transform = Transform(centerX: 0.5, centerY: 0.5, width: 0.8, height: 0.6)
+        let h = ToolHarness(timeline: Fixtures.timeline(tracks: [Fixtures.videoTrack(clips: [clip])]))
+
+        let content = "A much longer title"
+        let result = await h.runRaw("update_text", args: [
+            "clipIds": [clip.id],
+            "content": content,
+            "transform": ["x": 0.2, "y": 0.3],
+        ])
+
+        #expect(result.isError == false, "\(ToolHarness.textOf(result))")
+        let updated = try #require(h.editor.clipFor(id: clip.id))
+        let natural = TextLayout.naturalSize(
+            content: content,
+            style: style,
+            maxWidth: CGFloat(h.editor.timeline.width) * 0.9,
+            canvasHeight: CGFloat(h.editor.timeline.height)
+        )
+        #expect(abs(updated.transform.centerX + updated.transform.width / 2 - 0.2) < 0.0001)
+        #expect(updated.transform.centerY == 0.3)
+        #expect(abs(updated.transform.width - Double(natural.width) / Double(h.editor.timeline.width)) < 0.0001)
+        #expect(abs(updated.transform.height - Double(natural.height) / Double(h.editor.timeline.height)) < 0.0001)
+
+        let resize = await h.runRaw("update_text", args: [
+            "clipIds": [clip.id],
+            "content": "\(content) that keeps growing",
+        ])
+        #expect(resize.isError == false, "\(ToolHarness.textOf(resize))")
+        let resized = try #require(h.editor.clipFor(id: clip.id))
+        #expect(resized.transform.width > updated.transform.width)
+        #expect(abs(resized.transform.centerX + resized.transform.width / 2 - 0.2) < 0.0001)
+    }
+
+    @Test func updateTextKeepsTheAnchorWhenAlignmentChanges() async throws {
+        var clip = Fixtures.clip(id: "title", mediaRef: "", mediaType: .text, start: 0, duration: 60)
+        clip.textContent = "Title"
+        clip.textStyle = TextStyle()
+        clip.transform = Transform(centerX: 0.4, centerY: 0.6, width: 0.2, height: 0.1)
+        let h = ToolHarness(timeline: Fixtures.timeline(tracks: [Fixtures.videoTrack(clips: [clip])]))
+
+        let result = await h.runRaw("update_text", args: [
+            "clipIds": [clip.id],
+            "style": ["alignment": "left"],
+        ])
+
+        #expect(result.isError == false, "\(ToolHarness.textOf(result))")
+        let updated = try #require(h.editor.clipFor(id: clip.id))
+        #expect(updated.textStyle?.alignment == .left)
+        #expect(abs(updated.transform.topLeft.x - 0.4) < 0.0001)
+        #expect(updated.transform.centerY == 0.6)
     }
 
     @Test func addTextsAppliesRichTextStyleFields() async throws {
@@ -2406,6 +2716,33 @@ struct SetClipPropertiesTests {
         #expect(group?["textPreview"] as? String == "word0 … word2")
     }
 
+    @Test func updateTextSingleCaptionReceiptPreservesDeviantStyle() async {
+        var clips: [Clip] = []
+        for i in 0..<3 {
+            var clip = Fixtures.clip(id: "cap-\(i)", mediaRef: "text", mediaType: .text, start: i * 30, duration: 30)
+            clip.captionGroupId = "g1"
+            clip.textContent = "word\(i)"
+            clip.textStyle = TextStyle()
+            clips.append(clip)
+        }
+        let h = ToolHarness(timeline: Fixtures.timeline(tracks: [Fixtures.videoTrack(clips: clips)]))
+
+        let result = await h.runRaw("update_text", args: [
+            "clipIds": ["cap-1"],
+            "style": ["color": "#FF0000"],
+        ])
+
+        #expect(result.isError == false, "\(ToolHarness.textOf(result))")
+        let json = (try? JSONSerialization.jsonObject(with: Data(ToolHarness.textOf(result).utf8))) as? [String: Any]
+        let receipt = (json?["clips"] as? [[String: Any]])?.first
+        let color = (receipt?["textStyle"] as? [String: Any])?["color"] as? [String: Any]
+        #expect(receipt?["id"] as? String == "cap-1")
+        #expect(receipt?["captionGroupId"] as? String == "g1")
+        #expect(color?["r"] == nil)
+        #expect((color?["g"] as? NSNumber)?.doubleValue == 0)
+        #expect((color?["b"] as? NSNumber)?.doubleValue == 0)
+    }
+
     @Test func updateTextCaptionGroupAcceptsRichTextStyleFields() async {
         var a = Fixtures.clip(id: "cap-a", mediaRef: "text", mediaType: .text, start: 0, duration: 30)
         var b = Fixtures.clip(id: "cap-b", mediaRef: "text", mediaType: .text, start: 30, duration: 30)
@@ -2464,12 +2801,12 @@ struct SetClipPropertiesTests {
 
         let result = await h.runRaw("update_text", args: [
             "clipIds": ["title"],
-            "animation": "wordPop",
+            "animation": "wordSlide",
         ])
 
         #expect(result.isError == false, "\(ToolHarness.textOf(result))")
         let animation = h.editor.timeline.tracks[0].clips[0].textAnimation
-        #expect(animation?.preset == .wordPop)
+        #expect(animation?.preset == .wordSlide)
         #expect(animation?.perWordFrames == 12)
         #expect(animation?.highlight == highlight)
     }

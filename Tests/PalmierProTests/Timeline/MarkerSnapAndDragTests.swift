@@ -21,8 +21,8 @@ struct MarkerSnapAndDragTests {
 
     @Test func markerFramesBecomeSnapTargets() {
         let markers = [
-            TimelineMarker(frame: 42, color: .blue, kind: .standard),
-            TimelineMarker(frame: 90, color: .red, kind: .chapter),
+            TimelineMarker(name: "A", startFrame: 42),
+            TimelineMarker(name: "B", startFrame: 90, kind: .chapter),
         ]
         let targets = SnapEngine.collectTargets(tracks: [], markers: markers)
         #expect(targets.map(\.frame) == [42, 90])
@@ -30,8 +30,8 @@ struct MarkerSnapAndDragTests {
     }
 
     @Test func theDraggedMarkerIsNotASnapTargetForItself() {
-        let marker = TimelineMarker(frame: 42, color: .blue, kind: .standard)
-        let other = TimelineMarker(frame: 90, color: .blue, kind: .standard)
+        let marker = TimelineMarker(name: "A", startFrame: 42)
+        let other = TimelineMarker(name: "B", startFrame: 90)
         let targets = SnapEngine.collectTargets(
             tracks: [], markers: [marker, other], excludeMarkerIds: [marker.id]
         )
@@ -40,7 +40,7 @@ struct MarkerSnapAndDragTests {
 
     @Test func aClipEdgeDragSnapsToANearbyMarker() {
         let track = Fixtures.videoTrack(clips: [Fixtures.clip(id: "drag", start: 0, duration: 50)])
-        let marker = TimelineMarker(frame: 120, color: .blue, kind: .standard)
+        let marker = TimelineMarker(name: "C", startFrame: 120)
         let targets = SnapEngine.collectTargets(
             tracks: [track], excludeClipIds: ["drag"], markers: [marker]
         )
@@ -50,54 +50,5 @@ struct MarkerSnapAndDragTests {
         )
         #expect(snap?.frame == 120)
         #expect(snap?.probeOffset == 0)
-    }
-
-    @Test func draggingAMarkerCommitsOneUndoEntry() throws {
-        let h = Harness()
-        let editor = h.editor
-        let marker = try #require(editor.addMarker(atFrame: 100))
-
-        for frame in [104, 118, 130] {
-            editor.previewMarkerFrame(id: marker.id, frame: frame)
-        }
-        #expect(editor.timeline.marker(id: marker.id)?.frame == 130)
-        #expect(editor.commitMarkerDrag(id: marker.id, fromFrame: 100))
-
-        #expect(editor.undo.undoLatest() == "Move Marker")
-        #expect(editor.timeline.marker(id: marker.id)?.frame == 100)
-        #expect(editor.undo.undoLatest() == "Add Marker")
-        #expect(editor.timeline.markers.isEmpty)
-    }
-
-    @Test func aDragThatEndsWhereItStartedRegistersNothing() throws {
-        let h = Harness()
-        let editor = h.editor
-        let marker = try #require(editor.addMarker(atFrame: 100))
-
-        editor.previewMarkerFrame(id: marker.id, frame: 140)
-        editor.previewMarkerFrame(id: marker.id, frame: 100)
-
-        #expect(!editor.commitMarkerDrag(id: marker.id, fromFrame: 100))
-        #expect(editor.undo.undoLatest() == "Add Marker")
-    }
-
-    @Test func aPreviewOutsideTheTimelineIsIgnored() throws {
-        let h = Harness()
-        let editor = h.editor
-        let marker = try #require(editor.addMarker(atFrame: 100))
-
-        editor.previewMarkerFrame(id: marker.id, frame: -5)
-        editor.previewMarkerFrame(id: marker.id, frame: editor.markerFrameLimit + 1)
-        #expect(editor.timeline.marker(id: marker.id)?.frame == 100)
-    }
-
-    @Test func markersStayFrameOrderedWhileDragging() throws {
-        let h = Harness()
-        let editor = h.editor
-        let first = try #require(editor.addMarker(atFrame: 10))
-        _ = editor.addMarker(atFrame: 120)
-
-        editor.previewMarkerFrame(id: first.id, frame: 250)
-        #expect(editor.timeline.markers.map(\.frame) == [120, 250])
     }
 }

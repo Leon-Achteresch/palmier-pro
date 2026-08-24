@@ -52,7 +52,7 @@ extension InspectorView {
             }
             .help("Stereo position: negative is left, positive is right. Mono sources keep their level.")
         }
-        .frame(height: KeyframesMetrics.rowHeight)
+        .frame(height: AppTheme.EditorPanel.fieldMinHeight)
     }
 
     private func eqRow(
@@ -91,7 +91,7 @@ extension InspectorView {
                 }
             }
         }
-        .frame(height: KeyframesMetrics.rowHeight)
+        .frame(height: AppTheme.EditorPanel.fieldMinHeight)
     }
 
     private func midFrequencyRow(audios: [Clip]) -> some View {
@@ -130,7 +130,7 @@ extension InspectorView {
                 }
             }
         }
-        .frame(height: KeyframesMetrics.rowHeight)
+        .frame(height: AppTheme.EditorPanel.fieldMinHeight)
     }
 
     private func compressorRow(audios: [Clip]) -> some View {
@@ -189,7 +189,7 @@ extension InspectorView {
                 }
             }
         }
-        .frame(height: KeyframesMetrics.rowHeight)
+        .frame(height: AppTheme.EditorPanel.fieldMinHeight)
     }
 
     private func applyMix(_ clips: [Clip], _ modify: @escaping (inout ClipAudioMix) -> Void) {

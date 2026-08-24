@@ -28,8 +28,7 @@ extension EditorViewModel {
     }
 
     static func nearestSupportedDuration(seconds: Double, in durations: [Int]) -> Int {
-        durations.min { abs(Double($0) - seconds) < abs(Double($1) - seconds) }
-            ?? max(1, Int(seconds.rounded()))
+        VideoModelConfig.nearestSupportedDuration(seconds: seconds, in: durations)
     }
 
     static func closestAspectRatio(width: Int, height: Int, in allowed: [String]) -> String {
@@ -49,12 +48,6 @@ extension EditorViewModel {
         return a / b
     }
 
-    func defaultTransitionModel() -> VideoModelConfig? {
-        VideoModelConfig.allModels.first {
-            !$0.requiresSourceVideo && $0.supportsFirstFrame && $0.supportsLastFrame
-        }
-    }
-
     func aiTransitionAvailability(for gap: GapSelection) -> (model: VideoModelConfig?, refusal: String?) {
         guard timeline.tracks.indices.contains(gap.trackIndex), gap.range.start > 0,
               gap.range.length > 0, timeline.tracks[gap.trackIndex].type == .video else { return (nil, nil) }
@@ -65,7 +58,7 @@ extension EditorViewModel {
         guard aiEditAllowed else {
             return (nil, "Sign in or add an OpenRouter API key in Settings › Agent.")
         }
-        let model = defaultTransitionModel()
+        let model = VideoModelConfig.firstAndLastFrame
         return (model, model == nil ? "No video model supports first and last frames." : nil)
     }
 
@@ -77,7 +70,7 @@ extension EditorViewModel {
             guard aiEditAllowed else {
                 return (nil, "Sign in or add an OpenRouter API key in Settings › Agent.")
             }
-            let model = defaultTransitionModel()
+            let model = VideoModelConfig.firstAndLastFrame
             guard let model else {
                 return (nil, "No video model supports first and last frames.")
             }
@@ -187,10 +180,7 @@ extension EditorViewModel {
             gapStartFrame: gap.range.start,
             gapLengthFrames: gap.range.length
         )
-        let duration = Self.nearestSupportedDuration(
-            seconds: transitionGapSeconds(lengthFrames: placement.gapLengthFrames),
-            in: model.durations
-        )
+        let gapSeconds = transitionGapSeconds(lengthFrames: placement.gapLengthFrames)
         cancelPendingTransitionSeed()
         transitionSeedTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -210,15 +200,12 @@ extension EditorViewModel {
                 )
                 try Task.checkCancellation()
                 guard transitionSeedIsCurrent(placement) else { return }
-                var stored = GenerationInput(
-                    prompt: Self.defaultTransitionPrompt, model: model.id,
-                    duration: duration,
-                    aspectRatio: Self.closestAspectRatio(
-                        width: timeline.width, height: timeline.height, in: model.aspectRatios
-                    ),
-                    resolution: model.resolutions?.first
+                let stored = EditSubmitter.transitionSeed(
+                    model: model,
+                    firstFrame: first.asset,
+                    lastFrame: last.asset,
+                    gapSeconds: gapSeconds
                 )
-                stored.imageURLAssetIds = [first.asset.id, last.asset.id]
                 seedGenerationPanel(asset: first.asset, stored: stored, transitionPlacement: placement)
             } catch is CancellationError {
             } catch {

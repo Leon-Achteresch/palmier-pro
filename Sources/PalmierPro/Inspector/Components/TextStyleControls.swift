@@ -27,11 +27,14 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
     let selection: TextStyleSelection
     let defaults: TextStyle
     let styleExpanded: Binding<Bool>?
+    let showsColorControl: Bool
     let showsSolidFillControls: Bool
+    let keyframeClips: [Clip]
     let actions: TextStyleEditingActions
     @ViewBuilder let afterAlignment: () -> AfterAlignment
     @ViewBuilder let afterColor: () -> AfterColor
 
+    @Environment(EditorViewModel.self) private var editor
     @State private var outlineExpanded: Bool
     @State private var shadowExpanded: Bool
     @State private var backgroundExpanded: Bool
@@ -41,7 +44,9 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
         defaults: TextStyle,
         styleExpanded: Binding<Bool>? = nil,
         groupsExpandedByDefault: Bool = true,
+        showsColorControl: Bool = true,
         showsSolidFillControls: Bool = true,
+        keyframeClips: [Clip] = [],
         actions: TextStyleEditingActions,
         @ViewBuilder afterAlignment: @escaping () -> AfterAlignment,
         @ViewBuilder afterColor: @escaping () -> AfterColor
@@ -49,7 +54,9 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
         self.selection = selection
         self.defaults = defaults
         self.styleExpanded = styleExpanded
+        self.showsColorControl = showsColorControl
         self.showsSolidFillControls = showsSolidFillControls
+        self.keyframeClips = keyframeClips
         self.actions = actions
         self.afterAlignment = afterAlignment
         self.afterColor = afterColor
@@ -60,19 +67,23 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.zero) {
-            EditorPanelGroup("Style", isExpanded: styleExpanded) {
+            EditorPanelGroup(L10n.string("Style"), isExpanded: styleExpanded) {
                 fontRow
                 traitsRow
+                if keyframeClips.isEmpty {
+                    numberRow(
+                        label: L10n.string("Size"),
+                        range: 12...300,
+                        format: "%.0f",
+                        suffix: " pt",
+                        fitToContent: true,
+                        keyPath: \.fontSize
+                    )
+                } else {
+                    textSizeRow
+                }
                 numberRow(
-                    label: "Size",
-                    range: 12...300,
-                    format: "%.0f",
-                    suffix: " pt",
-                    fitToContent: true,
-                    keyPath: \.fontSize
-                )
-                numberRow(
-                    label: "Width",
+                    label: L10n.string("Width"),
                     range: TextStyle.axisScaleRange,
                     displayMultiplier: 100,
                     format: "%.0f",
@@ -81,7 +92,7 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
                     keyPath: \.widthScale
                 )
                 numberRow(
-                    label: "Height",
+                    label: L10n.string("Height"),
                     range: TextStyle.axisScaleRange,
                     displayMultiplier: 100,
                     format: "%.0f",
@@ -90,7 +101,7 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
                     keyPath: \.heightScale
                 )
                 numberRow(
-                    label: "Tracking",
+                    label: L10n.string("Tracking"),
                     range: -20...100,
                     format: "%.1f",
                     suffix: " pt",
@@ -98,7 +109,7 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
                     keyPath: \.tracking
                 )
                 numberRow(
-                    label: "Line Spacing",
+                    label: L10n.string("Line Spacing"),
                     range: -100...300,
                     format: "%.1f",
                     suffix: " pt",
@@ -108,14 +119,21 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
                 fontCaseRow
                 alignmentRow
                 afterAlignment()
-                if showsSolidFillControls {
+                if showsColorControl {
                     colorRow(
-                        label: "Color",
+                        label: L10n.string("Color"),
                         debounceKey: "textColor",
                         keyPath: \.color
                     )
                 }
                 afterColor()
+                numberRow(
+                    label: L10n.string("Blur"),
+                    range: 0...100,
+                    format: "%.0f",
+                    suffix: " px",
+                    keyPath: \.blur
+                )
             }
             if showsSolidFillControls {
                 outlineGroup
@@ -128,7 +146,7 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
     private var fontRow: some View {
         let originalFont = selection.value(\.fontName)
         return InspectorRow(
-            label: "Font",
+            label: L10n.string("Font"),
             onReset: {
                 actions.commit(true) { $0.fontName = defaults.fontName }
             }
@@ -150,7 +168,7 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
 
     private var traitsRow: some View {
         InspectorRow(
-            label: "Style",
+            label: L10n.string("Style"),
             onReset: {
                 actions.commit(true) {
                     $0.isBold = defaults.isBold
@@ -188,19 +206,19 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
 
     private var fontCaseRow: some View {
         InspectorRow(
-            label: "Font Case",
+            label: L10n.string("Font Case"),
             onReset: {
                 actions.commit(true) { $0.fontCase = defaults.fontCase }
             }
         ) {
             Menu {
                 ForEach(TextStyle.FontCase.allCases, id: \.self) { fontCase in
-                    Button(fontCase.label) {
+                    Button(L10n.string(key: fontCase.label)) {
                         actions.commit(true) { $0.fontCase = fontCase }
                     }
                 }
             } label: {
-                EditorMenuValue(text: selection.value(\.fontCase)?.label ?? "—")
+                EditorMenuValue(text: selection.value(\.fontCase).map { L10n.string(key: $0.label) } ?? "—")
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
@@ -211,13 +229,13 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
 
     private var alignmentRow: some View {
         InspectorRow(
-            label: "Alignment",
+            label: L10n.string("Alignment"),
             onReset: {
                 actions.commit(false) { $0.alignment = defaults.alignment }
             }
         ) {
             Picker(
-                "",
+                String(),
                 selection: Binding(
                     get: { selection.primary.alignment },
                     set: { value in actions.commit(false) { $0.alignment = value } }
@@ -229,14 +247,14 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .tint(Color.white.opacity(AppTheme.Opacity.strong))
+            .tint(AppTheme.Accent.primary.opacity(AppTheme.Opacity.strong))
             .fixedSize()
         }
     }
 
     private var outlineGroup: some View {
         decorationGroup(
-            "Outline",
+            L10n.string("Outline"),
             isExpanded: $outlineExpanded,
             fitToContent: true,
             enabledKeyPath: \.border.enabled,
@@ -244,12 +262,12 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
             onReset: { $0.border = defaults.border }
         ) {
             colorRow(
-                label: "Color",
+                label: L10n.string("Color"),
                 debounceKey: "outlineColor",
                 keyPath: \.border.color
             )
             numberRow(
-                label: "Width",
+                label: L10n.string("Width"),
                 range: 0...40,
                 format: "%.1f",
                 suffix: " pt",
@@ -261,7 +279,7 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
 
     private var shadowGroup: some View {
         decorationGroup(
-            "Shadow",
+            L10n.string("Shadow"),
             isExpanded: $shadowExpanded,
             fitToContent: true,
             enabledKeyPath: \.shadow.enabled,
@@ -269,13 +287,13 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
             onReset: { $0.shadow = defaults.shadow }
         ) {
             colorRow(
-                label: "Color",
+                label: L10n.string("Color"),
                 debounceKey: "shadowColor",
                 preservesOpacity: true,
                 keyPath: \.shadow.color
             )
             numberRow(
-                label: "Opacity",
+                label: L10n.string("Opacity"),
                 range: 0...1,
                 displayMultiplier: 100,
                 format: "%.0f",
@@ -283,14 +301,14 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
                 keyPath: \.shadow.color.a
             )
             pairRow(
-                label: "Offset",
+                label: L10n.string("Offset"),
                 range: -200...200,
                 fitToContent: true,
                 xKeyPath: \.shadow.offsetX,
                 yKeyPath: \.shadow.offsetY
             )
             numberRow(
-                label: "Blur",
+                label: L10n.string("Blur"),
                 range: 0...100,
                 format: "%.1f",
                 suffix: " pt",
@@ -302,7 +320,7 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
 
     private var backgroundGroup: some View {
         decorationGroup(
-            "Background",
+            L10n.string("Background"),
             isExpanded: $backgroundExpanded,
             fitToContent: true,
             enabledKeyPath: \.background.enabled,
@@ -310,13 +328,13 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
             onReset: { $0.background = defaults.background }
         ) {
             colorRow(
-                label: "Color",
+                label: L10n.string("Color"),
                 debounceKey: "backgroundColor",
                 preservesOpacity: true,
                 keyPath: \.background.color
             )
             numberRow(
-                label: "Opacity",
+                label: L10n.string("Opacity"),
                 range: 0...1,
                 displayMultiplier: 100,
                 format: "%.0f",
@@ -324,32 +342,32 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
                 keyPath: \.background.color.a
             )
             pairRow(
-                label: "Padding",
+                label: L10n.string("Padding"),
                 range: 0...300,
                 fitToContent: true,
                 xKeyPath: \.background.paddingX,
                 yKeyPath: \.background.paddingY
             )
             pairRow(
-                label: "Center",
+                label: L10n.string("Center"),
                 range: -500...500,
                 xKeyPath: \.background.offsetX,
                 yKeyPath: \.background.offsetY
             )
             numberRow(
-                label: "Corner Radius",
+                label: L10n.string("Corner Radius"),
                 range: 0...300,
                 format: "%.1f",
                 suffix: " pt",
                 keyPath: \.background.cornerRadius
             )
             colorRow(
-                label: "Outline Color",
+                label: L10n.string("Outline Color"),
                 debounceKey: "backgroundOutlineColor",
                 keyPath: \.background.outlineColor
             )
             numberRow(
-                label: "Outline Width",
+                label: L10n.string("Outline Width"),
                 range: 0...40,
                 format: "%.1f",
                 suffix: " pt",
@@ -377,7 +395,7 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
             },
             headerAccessory: {
                 Toggle(
-                    "",
+                    String(),
                     isOn: Binding(
                         get: { enabled ?? false },
                         set: { value in
@@ -391,7 +409,7 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
                 .toggleStyle(.switch)
                 .controlSize(.mini)
                 .tint(AppTheme.Text.primaryColor.opacity(AppTheme.Opacity.strong))
-                .accessibilityLabel(title)
+                .accessibilityLabel(L10n.string(key: title))
             }
         ) {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.smMd) {
@@ -434,6 +452,23 @@ struct TextStyleControls<AfterAlignment: View, AfterColor: View>: View {
                     }
                 },
                 supportsOpacity: !preservesOpacity
+            )
+        }
+    }
+
+    private var textSizeRow: some View {
+        InspectorRow(
+            label: L10n.string("Size"),
+            onReset: {
+                editor.resetTextSize(
+                    clipIds: keyframeClips.map(\.id),
+                    defaultSize: defaults.fontSize
+                )
+            }
+        ) {
+            InspectorKeyframePropertyControl(
+                clips: keyframeClips,
+                property: .scale
             )
         }
     }

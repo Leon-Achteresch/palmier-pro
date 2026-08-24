@@ -12,6 +12,13 @@ swift test
 
 Use `swift build --traits BundledSpeech` for changes that touch MLX, speech analysis, transcription, or bundled speech resources.
 
+## Agents
+
+- Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
+- Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
+- Grow the system in layers, Start from the smallest version that works end to end, and add each new feature on top of a product that already works.
+- Make architectural decisions for the long term. Do not accept a stopgap that only works for now.
+
 ## Engineering approach
 
 - Understand the owning feature and existing abstractions before editing. Trace the complete call path, including UI, Agent tools, undo, persistence, and background work.
@@ -178,6 +185,17 @@ Rule: **any drop target that spans an area containing other drop targets must us
 - Do not use `#if DEBUG` to select a fundamentally different resource path or user behavior unless the difference is intentional and tested.
 - When adding a bundled resource, update `Package.swift`, bundle scripts, and tests as required. Verify the final `.app` layout when packaging behavior changes.
 - Keep optional feature-trait code buildable both with and without the trait.
+
+## Localization
+
+- Localize fixed app-owned UI copy with `L10n.string`. Keep interpolation inside the localized value so translations can reorder it.
+- Register app-owned UI labels stored in models with `L10n.key`, then resolve them at the UI boundary with `L10n.string(key:)`.
+- Render user content, filenames, technical values, provider metadata, and other non-translatable values with `Text(verbatim:)` or an equivalent verbatim API.
+- Never localize Agent or MCP contracts, persistence values, stable identifiers, machine-readable errors, or analytics values.
+- Run `scripts/localization/sync.sh` after changing UI copy. CI requires complete coverage when a PR changes a non-English catalog.
+- The generated `en.lproj/Localizable.strings` file is the source inventory. Do not edit it manually.
+- A language PR must add only complete `<locale>.lproj` directories containing `Localizable.strings` and `InfoPlist.strings`. Translate values, never keys, and do not add production-code language lists.
+- Follow `docs/Localization.md` for source patterns, translation boundaries, and manual verification.
 
 ## Errors, logging, and observability
 

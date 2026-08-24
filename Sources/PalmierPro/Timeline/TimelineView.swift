@@ -2,29 +2,40 @@ import AppKit
 import SwiftUI
 
 /// AppKit drawing view; input is delegated to TimelineInputController.
-final class TimelineView: NSView {
+final class TimelineView: NSView, NSPopoverDelegate {
     unowned var editor: EditorViewModel
+    let keyframeLaneState: TimelineKeyframeLaneState
     private(set) var inputController: TimelineInputController!
     private var playheadOverlay: PlayheadOverlay!
     private(set) var snapOverlay: SnapIndicatorOverlay!
     private var generatingClipOverlays: [String: NSHostingView<ClipGeneratingOverlay>] = [:]
     private var clipDisplayRects: [String: NSRect] = [:]
+    private let agentActivityLayer = CALayer()
+    private let agentAddedLayer = CAShapeLayer()
+    private let agentMutatedLayer = CAShapeLayer()
+    private let agentReadLayer = CAShapeLayer()
+    private let agentRangeLayer = CAShapeLayer()
+    private var displayedAgentActivityRevision = -1
     private var derivedCacheRevision: Int = -1
     private var cachedLinkOffsets: [String: Int] = [:]
     private var cachedAngleLabels: [String: [String: String]] = [:]
     private(set) var hoveredClipId: String?
     private let canvas = TimelineCanvasView()
+    private var markerPopover: NSPopover?
 
     // MARK: - Init
 
-    init(editor: EditorViewModel) {
+    init(editor: EditorViewModel, keyframeLaneState: TimelineKeyframeLaneState) {
         self.editor = editor
+        self.keyframeLaneState = keyframeLaneState
         super.init(frame: .zero)
         self.inputController = TimelineInputController(editor: editor, view: self)
         editor.mediaVisualCache.timelineView = self
         editor.onCancelTimelineDrag = { [weak self] in self?.inputController.cancelActiveDrag() }
+        editor.onPresentTimelineMarkerEditor = { [weak self] in self?.presentMarkerEditor(id: $0) }
         wantsLayer = true
-        layer?.backgroundColor = AppTheme.Background.surface.cgColor
+        configureAgentActivityLayers()
+        updateAppearanceColors()
         canvas.wantsLayer = true
         canvas.layerContentsRedrawPolicy = .onSetNeedsDisplay
         addSubview(canvas)
@@ -33,10 +44,20 @@ final class TimelineView: NSView {
         snapOverlay = SnapIndicatorOverlay(view: self)
     }
 
+    convenience init(editor: EditorViewModel) {
+        self.init(editor: editor, keyframeLaneState: TimelineKeyframeLaneState())
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
     override var isFlipped: Bool { true }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateAppearanceColors()
+        needsDisplay = true
+    }
 
     // MARK: - Viewport canvas
 
@@ -70,8 +91,57 @@ final class TimelineView: NSView {
         canvas.needsDisplay = true
     }
 
-    // Cached for draw performance — avoid per-frame allocations.
-    private static let trackBg = AppTheme.Background.surface.cgColor
+    private static var trackBg: CGColor { AppTheme.Background.surface.cgColor }
+
+    private func updateAppearanceColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = Self.trackBg
+        }
+        updateAgentActivityColors()
+        playheadOverlay?.refreshAppearance()
+    }
+
+    private func configureAgentActivityLayers() {
+        agentActivityLayer.zPosition = 80
+        layer?.addSublayer(agentActivityLayer)
+        let styles = [
+            (agentRangeLayer, CGFloat.zero, Float(0), CGFloat(0), CGFloat(0)),
+            (agentReadLayer, AppTheme.BorderWidth.medium, AppTheme.AgentActivity.readGlowOpacity,
+             AppTheme.AgentActivity.readGlowRadius, CGFloat(9)),
+            (agentAddedLayer, AppTheme.BorderWidth.thick, AppTheme.AgentActivity.changeGlowOpacity,
+             AppTheme.AgentActivity.changeGlowRadius, CGFloat(10)),
+            (agentMutatedLayer, AppTheme.BorderWidth.thick, AppTheme.AgentActivity.changeGlowOpacity,
+             AppTheme.AgentActivity.changeGlowRadius, CGFloat(10)),
+        ]
+        for (layer, lineWidth, glowOpacity, glowRadius, zPosition) in styles {
+            layer.lineWidth = lineWidth
+            layer.shadowOpacity = glowOpacity
+            layer.shadowRadius = glowRadius
+            layer.shadowOffset = .zero
+            layer.zPosition = zPosition
+            layer.opacity = 0
+            agentActivityLayer.addSublayer(layer)
+        }
+        for layer in [agentReadLayer, agentAddedLayer, agentMutatedLayer] {
+            layer.fillColor = nil
+        }
+    }
+
+    private func updateAgentActivityColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let styles = [
+                (agentAddedLayer, AppTheme.AgentActivity.added),
+                (agentMutatedLayer, AppTheme.AgentActivity.mutated),
+                (agentReadLayer, AppTheme.AgentActivity.read),
+            ]
+            for (layer, color) in styles {
+                layer.strokeColor = color.cgColor
+                layer.shadowColor = color.cgColor
+            }
+            agentRangeLayer.fillColor = AppTheme.AgentActivity.readFill.cgColor
+            agentRangeLayer.strokeColor = nil
+        }
+    }
 
     var externalDropTarget: TrackDropTarget?
     var externalDragAssets: [MediaAsset]?
@@ -84,7 +154,17 @@ final class TimelineView: NSView {
     private var externalDragIsRippleInsert: Bool = false
 
     var geometry: TimelineGeometry {
-        TimelineGeometry(editor: editor, bounds: bounds)
+        TimelineGeometry(editor: editor, bounds: bounds, laneState: keyframeLaneState)
+    }
+
+    private var displayedSilenceRemovalSettings: SilenceRemovalSettings? {
+        editor.markDeadAir ? editor.silenceRemovalSettings : nil
+    }
+
+    private func displayedDeadAirRanges(for clip: Clip) -> [Range<Double>] {
+        guard clip.mediaType == .audio,
+              let settings = displayedSilenceRemovalSettings else { return [] }
+        return editor.deadAirSourceRanges(for: clip, settings: settings)
     }
 
     private var isUpdatingContentSize = false
@@ -109,7 +189,7 @@ final class TimelineView: NSView {
                     editor.timelineVisibleWidth = newVisibleWidth
                     let minZoom = editor.minZoomScale
                     if isFirstLayout {
-                        editor.zoomScale = editor.timeline.totalFrames == 0
+                        editor.zoomScale = editor.timeline.displayFrames == 0
                             ? Defaults.pixelsPerFrame
                             : minZoom
                     } else if editor.zoomScale < minZoom {
@@ -119,15 +199,14 @@ final class TimelineView: NSView {
             }
         }
 
-        let totalFrames = editor.timeline.totalFrames
+        let totalFrames = editor.timeline.displayFrames
         let contentWidth = editor.zoomScale * Double(totalFrames) + visibleSize.width * 0.5
         let geo = geometry
         let contentHeight: CGFloat
         if editor.timeline.tracks.isEmpty {
             contentHeight = visibleSize.height
         } else {
-            let lastTrack = editor.timeline.tracks.count - 1
-            contentHeight = max(visibleSize.height, geo.trackY(at: lastTrack) + geo.trackHeight(at: lastTrack) + Layout.dropZoneHeight)
+            contentHeight = max(visibleSize.height, geo.contentBottom + Layout.dropZoneHeight)
         }
         let newSize = NSSize(width: max(visibleSize.width, contentWidth), height: contentHeight)
         if frame.size != newSize {
@@ -147,8 +226,21 @@ final class TimelineView: NSView {
 
     func setHoveredClipId(_ clipId: String?) {
         guard hoveredClipId != clipId else { return }
+        let previousClipId = hoveredClipId
         hoveredClipId = clipId
-        needsDisplay = true
+
+        let padding = AppTheme.BorderWidth.thick
+        var requiresFullRedraw = false
+        for id in [previousClipId, clipId].compactMap({ $0 }) {
+            guard let rect = clipDisplayRects[id] else {
+                requiresFullRedraw = true
+                continue
+            }
+            setNeedsDisplay(rect.insetBy(dx: -padding, dy: -padding))
+        }
+        if requiresFullRedraw {
+            needsDisplay = true
+        }
     }
 
     @discardableResult
@@ -217,11 +309,20 @@ final class TimelineView: NSView {
         let rippleInsertPreview = currentRippleInsertPreview()
 
         drawTrackBackgrounds(geometry: geo, context: ctx)
+        drawKeyframeLanes(geometry: geo, dirtyRect: dirtyRect, context: ctx)
         drawTimelineRangeSelectionTrackFill(geometry: geo, context: ctx)
         if let rippleInsertPreview {
             drawRippleInsertGapBand(preview: rippleInsertPreview, geometry: geo, context: ctx)
         }
         drawClips(geometry: geo, dirtyRect: dirtyRect, context: ctx, rippleInsertPreview: rippleInsertPreview)
+        var displayedMarkers = editor.displayedTimelineMarkers(
+            preview: editor.timelineMarkerPreview
+        )
+        if case .timelineMarker(let drag) = inputController.dragState,
+           let index = displayedMarkers.firstIndex(where: { $0.id == drag.original.id }) {
+            displayedMarkers[index] = drag.value
+        }
+        syncAgentActivityLayers()
         drawGapSelection(geometry: geo, context: ctx)
         syncGeneratingClipOverlays(geometry: geo)
 
@@ -231,17 +332,6 @@ final class TimelineView: NSView {
                 drawRippleInsertIndicator(atFrame: externalDragFrame, geometry: geo, context: ctx)
                 drawRippleInsertBadge(atFrame: externalDragFrame, geometry: geo, scrollOffset: scrollOffset, visibleWidth: visibleWidth, context: ctx)
             }
-        }
-
-        if case .marquee(let marq) = inputController.dragState,
-           marq.current.width > 0 || marq.current.height > 0 {
-            ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.6).cgColor)
-            ctx.setFillColor(NSColor.white.withAlphaComponent(0.1).cgColor)
-            ctx.setLineWidth(1)
-            ctx.setLineDash(phase: 0, lengths: [3, 3])
-            ctx.addRect(marq.current)
-            ctx.drawPath(using: .fillStroke)
-            ctx.setLineDash(phase: 0, lengths: [])
         }
 
         let activeDropTarget: TrackDropTarget? = {
@@ -279,30 +369,171 @@ final class TimelineView: NSView {
         )
         drawTimelineRangeSelectionRulerFill(geometry: geo, scrollOffset: scrollOffset, context: ctx)
         drawTimelineRangeSelectionEdges(geometry: geo, scrollOffset: scrollOffset, context: ctx)
-        TimelineMarkerRibbon.draw(
-            markers: editor.timeline.markers,
-            in: rulerRect(scrollOffset: scrollOffset, visibleWidth: visibleWidth, geometry: geo),
-            pixelsPerFrame: geo.pixelsPerFrame,
-            scrollOffsetX: scrollOffset.x,
-            selectedId: editor.selectedMarkerId,
+        TimelineMarkerRenderer.draw(
+            displayedMarkers,
+            selectedIds: editor.selectedTimelineMarkerIds,
+            geometry: geo,
+            rulerMinY: scrollOffset.y,
             context: ctx
         )
+
+        if case .marquee(let marq) = inputController.dragState,
+           marq.current.width > 0 || marq.current.height > 0 {
+            ctx.setStrokeColor(AppTheme.Text.primary.withAlphaComponent(0.6).cgColor)
+            ctx.setFillColor(AppTheme.Text.primary.withAlphaComponent(0.1).cgColor)
+            ctx.setLineWidth(AppTheme.BorderWidth.thin)
+            ctx.setLineDash(phase: 0, lengths: [3, 3])
+            ctx.addRect(marq.current)
+            ctx.drawPath(using: .fillStroke)
+            ctx.setLineDash(phase: 0, lengths: [])
+        }
     }
 
-    /// Ruler band in document coordinates; markers hit-test and draw against it.
+    /// Ruler band in document coordinates.
     func rulerRect(scrollOffset: NSPoint, visibleWidth: CGFloat, geometry geo: TimelineGeometry) -> NSRect {
         NSRect(x: scrollOffset.x, y: scrollOffset.y, width: visibleWidth, height: Double(geo.rulerHeight))
     }
 
-    var currentRulerRect: NSRect {
-        let scrollOffset = enclosingScrollView?.contentView.bounds.origin ?? .zero
-        let visibleWidth = enclosingScrollView?.contentView.bounds.width ?? bounds.width
-        return rulerRect(scrollOffset: scrollOffset, visibleWidth: visibleWidth, geometry: geometry)
+    func updatePlayheadLayer() { playheadOverlay.update() }
+    func updateAgentActivityOverlay() { syncAgentActivityLayers() }
+
+    func presentMarkerEditor(id: String) {
+        guard let marker = editor.timelineMarker(id: id),
+              let displayed = editor.displayedTimelineMarkers().first(where: { $0.id == id }) else { return }
+        let rulerY = enclosingScrollView?.contentView.bounds.origin.y ?? 0
+        let anchor = TimelineMarkerRenderer.anchorRect(
+            for: displayed, geometry: geometry, rulerMinY: rulerY
+        )
+        dismissMarkerEditor()
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.delegate = self
+        popover.contentViewController = NSHostingController(rootView:
+            MarkerEditorPopover(
+                marker: marker,
+                fps: editor.timeline.fps,
+                onPreview: { [weak self] marker in
+                    self?.editor.timelineMarkerPreview = marker
+                    self?.needsDisplay = true
+                },
+                onDismiss: { [weak self] in self?.dismissMarkerEditor() }
+            )
+            .environment(editor)
+        )
+        markerPopover = popover
+        popover.show(relativeTo: anchor, of: self, preferredEdge: .minY)
     }
 
-    func updatePlayheadLayer() { playheadOverlay.update() }
+    private func dismissMarkerEditor() {
+        editor.timelineMarkerPreview = nil
+        markerPopover?.close()
+        needsDisplay = true
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        guard let closed = notification.object as? NSPopover,
+              closed === markerPopover else { return }
+        editor.timelineMarkerPreview = nil
+        markerPopover = nil
+        needsDisplay = true
+    }
 
     // MARK: - Clip drawing with ghost support
+
+    private func syncAgentActivityLayers() {
+        let activity = editor.agentActivity
+        guard !activity.isEmpty || activity.revision != displayedAgentActivityRevision else { return }
+        let viewport = visibleRect
+        guard !viewport.isEmpty else { return }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        updateAgentActivityFrame(viewport)
+        agentAddedLayer.path = agentClipPath(for: activity.addedClipIds, viewport: viewport)
+        agentMutatedLayer.path = agentClipPath(for: activity.mutatedClipIds, viewport: viewport)
+        agentReadLayer.path = agentClipPath(for: activity.readClipIds, viewport: viewport)
+        agentRangeLayer.path = agentRangePath(for: activity.range, viewport: viewport)
+        CATransaction.commit()
+
+        guard activity.revision != displayedAgentActivityRevision else { return }
+        displayedAgentActivityRevision = activity.revision
+        let hold = activity.isRead
+            ? AppTheme.Anim.agentReadHighlightHold
+            : AppTheme.Anim.agentChangeHighlightHold
+        let duration = activity.isRead
+            ? AppTheme.Anim.agentReadHighlightDuration
+            : AppTheme.Anim.agentChangeHighlightDuration
+        let highlights = [
+            (agentAddedLayer, !activity.addedClipIds.isEmpty),
+            (agentMutatedLayer, !activity.mutatedClipIds.isEmpty),
+            (agentReadLayer, !activity.readClipIds.isEmpty),
+            (agentRangeLayer, activity.range != nil),
+        ]
+        for (layer, hasHighlight) in highlights {
+            AgentActivityLayerSupport.updateAnimation(
+                layer,
+                hasHighlight: hasHighlight,
+                staysVisible: activity.isActive,
+                hold: hold,
+                duration: duration
+            )
+        }
+    }
+
+    private func agentClipPath(for clipIds: Set<String>, viewport: NSRect) -> CGPath? {
+        let combinedPath = CGMutablePath()
+        for clipId in clipIds {
+            guard let rect = clipDisplayRects[clipId], rect.intersects(viewport) else { continue }
+            let ringRect = rect
+                .offsetBy(dx: -viewport.minX, dy: -viewport.minY)
+                .insetBy(
+                    dx: AppTheme.BorderWidth.hairline,
+                    dy: AppTheme.BorderWidth.hairline
+                )
+            guard ringRect.width > 0, ringRect.height > 0 else { continue }
+            combinedPath.addRoundedRect(
+                in: ringRect,
+                cornerWidth: Trim.clipCornerRadius,
+                cornerHeight: Trim.clipCornerRadius
+            )
+        }
+        return combinedPath.isEmpty ? nil : combinedPath
+    }
+
+    private func agentRangePath(
+        for range: Range<Int>?,
+        viewport: NSRect
+    ) -> CGPath? {
+        guard let range else { return nil }
+        let geo = geometry
+        let minX = geo.xForFrame(range.lowerBound)
+        let maxX = geo.xForFrame(range.upperBound)
+        let y = Double(geo.rulerHeight)
+        let documentRect = NSRect(
+            x: minX,
+            y: y,
+            width: max(Double(AppTheme.BorderWidth.medium), maxX - minX),
+            height: max(0, Double(bounds.height - geo.rulerHeight))
+        )
+        let visibleRange = documentRect.intersection(viewport)
+        guard !visibleRange.isNull, !visibleRange.isEmpty else { return nil }
+        return CGPath(
+            rect: visibleRange.offsetBy(dx: -viewport.minX, dy: -viewport.minY),
+            transform: nil
+        )
+    }
+
+    private func updateAgentActivityFrame(_ viewport: NSRect) {
+        agentActivityLayer.frame = viewport
+        for layer in [agentAddedLayer, agentMutatedLayer, agentReadLayer, agentRangeLayer] {
+            layer.frame = agentActivityLayer.bounds
+        }
+        AgentActivityLayerSupport.updateMask(
+            agentActivityLayer,
+            bounds: agentActivityLayer.bounds,
+            rulerHeight: geometry.rulerHeight
+        )
+    }
 
     private func drawClips(
         geometry geo: TimelineGeometry,
@@ -403,6 +634,7 @@ final class TimelineView: NSView {
                         ClipRenderer.draw(previewClip, type: clip.mediaType, in: previewRect,
                                           isSelected: isSelected, opacity: CGFloat(AppTheme.Opacity.prominent), context: ctx,
                                           cache: editor.mediaVisualCache,
+                                          deadAirRanges: displayedDeadAirRanges(for: previewClip),
                                           displayName: displayName(clip, in: previewRect, isSelected: isSelected),
                                           multicamAngleLabel: angleLabel(clip),
                                           fps: editor.timeline.fps, isMissing: clipMissing, isGenerating: clipGenerating)
@@ -418,6 +650,7 @@ final class TimelineView: NSView {
                         ClipRenderer.draw(clip, type: clip.mediaType, in: originalRect,
                                           isSelected: drag.isDuplicate && isSelected, opacity: originalOpacity, context: ctx,
                                           cache: editor.mediaVisualCache,
+                                          deadAirRanges: displayedDeadAirRanges(for: clip),
                                           displayName: displayName(clip, in: originalRect, isSelected: drag.isDuplicate && isSelected),
                                           multicamAngleLabel: angleLabel(clip),
                                           fps: editor.timeline.fps, isMissing: clipMissing, isGenerating: clipGenerating)
@@ -444,6 +677,7 @@ final class TimelineView: NSView {
                         ClipRenderer.draw(ghostClip, type: clip.mediaType, in: ghostRect,
                                           isSelected: true, opacity: 0.7, context: ctx,
                                           cache: editor.mediaVisualCache,
+                                          deadAirRanges: displayedDeadAirRanges(for: ghostClip),
                                           displayName: displayName(clip, in: ghostRect, isSelected: true),
                                           multicamAngleLabel: angleLabel(clip),
                                           fps: editor.timeline.fps, isMissing: clipMissing, isGenerating: clipGenerating)
@@ -482,7 +716,9 @@ final class TimelineView: NSView {
                         deferredDraws.append {
                             ClipRenderer.draw(previewClip, type: clip.mediaType, in: previewRect,
                                               isSelected: isSelected, context: ctx,
-                                              cache: cache, displayName: name,
+                                              cache: cache,
+                                              deadAirRanges: self.displayedDeadAirRanges(for: previewClip),
+                                              displayName: name,
                                               multicamAngleLabel: chip,
                                               fps: fps, isMissing: clipMissing, isGenerating: clipGenerating)
                         }
@@ -520,7 +756,9 @@ final class TimelineView: NSView {
                         deferredDraws.append {
                             ClipRenderer.draw(previewClip, type: clip.mediaType, in: rect,
                                               isSelected: isSelected, context: ctx,
-                                              cache: cache, displayName: name,
+                                              cache: cache,
+                                              deadAirRanges: self.displayedDeadAirRanges(for: previewClip),
+                                              displayName: name,
                                               multicamAngleLabel: chip,
                                               fps: fps, isMissing: clipMissing, isGenerating: clipGenerating)
                         }
@@ -537,6 +775,7 @@ final class TimelineView: NSView {
                         ClipRenderer.draw(shiftedClip, type: clip.mediaType, in: shiftedRect,
                                           isSelected: isSelected, context: ctx,
                                           cache: editor.mediaVisualCache,
+                                          deadAirRanges: displayedDeadAirRanges(for: shiftedClip),
                                           displayName: displayName(clip, in: shiftedRect, isSelected: isSelected),
                                           linkOffset: linkOffsets[clip.id],
                                           multicamAngleLabel: angleLabel(clip),
@@ -551,10 +790,13 @@ final class TimelineView: NSView {
                 ClipRenderer.draw(clip, type: clip.mediaType, in: rect,
                                   isSelected: isSelected, isHovered: hoveredClipId == clip.id, context: ctx,
                                   cache: editor.mediaVisualCache,
+                                  deadAirRanges: displayedDeadAirRanges(for: clip),
                                   displayName: displayName(clip, in: rect, isSelected: isSelected),
                                   linkOffset: linkOffsets[clip.id],
                                   multicamAngleLabel: angleLabel(clip),
-                                  fps: editor.timeline.fps, isMissing: clipMissing, isGenerating: clipGenerating)
+                                  fps: editor.timeline.fps,
+                                  showsKeyframeAutomation: !keyframeLaneState.isExpanded(trackId: track.id),
+                                  isMissing: clipMissing, isGenerating: clipGenerating)
             }
             for resolved in track.resolvedTransitions {
                 let transitionRect = TransitionRenderer.rect(for: resolved, trackIndex: ti, geometry: geo)
@@ -619,6 +861,7 @@ final class TimelineView: NSView {
             opacity: CGFloat(AppTheme.Opacity.medium),
             context: ctx,
             cache: editor.mediaVisualCache,
+            deadAirRanges: displayedDeadAirRanges(for: sourceClip),
             displayName: editor.clipDisplayLabel(for: clip),
             multicamAngleLabel: angleLabel,
             fps: editor.timeline.fps,
@@ -723,8 +966,8 @@ final class TimelineView: NSView {
         let maxX = geo.xForFrame(gap.range.end)
         let rect = NSRect(x: minX, y: y + 2, width: maxX - minX, height: height - 4)
 
-        ctx.setFillColor(NSColor.white.withAlphaComponent(0.12).cgColor)
-        ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.9).cgColor)
+        ctx.setFillColor(AppTheme.Text.primary.withAlphaComponent(0.12).cgColor)
+        ctx.setStrokeColor(AppTheme.Text.primary.withAlphaComponent(0.9).cgColor)
         ctx.setLineWidth(1)
         ctx.setLineDash(phase: 0, lengths: [3, 3])
         ctx.addRect(rect.insetBy(dx: 0.5, dy: 0.5))
@@ -816,6 +1059,7 @@ final class TimelineView: NSView {
             ClipRenderer.draw(ghost.clip, type: ghost.clip.mediaType, in: ghost.rect,
                               isSelected: true, opacity: 0.5, context: ctx,
                               cache: editor.mediaVisualCache,
+                              deadAirRanges: displayedDeadAirRanges(for: ghost.clip),
                               fps: editor.timeline.fps,
                               isMissing: editor.isClipMediaOffline(ghost.clip),
                               isGenerating: editor.isClipMediaGenerating(ghost.clip))
@@ -958,19 +1202,115 @@ final class TimelineView: NSView {
             }
             context.setFillColor(borderColor)
             context.fill(NSRect(x: 0, y: y + h - 1, width: bounds.width, height: 1))
+            for property in geo.laneProperties[i] {
+                guard let laneRect = geo.laneRect(trackIndex: i, property: property) else { continue }
+                context.setFillColor(AppTheme.Background.base.cgColor)
+                context.fill(laneRect)
+                context.setFillColor(AppTheme.Border.subtle.cgColor)
+                context.fill(NSRect(
+                    x: laneRect.minX,
+                    y: laneRect.maxY - AppTheme.BorderWidth.thin,
+                    width: laneRect.width,
+                    height: AppTheme.BorderWidth.thin
+                ))
+            }
         }
 
         let z = editor.zones
         if z.videoTrackCount > 0, z.audioTrackCount > 0 {
             let dividerY = geo.trackY(at: z.firstAudioIndex)
-            context.setFillColor(AppTheme.Border.divider.cgColor)
+            context.setFillColor(AppTheme.Border.divider.withAlphaComponent(AppTheme.Opacity.medium).cgColor)
             context.fill(NSRect(x: 0, y: dividerY - 1, width: bounds.width, height: 2))
+        }
+    }
+
+    private func drawKeyframeLanes(
+        geometry geo: TimelineGeometry,
+        dirtyRect: NSRect,
+        context: CGContext
+    ) {
+        let diamondHalf = AppTheme.ComponentSize.timelineKeyframeDiamondSize / 2
+        let markerPaddingFrames = max(
+            1,
+            Int((Double(diamondHalf) / max(geo.pixelsPerFrame, Zoom.floor)).rounded(.up))
+        )
+        let firstVisibleFrame = max(
+            0,
+            geo.frameAt(x: dirtyRect.minX) - markerPaddingFrames
+        )
+        let lastVisibleFrame = max(
+            firstVisibleFrame,
+            geo.frameAt(x: dirtyRect.maxX) + markerPaddingFrames
+        )
+        let visibleFrames = firstVisibleFrame...lastVisibleFrame
+        for (trackIndex, track) in editor.timeline.tracks.enumerated() {
+            let properties = geo.laneProperties[trackIndex]
+            guard properties.contains(where: {
+                geo.laneRect(trackIndex: trackIndex, property: $0)?.intersects(dirtyRect) == true
+            }) else { continue }
+            for clip in track.clips {
+                let segmentX = geo.xForFrame(clip.startFrame)
+                let segmentWidth = Double(clip.durationFrames) * geo.pixelsPerFrame
+                guard segmentX + segmentWidth >= dirtyRect.minX,
+                      segmentX <= dirtyRect.maxX else { continue }
+                for property in properties {
+                    guard let laneRect = geo.laneRect(trackIndex: trackIndex, property: property),
+                          laneRect.intersects(dirtyRect) else { continue }
+                    let segment = NSRect(
+                        x: segmentX,
+                        y: laneRect.minY + AppTheme.Spacing.xxs,
+                        width: segmentWidth,
+                        height: laneRect.height - AppTheme.Spacing.xs
+                    )
+                    let eligible = clip.supportsKeyframes(for: property)
+                    let selected = editor.selectedClipIds.contains(clip.id)
+                    let fillOpacity = eligible
+                        ? (selected ? AppTheme.Opacity.moderate : AppTheme.Opacity.soft)
+                        : AppTheme.Opacity.subtle
+                    context.setFillColor(
+                        (eligible ? clip.sourceClipType.themeColor : AppTheme.Text.muted)
+                            .withAlphaComponent(CGFloat(fillOpacity))
+                            .cgColor
+                    )
+                    context.fill(segment)
+                    context.setStrokeColor(
+                        (selected ? AppTheme.Border.timelineClipSelected : AppTheme.Border.subtle).cgColor
+                    )
+                    context.setLineWidth(
+                        selected ? AppTheme.BorderWidth.medium : AppTheme.BorderWidth.hairline
+                    )
+                    context.beginPath()
+                    context.move(to: CGPoint(x: segment.minX, y: segment.minY))
+                    context.addLine(to: CGPoint(x: segment.minX, y: segment.maxY))
+                    context.move(to: CGPoint(x: segment.maxX, y: segment.minY))
+                    context.addLine(to: CGPoint(x: segment.maxX, y: segment.maxY))
+                    context.strokePath()
+                    guard eligible else { continue }
+                    for frame in clip.keyframeFrames(
+                        for: property,
+                        intersecting: visibleFrames
+                    ) {
+                        let x = geo.xForFrame(frame)
+                        let y = laneRect.midY
+                        let diamond = CGMutablePath()
+                        diamond.move(to: CGPoint(x: x, y: y - diamondHalf))
+                        diamond.addLine(to: CGPoint(x: x + diamondHalf, y: y))
+                        diamond.addLine(to: CGPoint(x: x, y: y + diamondHalf))
+                        diamond.addLine(to: CGPoint(x: x - diamondHalf, y: y))
+                        diamond.closeSubpath()
+                        context.addPath(diamond)
+                        context.setFillColor(AppTheme.Accent.timecodeNSColor.cgColor)
+                        context.fillPath()
+                    }
+                }
+            }
         }
     }
 
     // MARK: - Input forwarding
 
     override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(nil)
         inputController.mouseDown(with: event, geometry: geometry)
     }
 
@@ -983,12 +1323,15 @@ final class TimelineView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        guard ownsTimelinePointer(at: event.locationInWindow) else {
+            setHoveredClipId(nil)
+            return
+        }
         inputController.mouseMoved(with: event, geometry: geometry)
     }
 
     override func mouseExited(with event: NSEvent) {
         setHoveredClipId(nil)
-        NSCursor.arrow.set()
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -999,8 +1342,64 @@ final class TimelineView: NSView {
         inputController.magnify(with: event)
     }
 
+    private func keyframeContextMenu(
+        clipId: String,
+        property: AnimatableProperty,
+        frame: Int
+    ) -> NSMenu {
+        let menu = NSMenu()
+        let current = editor.interpolation(
+            clipId: clipId,
+            property: property,
+            atFrame: frame
+        ) ?? .smooth
+        for interpolation in Interpolation.allCases {
+            let item = NSMenuItem(
+                title: interpolation.displayName,
+                action: #selector(performSetKeyframeInterpolation(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.state = current == interpolation ? .on : .off
+            item.representedObject = [
+                "clipId": clipId,
+                "property": property.rawValue,
+                "frame": frame,
+                "interpolation": interpolation.rawValue,
+            ] as [String: Any]
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let delete = NSMenuItem(
+            title: L10n.string("Delete Keyframe"),
+            action: #selector(performDeleteKeyframe(_:)),
+            keyEquivalent: ""
+        )
+        delete.target = self
+        delete.representedObject = [
+            "clipId": clipId,
+            "property": property.rawValue,
+            "frame": frame,
+        ] as [String: Any]
+        menu.addItem(delete)
+        return menu
+    }
+
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
+        if case .keyframeLane(let trackIndex, let property) = geometry.rowLocation(atY: point.y) {
+            guard let hit = inputController.keyframeLaneHit(
+                at: point,
+                trackIndex: trackIndex,
+                property: property,
+                geometry: geometry
+            ) else { return nil }
+            return keyframeContextMenu(
+                clipId: hit.clipId,
+                property: property,
+                frame: hit.frame
+            )
+        }
         let trackIndex = geometry.trackAt(y: point.y)
         let clickFrame = max(0, geometry.frameAt(x: point.x))
         let clickedRange = editor.validSelectedTimelineRange?.contains(frame: clickFrame) ?? false
@@ -1032,30 +1431,17 @@ final class TimelineView: NSView {
         // kf menu before clip menu.
         if clip.mediaType == .audio,
            let kfFrame = inputController.audioVolumeKfHit(at: point, clip: clip, clipRect: clipRect) {
-            let menu = NSMenu()
-            let current = editor.interpolation(clipId: clip.id, property: .volume, atFrame: kfFrame) ?? .smooth
-            let mk: (String, Interpolation) -> NSMenuItem = { title, interp in
-                let item = NSMenuItem(title: title, action: #selector(self.performSetVolumeKfInterpolation(_:)), keyEquivalent: "")
-                item.target = self
-                item.state = current == interp ? .on : .off
-                item.representedObject = ["clipId": clip.id, "frame": kfFrame, "interp": interp.rawValue] as [String: Any]
-                return item
-            }
-            for interp in Interpolation.allCases {
-                menu.addItem(mk(interp.displayName, interp))
-            }
-            menu.addItem(.separator())
-            let del = NSMenuItem(title: "Delete Keyframe", action: #selector(performDeleteVolumeKf(_:)), keyEquivalent: "")
-            del.target = self
-            del.representedObject = ["clipId": clip.id, "frame": kfFrame] as [String: Any]
-            menu.addItem(del)
-            return menu
+            return keyframeContextMenu(
+                clipId: clip.id,
+                property: .volume,
+                frame: kfFrame
+            )
         }
 
         if clip.mediaType == .audio, editor.markDeadAir,
            editor.deadAirSpanRange(clip: clip, atTimelineFrame: clickFrame) != nil {
             let menu = NSMenu()
-            let remove = NSMenuItem(title: "Remove Dead Air", action: #selector(performRemoveDeadAir(_:)), keyEquivalent: "")
+            let remove = NSMenuItem(title: L10n.string("Remove Dead Air"), action: #selector(performRemoveDeadAir(_:)), keyEquivalent: "")
             remove.target = self
             remove.representedObject = ["clipId": clip.id, "frame": clickFrame] as [String: Any]
             menu.addItem(remove)
@@ -1075,52 +1461,61 @@ final class TimelineView: NSView {
 
         // Timeline actions
         var timelineItems: [NSMenuItem] = []
-        let selectForwardTrackItem = NSMenuItem(title: "Select Forward on Track", action: #selector(performSelectForwardOnTrack(_:)), keyEquivalent: "")
+        let selectForwardTrackItem = NSMenuItem(title: L10n.string("Select Forward on Track"), action: #selector(performSelectForwardOnTrack(_:)), keyEquivalent: "")
         selectForwardTrackItem.target = self
         selectForwardTrackItem.representedObject = clip.id
         timelineItems.append(selectForwardTrackItem)
 
-        let selectForwardAllItem = NSMenuItem(title: "Select Forward on All Tracks", action: #selector(performSelectForwardOnAllTracks(_:)), keyEquivalent: "")
+        let selectForwardAllItem = NSMenuItem(title: L10n.string("Select Forward on All Tracks"), action: #selector(performSelectForwardOnAllTracks(_:)), keyEquivalent: "")
         selectForwardAllItem.target = self
         selectForwardAllItem.representedObject = clip.id
         timelineItems.append(selectForwardAllItem)
 
-        let copyItem = NSMenuItem(title: "Copy", action: #selector(performCopyClips(_:)), keyEquivalent: "")
+        let copyItem = NSMenuItem(title: L10n.string("Copy"), action: #selector(performCopyClips(_:)), keyEquivalent: "")
         copyItem.target = self
         timelineItems.append(copyItem)
         if editor.canPasteClips {
-            let pasteItem = NSMenuItem(title: "Paste", action: #selector(performPasteClips(_:)), keyEquivalent: "")
+            let pasteItem = NSMenuItem(title: L10n.string("Paste"), action: #selector(performPasteClips(_:)), keyEquivalent: "")
             pasteItem.target = self
             pasteItem.representedObject = ["trackIndex": hit.trackIndex, "frame": clickFrame] as [String: Any]
             timelineItems.append(pasteItem)
         }
-        let deleteItem = NSMenuItem(title: "Delete", action: #selector(performDeleteClips(_:)), keyEquivalent: "")
+        let deleteItem = NSMenuItem(title: L10n.string("Delete"), action: #selector(performDeleteClips(_:)), keyEquivalent: "")
         deleteItem.target = self
         timelineItems.append(deleteItem)
 
-        let rippleDeleteItem = NSMenuItem(title: "Ripple Delete", action: #selector(performRippleDeleteClips(_:)), keyEquivalent: "")
+        let rippleDeleteItem = NSMenuItem(title: L10n.string("Ripple Delete"), action: #selector(performRippleDeleteClips(_:)), keyEquivalent: "")
         rippleDeleteItem.target = self
         timelineItems.append(rippleDeleteItem)
 
+        if let snapshot = editor.copiedClipSettings(for: clip.mediaType) {
+            let targetIds = editor.compatibleClipSettingsTargets(in: targetClipIds, for: snapshot)
+            if !targetIds.isEmpty {
+                let pasteSettingsItem = NSMenuItem(title: L10n.string("Paste Settings"), action: #selector(performPasteClipSettings(_:)), keyEquivalent: "")
+                pasteSettingsItem.target = self
+                pasteSettingsItem.representedObject = targetIds
+                timelineItems.append(pasteSettingsItem)
+            }
+        }
         if editor.canLinkSelected {
-            let item = NSMenuItem(title: "Link", action: #selector(performLink(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: L10n.string("Link"), action: #selector(performLink(_:)), keyEquivalent: "")
             item.target = self
             timelineItems.append(item)
         }
         if editor.canUnlinkSelected {
-            let item = NSMenuItem(title: "Unlink", action: #selector(performUnlink(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: L10n.string("Unlink"), action: #selector(performUnlink(_:)), keyEquivalent: "")
             item.target = self
             timelineItems.append(item)
         }
 
         // AI
         var aiItems: [NSMenuItem] = []
-        let addToChatItem = NSMenuItem(title: "Add to Chat", action: #selector(performAddClipsToChat(_:)), keyEquivalent: "")
+        let addToChatItem = NSMenuItem(title: L10n.string("Add to Chat"), action: #selector(performAddClipsToChat(_:)), keyEquivalent: "")
         addToChatItem.target = self
         addToChatItem.representedObject = targetClipIds
         aiItems.append(addToChatItem)
         if let aiEditSubmenu = aiEditSubmenu(for: clip.id) {
-            let aiEditItem = NSMenuItem(title: "AI Edit", action: nil, keyEquivalent: "")
+            let aiEditItem = NSMenuItem(title: L10n.string("AI Edit"), action: nil, keyEquivalent: "")
             aiEditItem.submenu = aiEditSubmenu
             aiItems.append(aiEditItem)
         }
@@ -1130,16 +1525,16 @@ final class TimelineView: NSView {
 
         // Nest
         var nestItems: [NSMenuItem] = []
-        let nestClipsItem = NSMenuItem(title: "Create Nested Timeline", action: #selector(performNestClips(_:)), keyEquivalent: "")
+        let nestClipsItem = NSMenuItem(title: L10n.string("Create Nested Timeline"), action: #selector(performNestClips(_:)), keyEquivalent: "")
         nestClipsItem.target = self
         nestItems.append(nestClipsItem)
         if clip.sourceClipType == .sequence {
-            let openItem = NSMenuItem(title: "Open Timeline", action: #selector(performOpenNestedTimeline(_:)), keyEquivalent: "")
+            let openItem = NSMenuItem(title: L10n.string("Open Timeline"), action: #selector(performOpenNestedTimeline(_:)), keyEquivalent: "")
             openItem.target = self
             openItem.representedObject = clip.mediaRef
             nestItems.append(openItem)
             if singleLinkGroup {
-                let decomposeItem = NSMenuItem(title: "Decompose Nested Timeline", action: #selector(performDecomposeNest(_:)), keyEquivalent: "")
+                let decomposeItem = NSMenuItem(title: L10n.string("Decompose Nested Timeline"), action: #selector(performDecomposeNest(_:)), keyEquivalent: "")
                 decomposeItem.target = self
                 decomposeItem.representedObject = clip.id
                 nestItems.append(decomposeItem)
@@ -1148,14 +1543,21 @@ final class TimelineView: NSView {
 
         // Media
         var mediaItems: [NSMenuItem] = []
-        if !clip.mediaType.isSourcelessLayer, clip.sourceClipType != .sequence, singleLinkGroup {
-            let swapItem = NSMenuItem(title: "Swap Media", action: #selector(performSwapMedia(_:)), keyEquivalent: "")
+        if !clip.mediaType.isSourcelessLayer, clip.sourceClipType != .sequence,
+           clip.multicamGroupId == nil, singleLinkGroup {
+            let swapItem = NSMenuItem(title: L10n.string("Swap Media"), action: #selector(performSwapMedia(_:)), keyEquivalent: "")
             swapItem.target = self
             swapItem.representedObject = clip.id
             mediaItems.append(swapItem)
         }
         if clip.mediaType == .video || clip.mediaType == .audio {
-            let item = NSMenuItem(title: "Save as Media", action: #selector(performSaveAsMedia(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: L10n.string("Save as Media"), action: #selector(performSaveAsMedia(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = clip.id
+            mediaItems.append(item)
+        }
+        if clip.mediaType == .video, editor.canExtractAudio(fromClipId: clip.id) {
+            let item = NSMenuItem(title: L10n.string("Save as Audio"), action: #selector(performSaveAsAudio(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = clip.id
             mediaItems.append(item)
@@ -1163,9 +1565,9 @@ final class TimelineView: NSView {
         // Sync
         var syncItems: [NSMenuItem] = []
         if let pair = editor.syncSelection() {
-            let syncItem = NSMenuItem(title: "Synchronize", action: nil, keyEquivalent: "")
+            let syncItem = NSMenuItem(title: L10n.string("Synchronize"), action: nil, keyEquivalent: "")
             let syncMenu = NSMenu()
-            for (title, mode) in [("Auto", EditorViewModel.SyncMode.auto), ("Audio", .audio), ("Timecode", .timecode)] {
+            for (title, mode) in [(L10n.string("Auto"), EditorViewModel.SyncMode.auto), (L10n.string("Audio"), .audio), (L10n.string("Timecode"), .timecode)] {
                 let item = NSMenuItem(title: title, action: #selector(performSynchronize(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = ["referenceClipId": pair.referenceClipId, "targetClipIds": pair.targetClipIds, "mode": mode.rawValue] as [String: Any]
@@ -1178,12 +1580,12 @@ final class TimelineView: NSView {
            let asset = editor.mediaAssets.first(where: { $0.id == clip.mediaRef }),
            asset.type == .audio || (asset.type == .video && asset.hasAudio) {
             let hasBeats = editor.mediaVisualCache.beats.analysis(for: clip.mediaRef) != nil
-            let beatsItem = NSMenuItem(title: hasBeats ? "Redetect Beats" : "Detect Beats", action: #selector(performDetectBeats(_:)), keyEquivalent: "")
+            let beatsItem = NSMenuItem(title: hasBeats ? L10n.string("Redetect Beats") : L10n.string("Detect Beats"), action: #selector(performDetectBeats(_:)), keyEquivalent: "")
             beatsItem.target = self
             beatsItem.representedObject = clip.mediaRef
             syncItems.append(beatsItem)
             if hasBeats {
-                let markItem = NSMenuItem(title: "Mark Beats", action: #selector(toggleMarkBeats(_:)), keyEquivalent: "")
+                let markItem = NSMenuItem(title: L10n.string("Mark Beats"), action: #selector(toggleMarkBeats(_:)), keyEquivalent: "")
                 markItem.target = self
                 markItem.state = editor.markBeats ? .on : .off
                 syncItems.append(markItem)
@@ -1198,7 +1600,7 @@ final class TimelineView: NSView {
             if clip.mediaType != .audio, group.angles.count >= 2 {
                 multicamItems.append(layoutItem(clip: clip))
             }
-            let ungroupItem = NSMenuItem(title: "Ungroup Multicam", action: #selector(performUngroupMulticam(_:)), keyEquivalent: "")
+            let ungroupItem = NSMenuItem(title: L10n.string("Ungroup Multicam"), action: #selector(performUngroupMulticam(_:)), keyEquivalent: "")
             ungroupItem.target = self
             ungroupItem.representedObject = group.id
             multicamItems.append(ungroupItem)
@@ -1220,7 +1622,7 @@ final class TimelineView: NSView {
         let menu = NSMenu()
         if editor.canPasteClips,
            editor.timeline.tracks.indices.contains(trackIndex) {
-            let item = NSMenuItem(title: "Paste", action: #selector(performPasteClips(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: L10n.string("Paste"), action: #selector(performPasteClips(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = ["trackIndex": trackIndex, "frame": frame] as [String: Any]
             menu.addItem(item)
@@ -1231,7 +1633,7 @@ final class TimelineView: NSView {
 
             if gap.range.start > 0, editor.timeline.tracks[gap.trackIndex].type == .video {
                 let availability = editor.aiTransitionAvailability(for: gap)
-                let item = NSMenuItem(title: "Create AI Transition", action: #selector(performCreateAITransition(_:)), keyEquivalent: "")
+                let item = NSMenuItem(title: L10n.string("Create AI Transition"), action: #selector(performCreateAITransition(_:)), keyEquivalent: "")
                 item.target = self
                 item.isEnabled = availability.model != nil
                 item.toolTip = availability.refusal
@@ -1240,7 +1642,7 @@ final class TimelineView: NSView {
             }
 
             let refusal = editor.rippleDeleteGapRefusal(gap)
-            let deleteItem = NSMenuItem(title: "Ripple Delete Gap", action: #selector(performRippleDeleteGap(_:)), keyEquivalent: "")
+            let deleteItem = NSMenuItem(title: L10n.string("Ripple Delete Gap"), action: #selector(performRippleDeleteGap(_:)), keyEquivalent: "")
             deleteItem.target = self
             deleteItem.isEnabled = refusal == nil
             deleteItem.toolTip = refusal
@@ -1256,11 +1658,11 @@ final class TimelineView: NSView {
     }
 
     private func addTimelineRangeItems(to menu: NSMenu) {
-        let addItem = NSMenuItem(title: "Add Range to Chat", action: #selector(performAddTimelineRangeToChat(_:)), keyEquivalent: "")
+        let addItem = NSMenuItem(title: L10n.string("Add Range to Chat"), action: #selector(performAddTimelineRangeToChat(_:)), keyEquivalent: "")
         addItem.target = self
         menu.addItem(addItem)
 
-        let saveItem = NSMenuItem(title: "Save Range as Media", action: #selector(performSaveTimelineRangeAsMedia(_:)), keyEquivalent: "")
+        let saveItem = NSMenuItem(title: L10n.string("Save Range as Media"), action: #selector(performSaveTimelineRangeAsMedia(_:)), keyEquivalent: "")
         saveItem.target = self
         menu.addItem(saveItem)
 
@@ -1293,7 +1695,7 @@ final class TimelineView: NSView {
             item.representedObject = ["clipId": clip.id, "angle": member.angleLabel] as [String: Any]
             submenu.addItem(item)
         }
-        let parent = NSMenuItem(title: audio ? "Switch Mic" : "Switch Angle", action: nil, keyEquivalent: "")
+        let parent = NSMenuItem(title: audio ? L10n.string("Switch Mic") : L10n.string("Switch Angle"), action: nil, keyEquivalent: "")
         parent.submenu = submenu
         return parent
     }
@@ -1301,13 +1703,13 @@ final class TimelineView: NSView {
     private func layoutItem(clip: Clip) -> NSMenuItem {
         let submenu = NSMenu()
         for layout in VideoLayout.allCases {
-            let item = NSMenuItem(title: layout.displayName, action: #selector(performApplyMulticamLayout(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: L10n.string(key: layout.displayName), action: #selector(performApplyMulticamLayout(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = ["clipId": clip.id, "layout": layout.rawValue] as [String: Any]
             submenu.addItem(item)
             if layout == .full { submenu.addItem(.separator()) }
         }
-        let parent = NSMenuItem(title: "Layout", action: nil, keyEquivalent: "")
+        let parent = NSMenuItem(title: L10n.string("Layout"), action: nil, keyEquivalent: "")
         parent.submenu = submenu
         return parent
     }
@@ -1331,13 +1733,13 @@ final class TimelineView: NSView {
                                       "start": range.startFrame, "end": range.endFrame] as [String: Any]
             submenu.addItem(item)
         }
-        let parent = NSMenuItem(title: "Switch Angle in Range", action: nil, keyEquivalent: "")
+        let parent = NSMenuItem(title: L10n.string("Switch Angle in Range"), action: nil, keyEquivalent: "")
         parent.submenu = submenu
         return parent
     }
 
     private func addClearRangeItem(to menu: NSMenu) {
-        let item = NSMenuItem(title: "Clear Range", action: #selector(performClearTimelineRange(_:)), keyEquivalent: "")
+        let item = NSMenuItem(title: L10n.string("Clear Range"), action: #selector(performClearTimelineRange(_:)), keyEquivalent: "")
         item.target = self
         menu.addItem(item)
     }
@@ -1404,6 +1806,12 @@ final class TimelineView: NSView {
         editor.copySelectedClipsToClipboard()
     }
 
+    @objc private func performPasteClipSettings(_ sender: Any?) {
+        guard let clipIds = (sender as? NSMenuItem)?.representedObject as? [String] else { return }
+        editor.pasteClipSettingsFromClipboard(to: clipIds)
+        needsDisplay = true
+    }
+
     @objc private func performPasteClips(_ sender: Any?) {
         guard let item = sender as? NSMenuItem,
               let info = item.representedObject as? [String: Any],
@@ -1439,6 +1847,12 @@ final class TimelineView: NSView {
         editor.saveClipAsMedia(clipId: clipId)
     }
 
+    @objc private func performSaveAsAudio(_ sender: Any?) {
+        guard let item = sender as? NSMenuItem,
+              let clipId = item.representedObject as? String else { return }
+        Task { await editor.extractAudio(fromClipId: clipId) }
+    }
+
     @objc private func performSwapMedia(_ sender: Any?) {
         guard let item = sender as? NSMenuItem,
               let clipId = item.representedObject as? String else { return }
@@ -1461,14 +1875,21 @@ final class TimelineView: NSView {
         editor.activateTimeline(timelineId)
     }
 
-    @objc private func performSetVolumeKfInterpolation(_ sender: Any?) {
+    @objc private func performSetKeyframeInterpolation(_ sender: Any?) {
         guard let item = sender as? NSMenuItem,
               let info = item.representedObject as? [String: Any],
               let clipId = info["clipId"] as? String,
+              let propertyRaw = info["property"] as? String,
+              let property = AnimatableProperty(rawValue: propertyRaw),
               let frame = info["frame"] as? Int,
-              let raw = info["interp"] as? String,
-              let interp = Interpolation(rawValue: raw) else { return }
-        editor.setInterpolation(clipId: clipId, property: .volume, frame: frame, interpolation: interp)
+              let interpolationRaw = info["interpolation"] as? String,
+              let interpolation = Interpolation(rawValue: interpolationRaw) else { return }
+        editor.setInterpolation(
+            clipId: clipId,
+            property: property,
+            frame: frame,
+            interpolation: interpolation
+        )
         needsDisplay = true
     }
 
@@ -1483,12 +1904,14 @@ final class TimelineView: NSView {
         needsDisplay = true
     }
 
-    @objc private func performDeleteVolumeKf(_ sender: Any?) {
+    @objc private func performDeleteKeyframe(_ sender: Any?) {
         guard let item = sender as? NSMenuItem,
               let info = item.representedObject as? [String: Any],
               let clipId = info["clipId"] as? String,
+              let propertyRaw = info["property"] as? String,
+              let property = AnimatableProperty(rawValue: propertyRaw),
               let frame = info["frame"] as? Int else { return }
-        editor.removeKeyframe(clipId: clipId, property: .volume, at: frame)
+        editor.removeKeyframe(clipId: clipId, property: property, at: frame)
         needsDisplay = true
     }
 
@@ -1599,7 +2022,8 @@ final class TimelineView: NSView {
             snapOverlay.setExternalX(nil)
             return candidate
         }
-        let totalDur = assets.reduce(0) { $0 + editor.clipDurationFrames(for: $1, segment: externalDragSegments[$1.id]) }
+        let totalDur = assets.filter { $0.type != .subtitle }
+            .reduce(0) { $0 + editor.clipDurationFrames(for: $1, segment: externalDragSegments[$1.id]) }
         let targets: [SnapEngine.SnapTarget]
         if let cache = externalSnapTargetsCache, cache.revision == editor.timelineRenderRevision {
             targets = cache.targets
@@ -1656,10 +2080,20 @@ final class TimelineView: NSView {
 
             let assets = editor.assetsFromDragPayload(urlString)
             if !assets.isEmpty {
-                let segments = editor.segmentsFromDragPayload(urlString)
-                let ripple = NSEvent.modifierFlags.contains(.command)
-                editor.addClipsWithSettingsCheck(assets: assets) {
-                    editor.placeDroppedAssets(assets, cursor: cursorTarget, atFrame: targetFrame, segments: segments, ripple: ripple)
+                let subtitles = assets.filter { $0.type == .subtitle }
+                let media = assets.filter { $0.type != .subtitle }
+                if !subtitles.isEmpty {
+                    Task { @MainActor in
+                        await editor.placeCaptions(fromSubtitleAssets: subtitles)
+                        self.needsDisplay = true
+                    }
+                }
+                if !media.isEmpty {
+                    let segments = editor.segmentsFromDragPayload(urlString)
+                    let ripple = NSEvent.modifierFlags.contains(.command)
+                    editor.addClipsWithSettingsCheck(assets: media) {
+                        editor.placeDroppedAssets(media, cursor: cursorTarget, atFrame: targetFrame, segments: segments, ripple: ripple)
+                    }
                 }
                 needsDisplay = true
                 return true

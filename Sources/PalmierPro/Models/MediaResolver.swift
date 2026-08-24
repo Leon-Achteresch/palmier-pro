@@ -39,6 +39,10 @@ final class MediaResolver: @unchecked Sendable {
         MediaResolver(frozen: manifest(), projectURL: projectURL())
     }
 
+    func manifestSnapshot() -> MediaManifest {
+        manifest()
+    }
+
     static func expectedURLMap(entries: [MediaManifestEntry], projectURL: URL?) -> [String: URL] {
         var seenIds: Set<String> = []
         var urls: [String: URL] = [:]

@@ -8,35 +8,46 @@ extension MediaTab {
 
     var searchResults: some View {
         let nameMatches = sortAndFilter(editor.mediaAssets)
-        let orderedAssetIds = Self.searchOrderedAssetIds(
+        let timelineMatches = searchFilteredTimelines(editor.timelines)
+        let orderedItemIds = Self.searchOrderedItemIds(
             momentAssetIds: visualHits.map(\.assetID),
             spokenAssetIds: spokenHits.map(\.assetID),
+            timelineItemIds: timelineMatches.map { MediaPanelItemKey.timeline($0.id) },
             fileAssetIds: nameMatches.map(\.id),
             collapsedSectionTitles: collapsedSearchSections
         )
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if !visualHits.isEmpty {
-                    momentHeader("Moments", icon: "sparkle.magnifyingglass", count: visualHits.count, collapsible: true)
-                    if !collapsedSearchSections.contains("Moments") {
+                    momentHeader(L10n.key("Moments"), icon: "sparkle.magnifyingglass", count: visualHits.count, collapsible: true)
+                    if !collapsedSearchSections.contains(L10n.key("Moments")) {
                         resultsGrid { ForEach(visualHits.indices, id: \.self) { momentCard(visualHits[$0]) } }
                     }
                 }
                 if !spokenHits.isEmpty {
-                    momentHeader("Spoken", icon: "waveform", count: spokenHits.count, collapsible: true)
-                    if !collapsedSearchSections.contains("Spoken") {
+                    momentHeader(L10n.key("Spoken"), icon: "waveform", count: spokenHits.count, collapsible: true)
+                    if !collapsedSearchSections.contains(L10n.key("Spoken")) {
                         VStack(spacing: AppTheme.Spacing.sm) {
                             ForEach(spokenHits.indices, id: \.self) { spokenRow(spokenHits[$0]) }
                         }
                         .padding(.bottom, AppTheme.Spacing.sm)
                     }
                 }
+                if !timelineMatches.isEmpty {
+                    momentHeader(L10n.key("Timelines"), icon: "film.stack", count: timelineMatches.count)
+                    resultsGrid {
+                        ForEach(timelineMatches) { timeline in
+                            timelineTile(timeline)
+                                .id(MediaPanelItemKey.timeline(timeline.id))
+                        }
+                    }
+                }
                 if !nameMatches.isEmpty {
-                    momentHeader("Files", icon: "doc", count: nameMatches.count)
+                    momentHeader(L10n.key("Files"), icon: "doc", count: nameMatches.count)
                     resultsGrid { ForEach(nameMatches) { fileCard($0) } }
                 }
-                if visualHits.isEmpty, spokenHits.isEmpty, nameMatches.isEmpty {
-                    Text("No matches for “\(trimmedSearchQuery)”")
+                if visualHits.isEmpty, spokenHits.isEmpty, timelineMatches.isEmpty, nameMatches.isEmpty {
+                    Text(L10n.string("No matches for “\(trimmedSearchQuery)”"))
                         .font(.system(size: AppTheme.FontSize.sm))
                         .foregroundStyle(AppTheme.Text.tertiaryColor)
                         .frame(maxWidth: .infinity)
@@ -46,19 +57,21 @@ extension MediaTab {
             .padding(.top, AppTheme.Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .onAppear { publishGridState(orderedIds: orderedAssetIds, columnCount: 1) }
-        .onChange(of: orderedAssetIds) { _, ids in publishOrderedIds(ids) }
+        .onAppear { publishGridState(orderedIds: orderedItemIds, columnCount: 1) }
+        .onChange(of: orderedItemIds) { _, ids in publishOrderedIds(ids) }
     }
 
-    static func searchOrderedAssetIds(
+    static func searchOrderedItemIds(
         momentAssetIds: [String],
         spokenAssetIds: [String],
+        timelineItemIds: [String],
         fileAssetIds: [String],
         collapsedSectionTitles: Set<String>
     ) -> [String] {
         let sections = [
-            collapsedSectionTitles.contains("Moments") ? [] : momentAssetIds,
-            collapsedSectionTitles.contains("Spoken") ? [] : spokenAssetIds,
+            collapsedSectionTitles.contains(L10n.key("Moments")) ? [] : momentAssetIds,
+            collapsedSectionTitles.contains(L10n.key("Spoken")) ? [] : spokenAssetIds,
+            timelineItemIds,
             fileAssetIds,
         ]
         var seen: Set<String> = []
@@ -93,9 +106,9 @@ extension MediaTab {
                 }
                 Image(systemName: icon)
                     .font(.system(size: AppTheme.FontSize.xs))
-                Text(title)
+                Text(L10n.string(key: title))
                     .font(.system(size: AppTheme.FontSize.xs, weight: .semibold))
-                Text("\(count)")
+                Text(verbatim: "\(count)")
                     .font(.system(size: AppTheme.FontSize.xs).monospacedDigit())
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
                 Spacer()
@@ -124,12 +137,12 @@ extension MediaTab {
                 .aspectRatio(16.0 / 9.0, contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.sm))
-            Text(asset?.name ?? "")
+            Text(verbatim: asset?.name ?? String())
                 .font(.system(size: AppTheme.FontSize.xs))
                 .foregroundStyle(AppTheme.Text.secondaryColor)
                 .lineLimit(1)
             if !isImage {
-                Text("\(timecode(range.lowerBound))–\(timecode(range.upperBound))")
+                Text(verbatim: "\(timecode(range.lowerBound))–\(timecode(range.upperBound))")
                     .font(.system(size: AppTheme.FontSize.xxs).monospacedDigit())
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
             }
@@ -147,12 +160,12 @@ extension MediaTab {
     private func momentThumb(_ asset: MediaAsset?, time: Double) -> some View {
         if let asset, asset.type == .image {
             ZStack {
-                Rectangle().fill(Color.black)
+                Rectangle().fill(AppTheme.MediaOverlay.backgroundColor)
                 if let thumb = asset.thumbnail {
                     Image(nsImage: thumb).resizable().aspectRatio(contentMode: .fit)
                 } else {
                     Image(systemName: "photo")
-                        .foregroundStyle(AppTheme.Text.tertiaryColor)
+                        .foregroundStyle(AppTheme.MediaOverlay.tertiaryColor)
                 }
             }
             .task(id: searchThumbnailTaskID(for: asset)) {
@@ -176,7 +189,7 @@ extension MediaTab {
                     .font(.system(size: AppTheme.FontSize.xs))
                     .foregroundStyle(AppTheme.Text.primaryColor)
                     .lineLimit(3)
-                Text("\(asset?.name ?? "") · \(timecode(hit.start))")
+                Text(verbatim: "\(asset?.name ?? "") · \(timecode(hit.start))")
                     .font(.system(size: AppTheme.FontSize.xxs))
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
                     .lineLimit(1)
@@ -197,19 +210,19 @@ extension MediaTab {
     private func fileCard(_ asset: MediaAsset) -> some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.xxs) {
             ZStack {
-                Rectangle().fill(Color.black)
+                Rectangle().fill(AppTheme.MediaOverlay.backgroundColor)
                 if let thumb = asset.thumbnail {
                     Image(nsImage: thumb).resizable().aspectRatio(contentMode: .fit)
                 } else {
                     Image(systemName: asset.type.sfSymbolName)
-                        .foregroundStyle(AppTheme.Text.tertiaryColor)
+                        .foregroundStyle(AppTheme.MediaOverlay.tertiaryColor)
                 }
             }
             .aspectRatio(16.0 / 9.0, contentMode: .fit)
             .frame(maxWidth: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.sm))
             Text(asset.name)
-                .font(.system(size: AppTheme.FontSize.xs))
+                .font(.system(size: AppTheme.FontSize.xxs))
                 .foregroundStyle(AppTheme.Text.secondaryColor)
                 .lineLimit(1)
         }
@@ -288,7 +301,7 @@ private struct MomentThumbnail: View {
 
     var body: some View {
         ZStack {
-            Rectangle().fill(Color.black)
+            Rectangle().fill(AppTheme.MediaOverlay.backgroundColor)
             if let image {
                 Image(decorative: image, scale: 1)
                     .resizable()

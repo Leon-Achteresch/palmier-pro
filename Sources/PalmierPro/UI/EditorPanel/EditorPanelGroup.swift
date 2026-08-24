@@ -14,12 +14,7 @@ struct EditorPanelGroup<Content: View, HeaderAccessory: View>: View {
         _ title: String,
         isExpanded: Binding<Bool>? = nil,
         contentSpacing: CGFloat = AppTheme.Spacing.smMd,
-        contentInsets: EdgeInsets = EdgeInsets(
-            top: AppTheme.Spacing.smMd,
-            leading: AppTheme.Spacing.smMd,
-            bottom: AppTheme.Spacing.smMd,
-            trailing: AppTheme.Spacing.smMd
-        ),
+        contentInsets: EdgeInsets = AppTheme.EditorPanel.contentInsets,
         onReset: (() -> Void)? = nil,
         @ViewBuilder headerAccessory: @escaping () -> HeaderAccessory,
         @ViewBuilder content: @escaping () -> Content
@@ -58,7 +53,7 @@ struct EditorPanelGroup<Content: View, HeaderAccessory: View>: View {
             }
             .buttonStyle(.plain)
             .focusable(false)
-            .accessibilityLabel("\(expanded ? "Collapse" : "Expand") \(title)")
+            .accessibilityLabel(Text(verbatim: "\(expanded ? L10n.string("Collapse") : L10n.string("Expand")) \(title)"))
 
             HStack(spacing: AppTheme.Spacing.sm) {
                 HStack(spacing: AppTheme.Spacing.sm) {
@@ -86,7 +81,7 @@ struct EditorPanelGroup<Content: View, HeaderAccessory: View>: View {
     }
 
     private var titleLabel: some View {
-        Text(title)
+        Text(L10n.string(key: title))
             .font(.system(size: AppTheme.FontSize.smMd, weight: AppTheme.FontWeight.medium))
             .foregroundStyle(AppTheme.Text.primaryColor)
             .lineLimit(1)
@@ -118,12 +113,7 @@ extension EditorPanelGroup where HeaderAccessory == EmptyView {
         _ title: String,
         isExpanded: Binding<Bool>? = nil,
         contentSpacing: CGFloat = AppTheme.Spacing.smMd,
-        contentInsets: EdgeInsets = EdgeInsets(
-            top: AppTheme.Spacing.smMd,
-            leading: AppTheme.Spacing.smMd,
-            bottom: AppTheme.Spacing.smMd,
-            trailing: AppTheme.Spacing.smMd
-        ),
+        contentInsets: EdgeInsets = AppTheme.EditorPanel.contentInsets,
         onReset: (() -> Void)? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {

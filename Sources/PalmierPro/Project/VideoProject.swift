@@ -6,14 +6,12 @@ import UniformTypeIdentifiers
 struct ProjectPackageContents: Sendable {
     var projectFile: ProjectFile
     var manifest: MediaManifest?
-    var generationLog: GenerationLog?
     var manifestUnreadable: Bool = false
 }
 
 struct ProjectPackageSnapshot: Sendable {
     var timeline: Data
     var manifest: Data?
-    var generationLog: Data?
     var thumbnail: Data?
     var chatSessionFiles: [(name: String, data: Data)]?
 }
@@ -44,7 +42,6 @@ class VideoProject: NSDocument {
     /// Decoded off-main in read(), applied on main in makeWindowControllers.
     private nonisolated(unsafe) var loadedProjectFile: ProjectFile?
     private nonisolated(unsafe) var loadedManifest: MediaManifest?
-    private nonisolated(unsafe) var loadedGenerationLog: GenerationLog?
 
     /// Set when media.json existed but failed to decode, so saves preserve it instead of clobbering.
     private nonisolated(unsafe) var manifestLoadFailed = false
@@ -52,7 +49,6 @@ class VideoProject: NSDocument {
     /// Captured on main thread as cheap value copies; encoded off-main in write().
     private nonisolated(unsafe) var snapshotProjectFile: ProjectFile?
     private nonisolated(unsafe) var snapshotManifest: MediaManifest?
-    private nonisolated(unsafe) var snapshotGenerationLog: GenerationLog?
     private nonisolated(unsafe) var snapshotThumbnail: Data?
     private nonisolated(unsafe) var snapshotChatSessionFiles: [(name: String, data: Data)]?
     private nonisolated(unsafe) var snapshotSourceProjectURL: URL?
@@ -91,7 +87,6 @@ class VideoProject: NSDocument {
     private nonisolated func applyLoadedContents(_ contents: ProjectPackageContents) {
         loadedProjectFile = contents.projectFile
         loadedManifest = contents.manifest
-        loadedGenerationLog = contents.generationLog
         manifestLoadFailed = contents.manifestUnreadable
         let timelines = loadedProjectFile?.timelines ?? []
         Log.project.notice(
@@ -101,8 +96,7 @@ class VideoProject: NSDocument {
                 "timelines": timelines.count,
                 "tracks": timelines.reduce(0) { $0 + $1.tracks.count },
                 "clips": timelines.reduce(0) { $0 + $1.tracks.reduce(0) { $0 + $1.clips.count } },
-                "media": loadedManifest?.entries.count ?? 0,
-                "hasGenerationLog": loadedGenerationLog != nil
+                "media": loadedManifest?.entries.count ?? 0
             ]
         )
     }
@@ -134,13 +128,9 @@ class VideoProject: NSDocument {
             manifestUnreadable = false
         }
 
-        let generationLog = try optionalData(Project.generationLogFilename, in: url)
-            .flatMap { try? JSONDecoder().decode(GenerationLog.self, from: $0) }
-
         return ProjectPackageContents(
             projectFile: projectFile,
             manifest: manifest,
-            generationLog: generationLog,
             manifestUnreadable: manifestUnreadable
         )
     }
@@ -252,7 +242,6 @@ class VideoProject: NSDocument {
 
         let file = snapshotProjectFile
         let manifest = snapshotManifest
-        let generationLog = snapshotGenerationLog
         let thumbnail = snapshotThumbnail
         let chatSessionFiles = snapshotChatSessionFiles
         let sourceURL = snapshotSourceProjectURL
@@ -270,7 +259,6 @@ class VideoProject: NSDocument {
             ProjectPackageSnapshot(
                 timeline: data,
                 manifest: manifest.flatMap { try? JSONEncoder().encode($0) },
-                generationLog: generationLog.flatMap { try? JSONEncoder().encode($0) },
                 thumbnail: thumbnail,
                 chatSessionFiles: chatSessionFiles
             ),
@@ -285,7 +273,6 @@ class VideoProject: NSDocument {
         editorViewModel.flushPendingManifestMetadataUpdates()
         snapshotProjectFile = editorViewModel.projectFileSnapshot()
         snapshotManifest = Self.manifestSnapshot(manifest: editorViewModel.mediaManifest, loadFailed: manifestLoadFailed)
-        snapshotGenerationLog = editorViewModel.generationLog
         snapshotThumbnail = captureThumbnail()
         snapshotChatSessionFiles = editorViewModel.agentService.sessionsLoaded
             ? editorViewModel.agentService.sessions
@@ -326,9 +313,6 @@ class VideoProject: NSDocument {
             try manifest.write(to: packageURL.appendingPathComponent(Project.manifestFilename), options: .atomic)
         } else {
             try copyPreservedFile(Project.manifestFilename, from: sourceURL, to: packageURL, fm: fm)
-        }
-        if let log = snapshot.generationLog {
-            try log.write(to: packageURL.appendingPathComponent(Project.generationLogFilename), options: .atomic)
         }
         if let thumbnail = snapshot.thumbnail {
             try thumbnail.write(to: packageURL.appendingPathComponent(Project.thumbnailFilename), options: .atomic)
@@ -439,6 +423,11 @@ class VideoProject: NSDocument {
             if let oldURL, let newURL = newValue,
                oldURL.standardizedFileURL != newURL.standardizedFileURL {
                 MainActor.assumeIsolated {
+                    Telemetry.beginOperation("project_url_rebase", data: [
+                        "media_count": editorViewModel.mediaAssets.count,
+                        "registry_count": ProjectRegistry.shared.entries.count,
+                    ])
+                    defer { Telemetry.endOperation("project_url_rebase") }
                     ProjectRegistry.shared.updateURL(from: oldURL, to: newURL)
                     editorViewModel.rebaseProjectURL(from: oldURL, to: newURL)
                 }
@@ -487,6 +476,7 @@ class VideoProject: NSDocument {
         let editorView = EditorView()
             .environment(editorViewModel)
             .focusEffectDisabled()
+            .background(.ultraThinMaterial)
             .sheet(isPresented: Bindable(editorViewModel).showExportDialog) { [editorViewModel] in
                 ExportView()
                     .environment(editorViewModel)
@@ -499,24 +489,27 @@ class VideoProject: NSDocument {
                 TourOverlay()
                     .environment(editorViewModel)
             }
-        let hostingController = NSHostingController(rootView: editorView.tint(AppTheme.Accent.primary).hotReloadable())
+            .ignoresSafeArea(.container, edges: .top)
+        let hostingController = NSHostingController(rootView: editorView.appLocalization().tint(AppTheme.Accent.primary).hotReloadable())
         hostingController.sizingOptions = .minSize
+        hostingController.safeAreaRegions = []
 
         let window = NSWindow(contentViewController: hostingController)
         window.minSize = AppTheme.Window.projectMin
-        window.appearance = NSAppearance(named: .darkAqua)
         window.titleVisibility = .visible
         window.titlebarAppearsTransparent = true
-        window.backgroundColor = NSColor(AppTheme.Background.surfaceColor)
+        window.backgroundColor = AppTheme.Background.base.withAlphaComponent(AppTheme.Opacity.high)
+        window.isOpaque = false
+        window.styleMask.insert(.fullSizeContentView)
         window.fillVisibleScreen()
 
-        window.addTitlebarSwiftUI(TitleBarLeadingView().environment(editorViewModel), side: .leading, width: AppTheme.IconSize.lg + AppTheme.Spacing.sm)
+        window.addTitlebarSwiftUI(TitleBarLeadingView().environment(editorViewModel), side: .leading, width: AppTheme.Window.projectTitlebarLeadingWidth)
         window.addTitlebarSwiftUI(TitleBarTrailingView().environment(editorViewModel), side: .trailing, width: AppTheme.Window.projectTitlebarTrailingWidth)
 
         let controller = EditorWindowController(editorViewModel: editorViewModel, window: window)
         controller.onBecameKey = { [weak self] in
             guard let self else { return }
-            AppState.shared.activateProject(self)
+            AppState.shared.projectWindowDidBecomeKey(self)
         }
         window.delegate = controller
         controller.installKeyMonitor()
@@ -524,14 +517,6 @@ class VideoProject: NSDocument {
 
         window.standardWindowButton(.documentIconButton)?.isHidden = true
 
-        AppState.shared.showEditor(for: self)
-
-        if let log = loadedGenerationLog {
-            editorViewModel.generationLog = log
-            loadedGenerationLog = nil
-        } else {
-            editorViewModel.seedGenerationLogFromAssets()
-        }
         editorViewModel.searchIndex.projectOpened()
         editorViewModel.updateTelemetryContext()
         Telemetry.breadcrumb(
@@ -739,7 +724,7 @@ extension NSWindow {
     }
 
     func addTitlebarSwiftUI<V: View>(_ view: V, side: NSLayoutConstraint.Attribute, width: CGFloat) {
-        let host = NSHostingController(rootView: view.tint(AppTheme.Accent.primary))
+        let host = NSHostingController(rootView: view.appLocalization().tint(AppTheme.Accent.primary))
         host.view.translatesAutoresizingMaskIntoConstraints = false
 
         let wrapper = CornerAdaptiveView()

@@ -6,11 +6,20 @@ enum CostEstimator {
         model: VideoModelConfig,
         durationSeconds: Int,
         resolution: String?,
-        generateAudio: Bool
+        generateAudio: Bool,
+        draft: Bool = false,
+        usesSourceVideo: Bool = false
     ) -> Int? {
-        guard !model.creditsPerSecond.isEmpty, durationSeconds > 0 else { return nil }
-        guard var rate = resolvedRate(model.creditsPerSecond, key: resolution) else { return nil }
-        if !generateAudio, let discount = model.audioDiscount(for: resolution) {
+        guard durationSeconds > 0 else { return nil }
+        // Source-video extension rates when defined, otherwise base rates.
+        let rates = (usesSourceVideo ? model.sourceVideoCreditsPerSecond : nil)
+            ?? model.creditsPerSecond
+        guard var rate = draft
+            ? (usesSourceVideo
+                ? model.sourceVideoDraftCreditsPerSecond
+                : model.draftCreditsPerSecond)
+            : resolvedRate(rates, key: resolution) else { return nil }
+        if !draft, !generateAudio, let discount = model.audioDiscount(for: resolution) {
             rate *= discount
         }
         return ceilCredits(rate * Double(durationSeconds))
@@ -110,7 +119,9 @@ enum CostEstimator {
                 model: m,
                 durationSeconds: genInput.duration,
                 resolution: genInput.resolution,
-                generateAudio: genInput.generateAudio ?? true
+                generateAudio: genInput.generateAudio ?? true,
+                draft: genInput.draft ?? false,
+                usesSourceVideo: genInput.usesSourceVideo ?? false
             )
         case .image(let m):
             return imageCost(
@@ -142,11 +153,56 @@ enum CostEstimator {
         }
     }
 
-    static func format(_ credits: Int?) -> String {
+    static func stableDescription(_ credits: Int?) -> String {
         guard let credits else { return "—" }
         if credits <= 0 { return "0 credits" }
         if credits == 1 { return "1 credit" }
         return "\(credits) credits"
+    }
+
+    @MainActor
+    static func localizedDescription(_ credits: Int?) -> String {
+        guard let credits else { return "—" }
+        if credits <= 0 { return L10n.string("0 credits") }
+        if credits == 1 { return L10n.string("1 credit") }
+        return L10n.string("\(credits) credits")
+    }
+
+    @MainActor
+    static func localizedEstimate(_ credits: Int) -> String {
+        if credits == 1 {
+            return L10n.string("1 credit estimated. Actual billing may differ.")
+        }
+        return L10n.string("\(credits) credits estimated. Actual billing may differ.")
+    }
+
+    @MainActor
+    static func localizedInsufficientCredits(_ credits: Int, remaining: Int) -> String {
+        if credits == 1 {
+            return L10n.string("1 credit needed. Only \(remaining) remaining.")
+        }
+        return L10n.string("\(credits) credits needed. Only \(remaining) remaining.")
+    }
+
+    @MainActor
+    static func localizedRemainingCredits(_ credits: Int, remaining: Int) -> String {
+        if credits == 1 {
+            return L10n.string("1 credit. \(remaining) remaining after this generation.")
+        }
+        return L10n.string("\(credits) credits. \(remaining) remaining after this generation.")
+    }
+
+    @MainActor
+    static func localizedGenerateLabel(_ credits: Int) -> String {
+        if credits == 1 { return L10n.string("Generate · 1 credit") }
+        return L10n.string("Generate · \(credits) credits")
+    }
+
+    @MainActor
+    static func localizedUsedCredits(_ credits: Int) -> String {
+        if credits <= 0 { return L10n.string("0 credits used") }
+        if credits == 1 { return L10n.string("1 credit used") }
+        return L10n.string("\(credits) credits used")
     }
 
     private static func resolvedRate(_ dict: [String: Double], key: String?) -> Double? {

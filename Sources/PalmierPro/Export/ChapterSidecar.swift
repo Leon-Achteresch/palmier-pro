@@ -10,10 +10,10 @@ enum ChapterSidecar {
     /// "00:00 Intro" lines, one per chapter marker in frame order. Nil when there is nothing to write.
     static func text(markers: [TimelineMarker], fps: Int) -> String? {
         guard fps > 0 else { return nil }
-        let chapters = markers.filter { $0.kind == .chapter }.sorted { $0.frame < $1.frame }
+        let chapters = markers.filter { $0.kind == .chapter }.sorted { $0.startFrame < $1.startFrame }
         guard !chapters.isEmpty else { return nil }
         let lines = chapters.enumerated().map { index, marker in
-            "\(timestamp(frame: marker.frame, fps: fps)) \(title(of: marker, number: index + 1))"
+            "\(timestamp(frame: marker.startFrame, fps: fps)) \(title(of: marker, number: index + 1))"
         }
         return lines.joined(separator: "\n") + "\n"
     }

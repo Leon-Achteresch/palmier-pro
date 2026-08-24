@@ -2,188 +2,200 @@ import Foundation
 import Testing
 @testable import PalmierPro
 
-@MainActor
 @Suite("Timeline markers")
+@MainActor
 struct TimelineMarkerTests {
-    private func harness() -> (EditorViewModel, UndoManager) {
-        let editor = EditorViewModel()
-        editor.timeline = Fixtures.timeline(tracks: [
-            Fixtures.videoTrack(clips: [Fixtures.clip(start: 0, duration: 300)])
-        ])
-        let manager = UndoManager()
-        editor.undo.attach(manager)
-        return (editor, manager)
+    @Test func markersPersistWithoutChangingContentDuration() throws {
+        var timeline = Fixtures.timeline(tracks: [Fixtures.videoTrack(clips: [Fixtures.clip(start: 0, duration: 30)])])
+        timeline.markers = [TimelineMarker(name: "Review", startFrame: 40, durationFrames: 10, color: .init(r: 1, g: 0, b: 0), comment: "Tighten", status: .review)]
+        let file = ProjectFile(timelines: [timeline])
+        let decoded = try JSONDecoder().decode(ProjectFile.self, from: JSONEncoder().encode(file))
+        #expect(decoded.timelines[0].markers == timeline.markers)
+        #expect(decoded.timelines[0].totalFrames == 30)
+        #expect(decoded.timelines[0].displayFrames == 50)
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(timeline)) as? [String: Any])
+        object.removeValue(forKey: "markers")
+        let withoutMarkers = try JSONSerialization.data(withJSONObject: object)
+        #expect(try JSONDecoder().decode(Timeline.self, from: withoutMarkers).markers.isEmpty)
     }
+    @Test func markersWithoutStatusDecodeAsOpen() throws {
+        var timeline = Fixtures.timeline()
+        timeline.markers = [
+            TimelineMarker(name: "Existing marker", startFrame: 12, status: .review)
+        ]
+        var object = try #require(
+            JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(timeline)
+            ) as? [String: Any]
+        )
+        var markers = try #require(object["markers"] as? [[String: Any]])
+        markers[0].removeValue(forKey: "status")
+        object["markers"] = markers
 
-    @Test func addKeepsMarkersOrderedByFrame() {
-        let (editor, _) = harness()
-        editor.addMarker(atFrame: 200, name: "Late")
-        editor.addMarker(atFrame: 10, name: "Early")
-        editor.addMarker(atFrame: 120, kind: .chapter, name: "Middle")
-
-        #expect(editor.timeline.markers.map(\.frame) == [10, 120, 200])
-        #expect(editor.timeline.markers.map(\.name) == ["Early", "Middle", "Late"])
-    }
-
-    @Test func movingAMarkerRestoresFrameOrder() throws {
-        let (editor, _) = harness()
-        let first = try #require(editor.addMarker(atFrame: 10))
-        editor.addMarker(atFrame: 120)
-
-        #expect(editor.moveMarker(id: first.id, toFrame: 250))
-        #expect(editor.timeline.markers.map(\.frame) == [120, 250])
-        #expect(editor.timeline.markers.last?.id == first.id)
-    }
-
-    @Test(arguments: [-1, 301, 5_000])
-    func rejectsFramesOutsideTheTimeline(frame: Int) throws {
-        let (editor, _) = harness()
-        #expect(editor.timeline.totalFrames == 300)
-        #expect(editor.addMarker(atFrame: frame) == nil)
-        #expect(editor.timeline.markers.isEmpty)
-
-        let marker = try #require(editor.addMarker(atFrame: 0))
-        #expect(editor.moveMarker(id: marker.id, toFrame: frame) == false)
-        #expect(editor.timeline.marker(id: marker.id)?.frame == 0)
-    }
-
-    @Test func acceptsBothEndsOfTheTimeline() {
-        let (editor, _) = harness()
-        #expect(editor.addMarker(atFrame: 0) != nil)
-        #expect(editor.addMarker(atFrame: 300) != nil)
-        #expect(editor.timeline.markers.count == 2)
-    }
-
-    @Test func updateReportsNoChangeWhenValuesMatch() throws {
-        let (editor, _) = harness()
-        let marker = try #require(editor.addMarker(atFrame: 30, kind: .todo, name: "Fix audio"))
-
-        #expect(editor.updateMarker(id: marker.id, .init(name: "Fix audio")) == false)
-        #expect(editor.updateMarker(id: marker.id, .init()) == false)
-        #expect(editor.updateMarker(id: "not-a-marker", .init(name: "x")) == false)
-        #expect(editor.updateMarker(id: marker.id, .init(done: true)))
-        #expect(editor.timeline.marker(id: marker.id)?.done == true)
-    }
-
-    @Test func leavingTodoClearsTheDoneFlag() throws {
-        let (editor, _) = harness()
-        let marker = try #require(editor.addMarker(atFrame: 30, kind: .todo, done: true))
-        #expect(editor.timeline.marker(id: marker.id)?.done == true)
-
-        #expect(editor.updateMarker(id: marker.id, .init(kind: .chapter)))
-        #expect(editor.timeline.marker(id: marker.id)?.done == false)
-    }
-
-    @Test func removeClearsSelectionAndIsIdempotent() throws {
-        let (editor, _) = harness()
-        let marker = try #require(editor.addMarker(atFrame: 40))
-        #expect(editor.selectedMarkerId == marker.id)
-
-        #expect(editor.removeMarker(id: marker.id))
-        #expect(editor.selectedMarkerId == nil)
-        #expect(editor.removeMarker(id: marker.id) == false)
-        #expect(editor.timeline.markers.isEmpty)
-    }
-
-    @Test func eachMarkerEditIsOneUndoStep() throws {
-        let (editor, manager) = harness()
-        let marker = try #require(editor.addMarker(atFrame: 40, name: "Rough"))
-        #expect(editor.renameMarker(id: marker.id, to: "Final"))
-        #expect(editor.moveMarker(id: marker.id, toFrame: 90))
-
-        #expect(editor.undo.undoLatest() == "Move Marker")
-        #expect(editor.timeline.marker(id: marker.id)?.frame == 40)
-        #expect(editor.undo.undoLatest() == "Rename Marker")
-        #expect(editor.timeline.marker(id: marker.id)?.name == "Rough")
-        #expect(editor.undo.undoLatest() == "Add Marker")
-        #expect(editor.timeline.markers.isEmpty)
-
-        manager.redo()
-        #expect(editor.timeline.markers.count == 1)
-    }
-
-    @Test func refusedEditsRegisterNoUndoStep() {
-        let (editor, manager) = harness()
-        editor.addMarker(atFrame: 400)
-        #expect(!manager.canUndo)
-        #expect(editor.timeline.markers.isEmpty)
-    }
-
-    @Test func markersSurviveEncodingAndStaySorted() throws {
-        let (editor, _) = harness()
-        editor.addMarker(atFrame: 120, kind: .chapter, name: "Two", note: "second", color: .green)
-        editor.addMarker(atFrame: 10, name: "One")
-
-        let data = try JSONEncoder().encode(editor.timeline)
+        let data = try JSONSerialization.data(withJSONObject: object)
         let decoded = try JSONDecoder().decode(Timeline.self, from: data)
 
-        #expect(decoded.markers.map(\.frame) == [10, 120])
-        #expect(decoded.markers.last?.kind == .chapter)
-        #expect(decoded.markers.last?.color == .green)
-        #expect(decoded.markers.last?.note == "second")
+        #expect(decoded.markers.count == 1)
+        #expect(decoded.markers[0].status == .open)
+    }
+    @Test func duplicateTimelineFreshensMarkerIds() throws {
+        let editor = EditorViewModel()
+        editor.timeline.markers = [TimelineMarker(name: "Note", startFrame: 4)]
+        let originalId = try #require(editor.timeline.markers.first?.id)
+        let copyId = try #require(editor.duplicateTimeline(editor.activeTimelineId))
+        let copy = try #require(editor.timeline(for: copyId))
+        let copiedMarker = try #require(copy.markers.first)
+        #expect(copiedMarker.id != originalId)
+    }
+    @Test func markerChangesUndoAsOneAction() throws {
+        let editor = EditorViewModel()
+        let undo = UndoManager()
+        editor.undo.attach(undo)
+        let created = try #require(try editor.changeTimelineMarkers(
+            creates: [TimelineMarker(
+                name: "Audio note",
+                startFrame: 12,
+                durationFrames: 8,
+                color: .init(r: 1, g: 1, b: 0),
+                comment: "Lower this"
+            )],
+            actionName: "Add Marker"
+        ).created.first)
+        #expect(editor.timeline.markers == [created])
+        undo.undo()
+        #expect(editor.timeline.markers.isEmpty)
+        undo.redo()
+        #expect(editor.timeline.markers == [created])
+        #expect(editor.timelineMarkerSnapFrames() == [12, 20])
+        #expect(editor.timelineMarkerSnapFrames(
+            excludingMarkerIds: [created.id]
+        ).isEmpty)
+    }
+    @Test func markerStatusChangesUndo() throws {
+        let editor = EditorViewModel()
+        let undo = UndoManager()
+        editor.undo.attach(undo)
+        editor.timeline.markers = [TimelineMarker(id: "marker", name: "Review", startFrame: 12)]
+        var marker = editor.timeline.markers[0]
+        marker.status = .review
+        _ = try editor.changeTimelineMarkers(
+            updates: [marker],
+            actionName: "Change Marker Status"
+        )
+        #expect(editor.timeline.markers[0].status == .review)
+        undo.undo()
+        #expect(editor.timeline.markers[0].status == .open)
+    }
+    @Test func committingMarkerChangeClearsItsPreview() throws {
+        let editor = EditorViewModel()
+        let marker = TimelineMarker(id: "marker", name: "Review", startFrame: 12)
+        editor.timeline.markers = [marker]
+        var preview = marker
+        preview.startFrame = 20
+        editor.timelineMarkerPreview = preview
+
+        _ = try editor.changeTimelineMarkers(
+            updates: [preview],
+            actionName: "Move Marker"
+        )
+
+        #expect(editor.timeline.markers == [preview])
+        #expect(editor.timelineMarkerPreview == nil)
+    }
+    @Test func defaultMarkerNamesUseNextNumber() {
+        let editor = EditorViewModel()
+        editor.selectedClipIds = ["clip"]
+        editor.currentFrame = 10
+        let first = editor.addTimelineMarkerAtSelection()
+        editor.currentFrame = 11
+        let second = editor.addTimelineMarkerAtSelection()
+        #expect((first?.startFrame, first?.name) == (10, L10n.string("Marker 1")))
+        #expect(second?.name == L10n.string("Marker 2"))
+    }
+    @Test func marqueeCrossingRulerSelectsMarkers() {
+        let geometry = TimelineGeometry(pixelsPerFrame: 1, trackHeights: [50])
+        let markers = [
+            TimelineMarker(id: "first", name: "First", startFrame: 10),
+            TimelineMarker(id: "second", name: "Second", startFrame: 20),
+        ]
+        let selected = TimelineMarkerRenderer.markerIds(
+            intersecting: NSRect(x: 0, y: 0, width: 30, height: 100),
+            markers: markers, geometry: geometry, rulerMinY: 0
+        )
+        #expect(selected == ["first", "second"])
+    }
+    @Test func durationBarIsNotAMarkerHitTarget() {
+        let geometry = TimelineGeometry(pixelsPerFrame: 1, trackHeights: [])
+        let marker = TimelineMarker(id: "range", name: "Range", startFrame: 10, durationFrames: 30)
+        let selected = TimelineMarkerRenderer.markerIds(
+            intersecting: NSRect(x: 20, y: 0, width: 5, height: 2),
+            markers: [marker], geometry: geometry, rulerMinY: 0
+        )
+        #expect(selected.isEmpty)
     }
 
-    @Test func unknownKindAndColorDecodeToDefaults() throws {
-        let json = Data(#"{"id":"m1","frame":12,"kind":"sparkle","color":"chartreuse"}"#.utf8)
-        let marker = try JSONDecoder().decode(TimelineMarker.self, from: json)
-
-        #expect(marker.kind == .standard)
-        #expect(marker.color == .blue)
-        #expect(marker.frame == 12)
+    @Test func markerFlagSitsAtTopOfRuler() {
+        let geometry = TimelineGeometry(pixelsPerFrame: 1, trackHeights: [])
+        let marker = TimelineMarker(id: "mark", name: "Mark", startFrame: 10)
+        #expect(
+            TimelineMarkerRenderer.marker(
+                at: NSPoint(x: 10, y: 2),
+                markers: [marker],
+                geometry: geometry,
+                rulerMinY: 0
+            )?.id == "mark"
+        )
+        #expect(
+            TimelineMarkerRenderer.marker(
+                at: NSPoint(x: 10, y: geometry.rulerHeight - 2),
+                markers: [marker],
+                geometry: geometry,
+                rulerMinY: 0
+            ) == nil
+        )
     }
 
-    @Test func frameRateChangeRescalesMarkers() throws {
-        let (editor, _) = harness()
-        let marker = try #require(editor.addMarker(atFrame: 60, kind: .chapter))
+    @Test func markersWithoutKindDecodeAsStandard() throws {
+        var timeline = Fixtures.timeline()
+        timeline.markers = [TimelineMarker(name: "Chapter one", startFrame: 12, kind: .chapter)]
+        var object = try #require(
+            JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(timeline)
+            ) as? [String: Any]
+        )
+        var markers = try #require(object["markers"] as? [[String: Any]])
+        markers[0].removeValue(forKey: "kind")
+        object["markers"] = markers
+
+        let data = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(Timeline.self, from: data)
+
+        #expect(decoded.markers[0].kind == .standard)
+        #expect(decoded.chapterMarkers.isEmpty)
+    }
+
+    @Test func chapterMarkersReadOnlyChapterKinds() {
+        var timeline = Fixtures.timeline()
+        timeline.markers = [
+            TimelineMarker(name: "Note", startFrame: 4),
+            TimelineMarker(name: "Intro", startFrame: 8, kind: .chapter),
+        ]
+        #expect(timeline.chapterMarkers.map(\.name) == ["Intro"])
+    }
+
+    @Test func frameRateChangeRescalesMarkers() {
+        let editor = EditorViewModel()
+        editor.timeline = Fixtures.timeline(
+            fps: 30, tracks: [Fixtures.videoTrack(clips: [Fixtures.clip(start: 0, duration: 300)])]
+        )
+        editor.timeline.markers = [
+            TimelineMarker(id: "point", name: "Point", startFrame: 60),
+            TimelineMarker(id: "range", name: "Range", startFrame: 60, durationFrames: 30),
+        ]
 
         editor.applyTimelineSettings(fps: 60, width: editor.timeline.width, height: editor.timeline.height)
 
-        #expect(editor.timeline.marker(id: marker.id)?.frame == 120)
-    }
-
-    @Test func duplicatingATimelineGivesItsMarkersFreshIds() throws {
-        let (editor, _) = harness()
-        let marker = try #require(editor.addMarker(atFrame: 60, name: "Intro"))
-        let copyId = try #require(editor.duplicateTimeline(editor.activeTimelineId))
-        let copy = try #require(editor.timeline(for: copyId))
-
-        #expect(copy.markers.count == 1)
-        #expect(copy.markers[0].name == "Intro")
-        #expect(copy.markers[0].id != marker.id)
-    }
-
-    @Test func ribbonHitTestingMatchesTheDrawnTag() throws {
-        let markers = [
-            TimelineMarker(id: "a", frame: 10),
-            TimelineMarker(id: "b", frame: 400),
-        ]
-        let rulerRect = NSRect(x: 0, y: 0, width: 200, height: Layout.rulerHeight)
-        let rect = TimelineMarkerRibbon.tagRect(
-            frame: 10, in: rulerRect, pixelsPerFrame: 2, scrollOffsetX: 0
-        )
-
-        let hit = TimelineMarkerRibbon.hitTest(
-            markers: markers, at: CGPoint(x: rect.midX, y: rect.midY),
-            in: rulerRect, pixelsPerFrame: 2, scrollOffsetX: 0
-        )
-        #expect(hit == "a")
-
-        let miss = TimelineMarkerRibbon.hitTest(
-            markers: markers, at: CGPoint(x: rect.midX, y: rulerRect.minY),
-            in: rulerRect, pixelsPerFrame: 2, scrollOffsetX: 0
-        )
-        #expect(miss == nil)
-    }
-
-    @Test func ribbonVisibleRangeSkipsOffscreenMarkers() {
-        let markers = (0..<100).map { TimelineMarker(id: "m\($0)", frame: $0 * 100) }
-        let rulerRect = NSRect(x: 0, y: 0, width: 300, height: Layout.rulerHeight)
-
-        let range = TimelineMarkerRibbon.visibleRange(
-            markers, in: rulerRect, pixelsPerFrame: 1, scrollOffsetX: 1_000
-        )
-
-        #expect(markers[range].allSatisfy { $0.frame >= 990 && $0.frame <= 1_310 })
-        #expect(range.count == 4)
+        #expect(editor.timeline.markers.map(\.startFrame) == [120, 120])
+        #expect(editor.timeline.markers.map(\.durationFrames) == [0, 60])
     }
 }

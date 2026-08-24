@@ -111,6 +111,9 @@ extension EditorViewModel {
                 pruneEmptyTracks()
                 selectedClipIds = carriers
             }
+            openTimelineIds.append(child.id)
+            timelineTabRenameRequest = child.id
+            timelineTabBarExpandedOverride = true
         }
         return child.id
     }
@@ -188,7 +191,7 @@ extension EditorViewModel {
 
         if videoCarrier.map({ carrierHasGroupLook($0, child: child) }) == true
             || audioCarrier.map({ $0.fadeInFrames > 0 || $0.fadeOutFrames > 0 || $0.volumeTrack != nil }) == true {
-            mediaPanelToast = "Nest settings discarded. Undo to restore."
+            mediaPanelToast = MediaPanelToast(message: L10n.string("Nest settings discarded. Undo to restore."))
         }
     }
 

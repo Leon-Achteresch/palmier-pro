@@ -20,7 +20,12 @@ final class TimelineInputController {
         case end
     }
 
-    private enum TrimEdge {
+    struct KeyframeLaneHit {
+        let clipId: String
+        let frame: Int
+    }
+
+    enum TrimEdge: Equatable {
         case left
         case right
     }
@@ -134,8 +139,26 @@ final class TimelineInputController {
         let point = view.convert(event.locationInWindow, from: nil)
         let scrollOffsetY = view.enclosingScrollView?.contentView.bounds.origin.y ?? 0
 
-        if event.clickCount == 2,
-           point.y >= scrollOffsetY + geometry.rulerHeight {
+        if editor.activePreviewTab != .timeline {
+            editor.selectPreviewTab(id: PreviewTab.timeline.id)
+        }
+        if let marker = TimelineMarkerRenderer.marker(
+            at: point,
+            markers: editor.displayedTimelineMarkers(),
+            geometry: geometry,
+            rulerMinY: scrollOffsetY
+        ) {
+            beginMarkerDrag(
+                marker,
+                grabFrame: geometry.frameAt(x: point.x),
+                adjustsDuration: event.modifierFlags.contains(.option),
+                clickCount: event.clickCount
+            )
+            view.needsDisplay = true
+            return
+        }
+
+        if event.clickCount == 2, point.y >= scrollOffsetY + geometry.rulerHeight {
             let ti = geometry.trackAt(y: point.y)
             if let hit = hitTestClip(at: point, trackIndex: ti, geometry: geometry) {
                 let clip = editor.timeline.tracks[hit.trackIndex].clips[hit.clipIndex]
@@ -154,37 +177,62 @@ final class TimelineInputController {
             }
         }
 
-        if editor.activePreviewTab != .timeline {
-            editor.selectPreviewTab(id: PreviewTab.timeline.id)
-        }
-
         if point.y >= scrollOffsetY && point.y < scrollOffsetY + geometry.rulerHeight {
             view.setHoveredClipId(nil)
             let frame = geometry.frameAt(x: point.x)
-            if let markerId = markerHit(at: point, geometry: geometry) {
-                editor.selectMarker(id: markerId)
-                if event.clickCount == 2 { editor.markerEditRequestTick &+= 1 }
-                dragState = editor.timeline.marker(id: markerId).map {
-                    .marker(DragState.MarkerDrag(
-                        markerId: markerId, originalFrame: $0.frame, grabFrame: frame
-                    ))
-                } ?? .idle
-                view.needsDisplay = true
-                return
-            }
-            editor.selectMarker(id: nil)
             if let edge = timelineRangeEdgeHit(at: point, geometry: geometry) {
                 beginTimelineRangeEdgeDrag(edge)
             } else if event.modifierFlags.contains(.shift) {
                 beginTimelineRangeSelection(at: frame)
             } else {
+                editor.selectedTimelineMarkerIds = []
                 beginPlayheadScrub(at: frame)
             }
             return
         }
 
+        if case .keyframeLane(let trackIndex, let property) = geometry.rowLocation(atY: point.y) {
+            editor.selectedTimelineMarkerIds = []
+            editor.selectedGap = nil
+            snapState = SnapEngine.SnapState()
+            snapIndicatorX = nil
+            if let hit = keyframeLaneHit(
+                at: point,
+                trackIndex: trackIndex,
+                property: property,
+                geometry: geometry
+            ) {
+                if editor.isPlaying {
+                    editor.pause()
+                }
+                editor.seekToFrame(hit.frame)
+                editor.selectedClipIds = [hit.clipId]
+                dragState = .keyframe(DragState.KeyframeDrag(
+                    clipId: hit.clipId,
+                    trackIndex: trackIndex,
+                    property: property,
+                    originalFrame: hit.frame,
+                    grabFrame: geometry.frameAt(x: point.x),
+                    currentFrame: hit.frame
+                ))
+                NSCursor.closedHand.set()
+            } else {
+                let frame = geometry.frameAt(x: point.x)
+                editor.seekToFrame(frame)
+                if let clip = editor.keyframeLaneTarget(
+                    trackId: editor.timeline.tracks[trackIndex].id,
+                    property: property,
+                    at: frame
+                ) {
+                    editor.selectedClipIds = [clip.id]
+                }
+                dragState = .idle
+            }
+            view.needsDisplay = true
+            return
+        }
+
         let trackIndex = geometry.trackAt(y: point.y)
-        editor.selectMarker(id: nil)
         editor.selectedGap = nil // re-selected below if this lands in a gap
         editor.selectedTransitionIds.removeAll()
 
@@ -199,6 +247,7 @@ final class TimelineInputController {
         }
 
         if editor.toolMode == .razor {
+            editor.selectedTimelineMarkerIds = []
             if let hit = hitTestClip(at: point, trackIndex: trackIndex, geometry: geometry) {
                 let clickFrame = razorPreviewFrame ?? geometry.frameAt(x: point.x)
                 let clip = editor.timeline.tracks[hit.trackIndex].clips[hit.clipIndex]
@@ -209,9 +258,10 @@ final class TimelineInputController {
         }
 
         if let hit = hitTestClip(at: point, trackIndex: trackIndex, geometry: geometry) {
+            editor.selectedTimelineMarkerIds = []
             let clip = editor.timeline.tracks[hit.trackIndex].clips[hit.clipIndex]
-            view.setHoveredClipId(clip.id)
             let rect = geometry.clipRect(for: clip, trackIndex: hit.trackIndex)
+            view.setHoveredClipId(ClipRenderer.supportsPrecisionControls(in: rect) ? clip.id : nil)
             let isShift = event.modifierFlags.contains(.shift)
             let isOption = event.modifierFlags.contains(.option)
             // Linked behavior is always on; Option is the per-drag override.
@@ -351,9 +401,14 @@ final class TimelineInputController {
             editor.isMarqueeSelecting = true
             if !event.modifierFlags.contains(.shift) {
                 editor.selectedClipIds.removeAll()
+                editor.selectedTimelineMarkerIds.removeAll()
             }
             editor.selectedGap = hitTestGap(at: point, trackIndex: trackIndex, geometry: geometry)
-            dragState = .marquee(DragState.MarqueeDrag(origin: point, baseSelection: editor.selectedClipIds))
+            dragState = .marquee(DragState.MarqueeDrag(
+                origin: point,
+                baseSelection: editor.selectedClipIds,
+                baseMarkerSelection: editor.selectedTimelineMarkerIds
+            ))
         }
 
         snapState = SnapEngine.SnapState()
@@ -393,6 +448,37 @@ final class TimelineInputController {
                 rangeEndFrame = frame
             }
             editor.setTimelineRange(startFrame: drag.anchorFrame, endFrame: rangeEndFrame)
+
+        case .timelineMarker(var drag):
+            let targets = SnapEngine.collectTargets(
+                tracks: editor.timeline.tracks,
+                playheadFrame: editor.currentFrame,
+                includePlayhead: true,
+                markerFrames: editor.timelineMarkerSnapFrames(excludingMarkerIds: [drag.original.id]),
+                beatFrames: editor.beatSnapFrames(for:)
+            )
+            func snapped(_ position: Int, probes: [Int] = [0]) -> Int {
+                guard let snap = SnapEngine.findSnap(
+                    position: position, probeOffsets: probes, targets: targets,
+                    state: &snapState, baseThreshold: Snap.thresholdPixels,
+                    pixelsPerFrame: geometry.pixelsPerFrame
+                ) else {
+                    snapIndicatorX = nil
+                    return position
+                }
+                snapIndicatorX = snap.x
+                return snap.frame - snap.probeOffset
+            }
+            if drag.adjustsDuration {
+                let end = max(drag.original.startFrame, snapped(frame))
+                drag.value.durationFrames = end - drag.original.startFrame
+            } else {
+                let raw = drag.original.startFrame + frame - drag.grabFrame
+                drag.value.startFrame = max(0, snapped(
+                    raw, probes: [0, drag.value.durationFrames]
+                ))
+            }
+            dragState = .timelineMarker(drag)
 
         case .moveClip(var drag):
             let candidateFrame = frame - drag.grabOffsetFrames
@@ -498,22 +584,12 @@ final class TimelineInputController {
             dragState = .slip(drag)
             return
 
-        case .marker(let drag):
-            let candidate = max(0, min(editor.markerFrameLimit, drag.originalFrame + frame - drag.grabFrame))
-            let targets = snapTargets(includePlayhead: true, excludeMarkerIds: [drag.markerId])
-            if let snap = SnapEngine.findSnap(
-                position: candidate,
-                targets: targets,
-                state: &snapState,
-                baseThreshold: Snap.thresholdPixels,
-                pixelsPerFrame: geometry.pixelsPerFrame
-            ), editor.isPlaceableMarkerFrame(snap.frame) {
-                snapIndicatorX = snap.x
-                editor.previewMarkerFrame(id: drag.markerId, frame: snap.frame)
-            } else {
-                snapIndicatorX = nil
-                editor.previewMarkerFrame(id: drag.markerId, frame: candidate)
-            }
+        case .keyframe(let drag):
+            dragState = .keyframe(applyKeyframeDrag(
+                drag,
+                cursorFrame: frame,
+                geometry: geometry
+            ))
 
         case .audioVolumeKf(let drag):
             dragState = .audioVolumeKf(applyVolumeKfDrag(drag, cursorFrame: frame, cursorY: point.y, geometry: geometry))
@@ -544,6 +620,14 @@ final class TimelineInputController {
             if !event.modifierFlags.contains(.option) {
                 selected = editor.expandToLinkGroup(selected)
             }
+            let rulerY = view.enclosingScrollView?.contentView.bounds.origin.y ?? 0
+            let markerIds = TimelineMarkerRenderer.markerIds(
+                intersecting: marq.current,
+                markers: editor.displayedTimelineMarkers(),
+                geometry: geometry,
+                rulerMinY: rulerY
+            )
+            editor.selectedTimelineMarkerIds = marq.baseMarkerSelection.union(markerIds)
             dragState = .marquee(marq)
             // Touch only what changed.
             let padding = AppTheme.BorderWidth.thick
@@ -693,6 +777,14 @@ final class TimelineInputController {
                 )
             }
 
+        case .keyframe(let drag):
+            if drag.currentFrame != drag.originalFrame {
+                editor.currentFrame = drag.currentFrame
+                editor.commitMoveKeyframe(clipId: drag.clipId)
+            } else {
+                editor.revertClipProperty(clipId: drag.clipId)
+            }
+
         case .audioVolumeKf(let drag):
             if drag.currentFrame != drag.originalFrame || drag.currentDb != drag.originalDb {
                 editor.commitMoveVolumeKeyframe(clipId: drag.clipId)
@@ -718,14 +810,28 @@ final class TimelineInputController {
         case .timelineRange:
             editor.keepValidTimelineRangeOrClear()
 
-        case .marker(let drag):
-            editor.commitMarkerDrag(id: drag.markerId, fromFrame: drag.originalFrame)
+        case .timelineMarker(let drag):
+            let changed = drag.adjustsDuration
+                ? drag.value.durationFrames != drag.original.durationFrames
+                : drag.value.startFrame != drag.original.startFrame
+            if changed {
+                do {
+                    _ = try editor.changeTimelineMarkers(
+                        updates: [drag.value],
+                        actionName: drag.adjustsDuration ? "Change Marker Duration" : "Move Marker"
+                    )
+                } catch {
+                    editor.refuseWithToast(L10n.string("Couldn't change marker."))
+                }
+            }
+            NSCursor.openHand.set()
 
         case .idle:
             break
         }
 
         dragState = .idle
+        snapState = SnapEngine.SnapState()
         snapIndicatorX = nil
         if let finalDirtyRect {
             view.setNeedsDisplay(finalDirtyRect)
@@ -740,12 +846,16 @@ final class TimelineInputController {
         switch dragState {
         case .slip:
             editor.slipPreview = nil
-        case .marker(let drag):
-            editor.previewMarkerFrame(id: drag.markerId, frame: drag.originalFrame)
+        case .keyframe(let drag):
+            editor.currentFrame = drag.originalFrame
+            editor.revertClipProperty(clipId: drag.clipId)
+        case .timelineMarker:
+            NSCursor.openHand.set()
         default:
             return
         }
         dragState = .idle
+        snapState = SnapEngine.SnapState()
         snapIndicatorX = nil
         stopPlayheadAutoScroll()
         view.needsDisplay = true
@@ -757,14 +867,24 @@ final class TimelineInputController {
         let point = view.convert(event.locationInWindow, from: nil)
         let scrollOffsetY = view.enclosingScrollView?.contentView.bounds.origin.y ?? 0
 
+        if TimelineMarkerRenderer.marker(
+            at: point,
+            markers: editor.displayedTimelineMarkers(),
+            geometry: geometry,
+            rulerMinY: scrollOffsetY
+        ) != nil {
+            if event.modifierFlags.contains(.option) {
+                NSCursor.resizeLeftRight.set()
+            } else {
+                NSCursor.openHand.set()
+            }
+            razorPreviewFrame = nil
+            razorSnapState = SnapEngine.SnapState()
+            return
+        }
+
         if point.y >= scrollOffsetY && point.y < scrollOffsetY + geometry.rulerHeight {
             view.setHoveredClipId(nil)
-            if markerHit(at: point, geometry: geometry) != nil {
-                NSCursor.pointingHand.set()
-                razorPreviewFrame = nil
-                razorSnapState = SnapEngine.SnapState()
-                return
-            }
             if timelineRangeEdgeHit(at: point, geometry: geometry) != nil {
                 NSCursor.resizeLeftRight.set()
             } else if event.modifierFlags.contains(.shift) {
@@ -774,6 +894,23 @@ final class TimelineInputController {
             }
             razorPreviewFrame = nil
             razorSnapState = SnapEngine.SnapState()
+            return
+        }
+
+        if case .keyframeLane(let trackIndex, let property) = geometry.rowLocation(atY: point.y) {
+            view.setHoveredClipId(nil)
+            razorPreviewFrame = nil
+            razorSnapState = SnapEngine.SnapState()
+            if keyframeLaneHit(
+                at: point,
+                trackIndex: trackIndex,
+                property: property,
+                geometry: geometry
+            ) != nil {
+                NSCursor.openHand.set()
+            } else {
+                NSCursor.pointingHand.set()
+            }
             return
         }
 
@@ -803,8 +940,8 @@ final class TimelineInputController {
 
         if let hit = hitTestClip(at: point, trackIndex: trackIndex, geometry: geometry) {
             let clip = editor.timeline.tracks[hit.trackIndex].clips[hit.clipIndex]
-            view.setHoveredClipId(clip.id)
             let rect = geometry.clipRect(for: clip, trackIndex: hit.trackIndex)
+            view.setHoveredClipId(ClipRenderer.supportsPrecisionControls(in: rect) ? clip.id : nil)
             let localX = point.x - rect.minX
             if let trimEdge = Self.trimEdge(localX: localX, clipWidth: rect.width) {
                 Self.trimCursor(for: trimEdge).set()
@@ -833,17 +970,8 @@ final class TimelineInputController {
         NSCursor.arrow.set()
     }
 
-    private func markerHit(at point: NSPoint, geometry: TimelineGeometry) -> String? {
-        TimelineMarkerRibbon.hitTest(
-            markers: editor.timeline.markers,
-            at: point,
-            in: view.currentRulerRect,
-            pixelsPerFrame: geometry.pixelsPerFrame,
-            scrollOffsetX: view.enclosingScrollView?.contentView.bounds.origin.x ?? 0
-        )
-    }
-
-    private static func trimEdge(localX: CGFloat, clipWidth: CGFloat) -> TrimEdge? {
+    static func trimEdge(localX: CGFloat, clipWidth: CGFloat) -> TrimEdge? {
+        guard ClipRenderer.supportsPrecisionControls(atWidth: clipWidth) else { return nil }
         if localX <= Trim.handleWidth { return .left }
         if localX >= clipWidth - Trim.handleWidth { return .right }
         return nil
@@ -874,10 +1002,10 @@ final class TimelineInputController {
             bracket.line(to: NSPoint(x: capX, y: bracketBottom))
             bracket.lineCapStyle = .square
 
-            AppTheme.Background.base.setStroke()
+            AppTheme.MediaOverlay.background.setStroke()
             bracket.lineWidth = AppTheme.BorderWidth.thick + AppTheme.BorderWidth.thin
             bracket.stroke()
-            AppTheme.Status.error.setStroke()
+            AppTheme.MediaOverlay.error.setStroke()
             bracket.lineWidth = AppTheme.BorderWidth.thick
             bracket.stroke()
 
@@ -890,9 +1018,9 @@ final class TimelineInputController {
             arrow.close()
             arrow.lineJoinStyle = .round
             arrow.lineWidth = AppTheme.BorderWidth.thick
-            AppTheme.Text.primary.setStroke()
+            AppTheme.MediaOverlay.primary.setStroke()
             arrow.stroke()
-            AppTheme.Status.error.setFill()
+            AppTheme.MediaOverlay.error.setFill()
             arrow.fill()
             return true
         }
@@ -914,10 +1042,10 @@ final class TimelineInputController {
             }
             ticks.lineCapStyle = .square
 
-            AppTheme.Background.base.setStroke()
+            AppTheme.MediaOverlay.background.setStroke()
             ticks.lineWidth = AppTheme.BorderWidth.thick + AppTheme.BorderWidth.thin
             ticks.stroke()
-            AppTheme.Status.error.setStroke()
+            AppTheme.MediaOverlay.error.setStroke()
             ticks.lineWidth = AppTheme.BorderWidth.thick
             ticks.stroke()
 
@@ -932,16 +1060,125 @@ final class TimelineInputController {
             arrow.close()
             arrow.lineJoinStyle = .round
             arrow.lineWidth = AppTheme.BorderWidth.thick
-            AppTheme.Text.primary.setStroke()
+            AppTheme.MediaOverlay.primary.setStroke()
             arrow.stroke()
-            AppTheme.Status.error.setFill()
+            AppTheme.MediaOverlay.error.setFill()
             arrow.fill()
             return true
         }
         return NSCursor(image: image, hotSpot: NSPoint(x: size.width / 2, y: size.height / 2))
     }
 
+    func keyframeLaneHit(
+        at point: NSPoint,
+        trackIndex: Int,
+        property: AnimatableProperty,
+        geometry: TimelineGeometry
+    ) -> KeyframeLaneHit? {
+        guard editor.timeline.tracks.indices.contains(trackIndex),
+              let laneRect = geometry.laneRect(trackIndex: trackIndex, property: property),
+              laneRect.contains(point) else { return nil }
+        let track = editor.timeline.tracks[trackIndex]
+        let hitHalf = AppTheme.ComponentSize.timelineKeyframeHitSize / 2
+        var best: (hit: KeyframeLaneHit, distance: CGFloat, selected: Bool)?
+        for clip in track.clips where clip.supportsKeyframes(for: property) {
+            for frame in clip.keyframeFrames(for: property) {
+                let distance = abs(CGFloat(geometry.xForFrame(frame)) - point.x)
+                guard distance <= hitHalf else { continue }
+                let selected = editor.selectedClipIds.contains(clip.id)
+                if let current = best,
+                   current.distance < distance
+                    || (current.distance == distance && current.selected && !selected) {
+                    continue
+                }
+                best = (KeyframeLaneHit(clipId: clip.id, frame: frame), distance, selected)
+            }
+        }
+        return best?.hit
+    }
+
+    private func draggedClip(id: String, trackIndex: Int) -> Clip? {
+        guard editor.timeline.tracks.indices.contains(trackIndex) else { return nil }
+        return editor.timeline.tracks[trackIndex].clips.first { $0.id == id }
+    }
+
+    private func keyframeDragBounds(
+        in clip: Clip,
+        property: AnimatableProperty,
+        currentFrame: Int
+    ) -> (lower: Int, upper: Int) {
+        var bounds = (
+            lower: clip.startFrame,
+            upper: max(clip.startFrame, clip.endFrame - 1)
+        )
+        for frame in clip.keyframeFrames(for: property) where frame != currentFrame {
+            if frame < currentFrame {
+                bounds.lower = max(bounds.lower, frame + 1)
+            } else {
+                bounds.upper = min(bounds.upper, frame - 1)
+            }
+        }
+        return bounds
+    }
+
+    private func applyKeyframeDrag(
+        _ source: DragState.KeyframeDrag,
+        cursorFrame: Int,
+        geometry: TimelineGeometry
+    ) -> DragState.KeyframeDrag {
+        var drag = source
+        guard let clip = draggedClip(id: drag.clipId, trackIndex: drag.trackIndex) else { return drag }
+        let maximumFrame = max(clip.startFrame, clip.endFrame - 1)
+
+        let proposed = drag.originalFrame + (cursorFrame - drag.grabFrame)
+        guard proposed != drag.currentFrame else { return drag }
+        var targets = [
+            SnapEngine.SnapTarget(frame: clip.startFrame, kind: .clipEdge),
+            SnapEngine.SnapTarget(frame: maximumFrame, kind: .clipEdge),
+        ]
+        for property in AnimatableProperty.allCases where property != drag.property {
+            targets += clip.keyframeFrames(for: property).map {
+                SnapEngine.SnapTarget(frame: $0, kind: .clipEdge)
+            }
+        }
+        let candidate: Int
+        if let snap = SnapEngine.findSnap(
+            position: proposed,
+            targets: targets,
+            state: &snapState,
+            baseThreshold: Snap.thresholdPixels,
+            pixelsPerFrame: geometry.pixelsPerFrame
+        ) {
+            candidate = snap.frame
+            snapIndicatorX = snap.x
+        } else {
+            candidate = proposed
+            snapIndicatorX = nil
+        }
+
+        let bounds = keyframeDragBounds(
+            in: clip,
+            property: drag.property,
+            currentFrame: drag.currentFrame
+        )
+        let next = max(bounds.lower, min(bounds.upper, candidate))
+        if next != candidate {
+            snapIndicatorX = nil
+        }
+        guard next != drag.currentFrame else { return drag }
+        editor.playheadState.timelineFrame = next
+        editor.applyMoveKeyframe(
+            clipId: drag.clipId,
+            property: drag.property,
+            fromFrame: drag.currentFrame,
+            toFrame: next
+        )
+        drag.currentFrame = next
+        return drag
+    }
+
     func audioVolumeKfHit(at point: NSPoint, clip: Clip, clipRect: NSRect) -> Int? {
+        guard baseClipKeyframeAutomationVisible(for: clip) else { return nil }
         guard ClipRenderer.showsVolumeKeyframes(
             isSelected: editor.selectedClipIds.contains(clip.id),
             isHovered: view.hoveredClipId == clip.id,
@@ -977,25 +1214,13 @@ final class TimelineInputController {
         geometry: TimelineGeometry
     ) -> DragState.AudioVolumeKfDrag {
         var drag = drag
-        guard editor.timeline.tracks.indices.contains(drag.trackIndex),
-              let clip = editor.timeline.tracks[drag.trackIndex].clips.first(where: { $0.id == drag.clipId }) else {
-            return drag
-        }
+        guard let clip = draggedClip(id: drag.clipId, trackIndex: drag.trackIndex) else { return drag }
         let clipRect = geometry.clipRect(for: clip, trackIndex: drag.trackIndex)
         let body = ClipRenderer.clipBodyRect(in: clipRect)
 
-        let curOffset = drag.currentFrame - clip.startFrame
-        var leftBound = 0
-        var rightBound = clip.durationFrames
-        for kf in clip.volumeTrack?.keyframes ?? [] where kf.frame != curOffset {
-            if kf.frame < curOffset {
-                leftBound = max(leftBound, kf.frame + 1)
-            } else {
-                rightBound = min(rightBound, kf.frame - 1)
-            }
-        }
+        let bounds = keyframeDragBounds(in: clip, property: .volume, currentFrame: drag.currentFrame)
         let proposed = drag.originalFrame + (cursorFrame - drag.grabFrame)
-        let newFrame = max(clip.startFrame + leftBound, min(clip.startFrame + rightBound, proposed))
+        let newFrame = max(bounds.lower, min(bounds.upper, proposed))
         let newDb = max(VolumeScale.floorDb, min(VolumeScale.ceilingDb, ClipRenderer.db(forY: cursorY, in: body)))
 
         guard newFrame != drag.currentFrame || newDb != drag.currentDb else { return drag }
@@ -1014,10 +1239,7 @@ final class TimelineInputController {
         cursorFrame: Int
     ) -> DragState.FadeKneeDrag {
         var drag = drag
-        guard editor.timeline.tracks.indices.contains(drag.trackIndex),
-              let clip = editor.timeline.tracks[drag.trackIndex].clips.first(where: { $0.id == drag.clipId }) else {
-            return drag
-        }
+        guard let clip = draggedClip(id: drag.clipId, trackIndex: drag.trackIndex) else { return drag }
         let delta = cursorFrame - drag.grabFrame
         let proposed = drag.edge == .left
             ? drag.originalFrames + delta
@@ -1035,12 +1257,17 @@ final class TimelineInputController {
 
     /// Returns true if a kf was added.
     private func addVolumeKeyframeOnClick(at point: NSPoint, clip: Clip, clipRect: NSRect) -> Bool {
+        guard baseClipKeyframeAutomationVisible(for: clip) else { return false }
+        guard ClipRenderer.supportsPrecisionControls(in: clipRect) else { return false }
         guard clip.durationFrames > 0 else { return false }
         let body = ClipRenderer.clipBodyRect(in: clipRect)
         guard body.contains(point) else { return false }
         let pxPerFrame = clipRect.width / CGFloat(clip.durationFrames)
         let xInClip = point.x - clipRect.minX
-        let offset = max(0, min(clip.durationFrames, Int((xInClip / pxPerFrame).rounded())))
+        let offset = max(
+            0,
+            min(max(0, clip.durationFrames - 1), Int((xInClip / pxPerFrame).rounded()))
+        )
         let absFrame = clip.startFrame + offset
         let dB = max(VolumeScale.floorDb, min(VolumeScale.ceilingDb, ClipRenderer.db(forY: point.y, in: body)))
         editor.commitClipProperty(clipId: clip.id, actionName: "Add Keyframe") { c in
@@ -1048,6 +1275,13 @@ final class TimelineInputController {
         }
         view.needsDisplay = true
         return true
+    }
+
+    private func baseClipKeyframeAutomationVisible(for clip: Clip) -> Bool {
+        guard let location = editor.findClip(id: clip.id),
+              editor.timeline.tracks.indices.contains(location.trackIndex) else { return false }
+        let trackId = editor.timeline.tracks[location.trackIndex].id
+        return !view.keyframeLaneState.isExpanded(trackId: trackId)
     }
 
     // MARK: - Zoom & pan
@@ -1258,6 +1492,29 @@ final class TimelineInputController {
         editor.setTimelineRange(startFrame: frame, endFrame: frame)
     }
 
+    private func beginMarkerDrag(
+        _ marker: TimelineMarker,
+        grabFrame: Int,
+        adjustsDuration: Bool,
+        clickCount: Int
+    ) {
+        guard let original = editor.timelineMarker(id: marker.id) else { return }
+        editor.selectedTimelineMarkerIds = [marker.id]
+        editor.selectedClipIds.removeAll()
+        editor.selectedGap = nil
+        editor.selectedTimelineRange = nil
+        snapState = SnapEngine.SnapState()
+        snapIndicatorX = nil
+        if adjustsDuration { NSCursor.resizeLeftRight.set() } else { NSCursor.closedHand.set() }
+        dragState = .timelineMarker(DragState.TimelineMarkerDrag(
+            original: original,
+            adjustsDuration: adjustsDuration,
+            grabFrame: grabFrame,
+            value: original
+        ))
+        if clickCount >= 2 { view.presentMarkerEditor(id: marker.id) }
+    }
+
     private func scrubToFrame(_ frame: Int) {
         editor.seekToFrame(frame, mode: .interactiveScrub)
     }
@@ -1295,9 +1552,9 @@ final class TimelineInputController {
 
     private func newTrackActionName(count: Int, isDuplicate: Bool) -> String {
         switch (isDuplicate, count) {
-        case (true, 1): return "Duplicate Clip to New Track"
-        case (true, _): return "Duplicate Clips to New Track"
-        default:        return "Move Clip to New Track"
+        case (true, 1): return L10n.string("Duplicate Clip to New Track")
+        case (true, _): return L10n.string("Duplicate Clips to New Track")
+        default:        return L10n.string("Move Clip to New Track")
         }
     }
 

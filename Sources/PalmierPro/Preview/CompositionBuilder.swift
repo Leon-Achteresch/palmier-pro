@@ -46,7 +46,11 @@ enum CompositionBuilder {
         resolveSourceSize: @escaping @Sendable (String) -> CGSize? = { _ in nil },
         resolveTimeline: @escaping @Sendable (String) -> Timeline? = { _ in nil },
         missingMediaRefs: Set<String> = [],
-        renderSize: CGSize
+        renderSize: CGSize,
+        makeAsset: @escaping @Sendable (URL) -> AVURLAsset = { AVURLAsset(url: $0) },
+        loadTracks: @escaping @Sendable (AVURLAsset, AVMediaType) async throws -> [AVAssetTrack] = {
+            try await $0.loadTracks(withMediaType: $1)
+        }
     ) async throws -> CompositionResult {
         Log.preview.info("build fps=\(timeline.fps) size=\(timeline.width)x\(timeline.height) tracks=\(timeline.tracks.count)")
         guard timeline.fps > 0, timeline.width > 0, timeline.height > 0 else {
@@ -64,7 +68,9 @@ enum CompositionBuilder {
             resolveVideoURL: resolveVideoURL,
             resolveSourceSize: resolveSourceSize,
             resolveTimeline: resolveTimeline,
-            missingMediaRefs: missingMediaRefs
+            missingMediaRefs: missingMediaRefs,
+            makeAsset: makeAsset,
+            loadTracks: loadTracks
         )
 
         let audioCrossfades = TransitionAudioExtension.crossfades(in: timeline)
@@ -76,6 +82,7 @@ enum CompositionBuilder {
                 .filter { !$0.mediaType.isSourcelessLayer }
             guard !sortedClips.isEmpty else { continue }
             if track.type == .audio {
+                guard !track.muted else { continue }
                 try await insertAudioLane(clips: sortedClips, parentTrackIndex: trackIdx, nest: nil, depth: 0, ctx: ctx)
                 let handles = TransitionAudioExtension.handles(
                     forAudioTrackIndex: trackIdx, crossfades: audioCrossfades
@@ -149,13 +156,18 @@ enum CompositionBuilder {
         let resolveSourceSize: @Sendable (String) -> CGSize?
         let resolveTimeline: @Sendable (String) -> Timeline?
         let missingMediaRefs: Set<String>
+        let makeAsset: @Sendable (URL) -> AVURLAsset
+        let loadTracks: @Sendable (AVURLAsset, AVMediaType) async throws -> [AVAssetTrack]
         var trackMappings: [TrackMapping] = []
         var clipNaturalSizes: [String: CGSize] = [:]
         var clipTransforms: [String: CGAffineTransform] = [:]
         var offlineMediaRefs: Set<String> = []
         var unprocessableMediaRefs: Set<String> = []
         var mediaFingerprints: [String: String] = [:]
-        var failedLoadOutcomes: [SourceLoadKey: LoadOutcome] = [:]
+        var sourceAssetsByURL: [URL: AVURLAsset] = [:]
+        var trackLoadOutcomes: [TrackLoadKey: LoadOutcome] = [:]
+        var videoURLsBySourceURL: [URL: URL] = [:]
+        var loadOutcomesByMedia: [MediaLoadKey: LoadOutcome] = [:]
 
         init(
             composition: AVMutableComposition,
@@ -165,7 +177,9 @@ enum CompositionBuilder {
             resolveVideoURL: @escaping @Sendable (String) -> URL?,
             resolveSourceSize: @escaping @Sendable (String) -> CGSize?,
             resolveTimeline: @escaping @Sendable (String) -> Timeline?,
-            missingMediaRefs: Set<String>
+            missingMediaRefs: Set<String>,
+            makeAsset: @escaping @Sendable (URL) -> AVURLAsset,
+            loadTracks: @escaping @Sendable (AVURLAsset, AVMediaType) async throws -> [AVAssetTrack]
         ) {
             self.composition = composition
             self.timescale = timescale
@@ -175,6 +189,146 @@ enum CompositionBuilder {
             self.resolveSourceSize = resolveSourceSize
             self.resolveTimeline = resolveTimeline
             self.missingMediaRefs = missingMediaRefs
+            self.makeAsset = makeAsset
+            self.loadTracks = loadTracks
+        }
+
+        private func sourceAsset(for url: URL) -> AVURLAsset {
+            if let asset = sourceAssetsByURL[url] { return asset }
+            let asset = makeAsset(url)
+            sourceAssetsByURL[url] = asset
+            return asset
+        }
+
+        func loadSource(for clip: Clip, mediaType: AVMediaType) async throws -> LoadOutcome {
+            try Task.checkCancellation()
+            let key = MediaLoadKey(mediaRef: clip.mediaRef, mediaType: mediaType)
+            if let outcome = loadOutcomesByMedia[key] { return outcome }
+            let outcome = try await prepareSource(for: clip, mediaType: mediaType)
+            if case .loaded(let asset, _) = outcome, mediaType == .video,
+               mediaFingerprints[clip.mediaRef] == nil {
+                mediaFingerprints[clip.mediaRef] = await DiskCache.loadSizeMtimeTag(for: asset.url)
+            }
+            loadOutcomesByMedia[key] = outcome
+            return outcome
+        }
+
+        private func prepareSource(for clip: Clip, mediaType: AVMediaType) async throws -> LoadOutcome {
+            guard !missingMediaRefs.contains(clip.mediaRef) else { return .offline }
+            guard let resolvedURL = resolveURL(clip.mediaRef) else { return .offline }
+
+            let mediaURL: URL
+            if clip.mediaType == .image {
+                let imageSize = resolveSourceSize(clip.mediaRef)
+                    ?? ImageVideoGenerator.imageNativeSize(url: resolvedURL)
+                    ?? renderSize
+                do {
+                    mediaURL = try await ImageVideoGenerator.stillVideo(
+                        for: resolvedURL,
+                        mediaRef: clip.mediaRef,
+                        size: imageSize
+                    )
+                } catch {
+                    Log.preview.error("stillVideo failed mediaRef=\(clip.mediaRef) size=\(Int(imageSize.width))x\(Int(imageSize.height)): \(Log.detail(error))")
+                    return FileManager.default.fileExists(atPath: resolvedURL.path) ? .unprocessable : .offline
+                }
+            } else if clip.mediaType == .lottie {
+                let lottieSize = resolveSourceSize(clip.mediaRef) ?? renderSize
+                do {
+                    mediaURL = try await LottieVideoGenerator.lottieVideo(
+                        for: resolvedURL,
+                        mediaRef: clip.mediaRef,
+                        size: lottieSize
+                    )
+                } catch {
+                    Log.preview.error("lottieVideo failed mediaRef=\(clip.mediaRef) size=\(Int(lottieSize.width))x\(Int(lottieSize.height)): \(Log.detail(error))")
+                    return FileManager.default.fileExists(atPath: resolvedURL.path) ? .unprocessable : .offline
+                }
+            } else if clip.mediaType == .motion {
+                do {
+                    mediaURL = try await MotionVideoGenerator.motionVideo(for: resolvedURL, mediaRef: clip.mediaRef)
+                } catch {
+                    Log.preview.error("motionVideo failed mediaRef=\(clip.mediaRef): \(Log.detail(error))")
+                    return FileManager.default.fileExists(atPath: resolvedURL.path) ? .unprocessable : .offline
+                }
+            } else if mediaType == .video {
+                let playbackURL = clip.mediaType == .video
+                    ? (resolveVideoURL(clip.mediaRef) ?? resolvedURL)
+                    : resolvedURL
+                return try await loadVideo(at: playbackURL, clip: clip)
+            } else if MonoStereoUpmixer.isNeeded(for: clip.audioMix) {
+                do {
+                    mediaURL = try await MonoStereoUpmixer.stereoAudio(for: resolvedURL, mediaRef: clip.mediaRef)
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    Log.preview.warning("mono upmix failed — pan stays centred. mediaRef=\(clip.mediaRef): \(Log.detail(error))")
+                    mediaURL = resolvedURL
+                }
+            } else {
+                mediaURL = resolvedURL
+            }
+            return try await loadTrack(at: mediaURL, mediaType: mediaType, clip: clip)
+        }
+
+        private func loadTrack(
+            at url: URL,
+            mediaType: AVMediaType,
+            clip: Clip
+        ) async throws -> LoadOutcome {
+            try Task.checkCancellation()
+            let key = TrackLoadKey(url: url, mediaType: mediaType)
+            if let outcome = trackLoadOutcomes[key] { return outcome }
+            let asset = sourceAsset(for: key.url)
+            let outcome: LoadOutcome
+            do {
+                if let track = try await loadTracks(asset, mediaType).first {
+                    outcome = .loaded(asset: asset, track: track)
+                } else {
+                    outcome = .offline
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                Log.preview.warning(
+                    "loadTracks failed — skipping clip. clipId=\(clip.id) mediaRef=\(clip.mediaRef): \(error.localizedDescription)"
+                )
+                return .offline
+            }
+            trackLoadOutcomes[key] = outcome
+            return outcome
+        }
+
+        private func loadVideo(at url: URL, clip: Clip) async throws -> LoadOutcome {
+            let sourceURL = url.standardizedFileURL
+            let source = try await loadTrack(at: sourceURL, mediaType: .video, clip: clip)
+            guard case .loaded(let asset, let track) = source else { return source }
+
+            let videoURL: URL
+            if let cachedURL = videoURLsBySourceURL[sourceURL] {
+                videoURL = cachedURL
+            } else {
+                do {
+                    let normalizedURL = try await AlphaVideoNormalizer.premultipliedVideo(
+                        for: sourceURL,
+                        mediaRef: clip.mediaRef,
+                        asset: asset,
+                        track: track
+                    )
+                    try Task.checkCancellation()
+                    videoURL = (normalizedURL ?? sourceURL).standardizedFileURL
+                    videoURLsBySourceURL[sourceURL] = videoURL
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    Log.preview.warning(
+                        "alpha premultiply unavailable mediaRef=\(clip.mediaRef): \(error.localizedDescription)"
+                    )
+                    return source
+                }
+            }
+            guard videoURL != sourceURL else { return source }
+            return try await loadTrack(at: videoURL, mediaType: .video, clip: clip)
         }
     }
 
@@ -199,7 +353,7 @@ enum CompositionBuilder {
                 continue
             }
             let source: (asset: AVURLAsset, track: AVAssetTrack)
-            switch try await loadSource(clip: clip, mediaType: .video, ctx: ctx) {
+            switch try await ctx.loadSource(for: clip, mediaType: .video) {
             case .loaded(let asset, let track): source = (asset, track)
             case .offline: ctx.offlineMediaRefs.insert(clip.mediaRef); continue
             case .unprocessable: ctx.unprocessableMediaRefs.insert(clip.mediaRef); continue
@@ -256,7 +410,7 @@ enum CompositionBuilder {
             }
             if let nest { clip.volume *= nest.volumeScale }
             let source: (asset: AVURLAsset, track: AVAssetTrack)
-            switch try await loadSource(clip: clip, mediaType: .audio, ctx: ctx) {
+            switch try await ctx.loadSource(for: clip, mediaType: .audio) {
             case .loaded(let asset, let track): source = (asset, track)
             case .offline: ctx.offlineMediaRefs.insert(clip.mediaRef); continue
             case .unprocessable: ctx.unprocessableMediaRefs.insert(clip.mediaRef); continue
@@ -343,117 +497,24 @@ enum CompositionBuilder {
         ctx.clipTransforms[clip.id] = pt.concatenating(CGAffineTransform(translationX: -box.minX, y: -box.minY))
     }
 
-    private static func loadSource(clip: Clip, mediaType: AVMediaType, ctx: BuildContext) async throws -> LoadOutcome {
-        let key = SourceLoadKey(mediaRef: clip.mediaRef, mediaType: mediaType)
-        if let failedOutcome = ctx.failedLoadOutcomes[key] {
-            return failedOutcome
-        }
-        let outcome = try await loadSource(
-            clip: clip, mediaType: mediaType, resolveURL: ctx.resolveURL,
-            resolveVideoURL: ctx.resolveVideoURL,
-            resolveSourceSize: ctx.resolveSourceSize, missingMediaRefs: ctx.missingMediaRefs,
-            renderSize: ctx.renderSize
-        )
-        switch outcome {
-        case .loaded(let asset, _):
-            if mediaType == .video, ctx.mediaFingerprints[clip.mediaRef] == nil {
-                ctx.mediaFingerprints[clip.mediaRef] = await DiskCache.loadSizeMtimeTag(for: asset.url)
-            }
-        case .offline, .unprocessable:
-            ctx.failedLoadOutcomes[key] = outcome
-        }
-        return outcome
-    }
-
     private enum LoadOutcome {
         case loaded(asset: AVURLAsset, track: AVAssetTrack)
         case offline
         case unprocessable
     }
 
-    private struct SourceLoadKey: Hashable {
+    private struct MediaLoadKey: Hashable {
         let mediaRef: String
-        let mediaType: String
-
-        init(mediaRef: String, mediaType: AVMediaType) {
-            self.mediaRef = mediaRef
-            self.mediaType = mediaType.rawValue
-        }
+        let mediaType: AVMediaType
     }
 
-    private static func loadSource(
-        clip: Clip,
-        mediaType: AVMediaType,
-        resolveURL: @Sendable (String) -> URL?,
-        resolveVideoURL: @Sendable (String) -> URL?,
-        resolveSourceSize: @Sendable (String) -> CGSize?,
-        missingMediaRefs: Set<String>,
-        renderSize: CGSize
-    ) async throws -> LoadOutcome {
-        let mediaURL: URL
-        guard !missingMediaRefs.contains(clip.mediaRef) else { return .offline }
-        guard let original = resolveURL(clip.mediaRef) else { return .offline }
-        let resolved = mediaType == .video && clip.mediaType == .video
-            ? (resolveVideoURL(clip.mediaRef) ?? original)
-            : original
-        if clip.mediaType == .image {
-            let imageSize = resolveSourceSize(clip.mediaRef)
-                ?? ImageVideoGenerator.imageNativeSize(url: resolved)
-                ?? renderSize
-            do {
-                mediaURL = try await ImageVideoGenerator.stillVideo(
-                    for: resolved,
-                    mediaRef: clip.mediaRef,
-                    size: imageSize
-                )
-            } catch {
-                Log.preview.error("stillVideo failed mediaRef=\(clip.mediaRef) size=\(Int(imageSize.width))x\(Int(imageSize.height)): \(Log.detail(error))")
-                return FileManager.default.fileExists(atPath: resolved.path) ? .unprocessable : .offline
-            }
-        } else if clip.mediaType == .lottie {
-            let lottieSize = resolveSourceSize(clip.mediaRef) ?? renderSize
-            do {
-                mediaURL = try await LottieVideoGenerator.lottieVideo(
-                    for: resolved,
-                    mediaRef: clip.mediaRef,
-                    size: lottieSize
-                )
-            } catch {
-                Log.preview.error("lottieVideo failed mediaRef=\(clip.mediaRef) size=\(Int(lottieSize.width))x\(Int(lottieSize.height)): \(Log.detail(error))")
-                return FileManager.default.fileExists(atPath: resolved.path) ? .unprocessable : .offline
-            }
-        } else if clip.mediaType == .motion {
-            do {
-                mediaURL = try await MotionVideoGenerator.motionVideo(for: resolved, mediaRef: clip.mediaRef)
-            } catch {
-                Log.preview.error("motionVideo failed mediaRef=\(clip.mediaRef): \(Log.detail(error))")
-                return FileManager.default.fileExists(atPath: resolved.path) ? .unprocessable : .offline
-            }
-        } else if mediaType == .video {
-            mediaURL = (try? await AlphaVideoNormalizer.premultipliedVideo(for: resolved, mediaRef: clip.mediaRef)) ?? resolved
-        } else if MonoStereoUpmixer.isNeeded(for: clip.audioMix) {
-            do {
-                mediaURL = try await MonoStereoUpmixer.stereoAudio(for: resolved, mediaRef: clip.mediaRef)
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                Log.preview.warning("mono upmix failed — pan stays centred. mediaRef=\(clip.mediaRef): \(Log.detail(error))")
-                mediaURL = resolved
-            }
-        } else {
-            mediaURL = resolved
-        }
+    private struct TrackLoadKey: Hashable {
+        let url: URL
+        let mediaType: AVMediaType
 
-        guard !Task.isCancelled else { throw CancellationError() }
-        let sourceAsset = AVURLAsset(url: mediaURL)
-        do {
-            guard let sourceTrack = try await sourceAsset.loadTracks(withMediaType: mediaType).first else {
-                return .offline
-            }
-            return .loaded(asset: sourceAsset, track: sourceTrack)
-        } catch {
-            Log.preview.warning("loadTracks failed — skipping clip. clipId=\(clip.id) mediaRef=\(clip.mediaRef): \(error.localizedDescription)")
-            return .offline
+        init(url: URL, mediaType: AVMediaType) {
+            self.url = url.standardizedFileURL
+            self.mediaType = mediaType
         }
     }
 

@@ -2,22 +2,16 @@
   "changelogURL": "https://github.com/palmier-io/palmier-pro/releases",
   "entries": [
     {
-      "version": "0.6.15",
-      "date": "2026-07-26",
+      "version": "0.7.6",
+      "date": "2026-08-18",
       "sections": [
         {
-          "heading": "AI Features",
+          "heading": "New",
           "items": [
-            "Seed Audio 1.0: Generate music, multilingual speech, sound effects all in one model",
-            "Sonilo Music and Sound Effects: Create music and sound effects from a text prompt with Sonilo",
-            "More upscale controls: Many more video upscale options with ByteDance Upscaler and Topaz, including upscaling to 60 fps and 4k."
-          ]
-        },
-        {
-          "heading": "Improved",
-          "items": [
-            "Better media panel usability: Select, navigate, and delete multiple media browser items with standard Mac controls",
-            "New effect: Invert Colors in the Adjust inspector"
+            "Timeline Index - A new way to navigate the timeline in the media panel. In the index tab, you can search the timeline via transcripts. You can also manage markers and handoff to agents to address them.",
+            "Ripple markers with edits: Markers can move with ripple edits. This is configurable in the dropdown next to the marker button in toolbar.",
+            "Smart Search model installs on demand when agent needs it.",
+            "More supported languages: German, Dutch, Polish, Swedish, Czech, Danish, Norwegian, Finnish, Ukrainian, Indonesian, Thai, Hebrew, and European Portuguese"
           ]
         }
       ]

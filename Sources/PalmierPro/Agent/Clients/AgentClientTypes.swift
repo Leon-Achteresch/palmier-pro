@@ -1,97 +1,135 @@
 import Foundation
 
-// MARK: - Shared value types
+extension Notification.Name {
+    static let agentAPIKeyChanged = Notification.Name("agentAPIKeyChanged")
+}
 
-enum AgentReasoningEffort: String, CaseIterable, Sendable {
-    case max
-    case xhigh
-    case high
-    case medium
-    case low
-    case minimal
-    case none
+enum AgentProvider: String, CaseIterable, Sendable {
+    case anthropic
+    case openAI
 
     var displayName: String {
         switch self {
-        case .max: "Max"
-        case .xhigh: "Extra high"
-        case .high: "High"
-        case .medium: "Medium"
-        case .low: "Low"
-        case .minimal: "Minimal"
-        case .none: "Off"
+        case .anthropic: "Anthropic"
+        case .openAI: "OpenAI"
+        }
+    }
+
+    private var credentialStorage: (account: String, environment: String) {
+        switch self {
+        case .anthropic: ("anthropic-api-key", "ANTHROPIC_API_KEY")
+        case .openAI: ("openai-api-key", "OPENAI_API_KEY")
+        }
+    }
+
+    fileprivate var storedAPIKey: String {
+        #if DEBUG
+        let environmentValue = ProcessInfo.processInfo.environment[credentialStorage.environment]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !environmentValue.isEmpty { return environmentValue }
+        #endif
+        return KeychainStore.load(account: credentialStorage.account) ?? ""
+    }
+
+    @concurrent
+    func loadAPIKey() async -> String {
+        storedAPIKey
+    }
+
+    @concurrent
+    func setAPIKey(_ key: String?) async {
+        if let key {
+            KeychainStore.save(key, account: credentialStorage.account)
+        } else {
+            KeychainStore.delete(account: credentialStorage.account)
+        }
+        NotificationCenter.default.post(name: .agentAPIKeyChanged, object: rawValue)
+    }
+}
+
+enum AgentReasoningEffort: String, CaseIterable, Sendable {
+    case none
+    case minimal
+    case low
+    case medium
+    case high
+    case xHigh = "xhigh"
+    case max
+
+    var labelKey: String {
+        switch self {
+        case .none: L10n.key("None")
+        case .minimal: L10n.key("Minimal")
+        case .low: L10n.key("Low")
+        case .medium: L10n.key("Medium")
+        case .high: L10n.key("High")
+        case .xHigh: L10n.key("X High")
+        case .max: L10n.key("Max")
         }
     }
 }
 
-struct AgentModel: Hashable, Identifiable, Sendable {
-    let id: String
-    let name: String
-    let supportedEfforts: [AgentReasoningEffort]
-    let defaultEffort: AgentReasoningEffort?
-    let reasoningMandatory: Bool
+enum AgentModel: String, CaseIterable, Codable, Sendable {
+    case sonnet5 = "claude-sonnet-5"
+    case opus5 = "claude-opus-5"
+    case fable5 = "claude-fable-5"
+    case luna = "gpt-5.6-luna"
+    case terra = "gpt-5.6-terra"
+    case sol = "gpt-5.6-sol"
+    case claudeCode = "claude-code"
+    case claudeCodeFable = "claude-code/claude-fable-5"
+    case claudeCodeOpus = "claude-code/claude-opus-5"
+    case claudeCodeSonnet = "claude-code/claude-sonnet-5"
+    case claudeCodeHaiku = "claude-code/claude-haiku-4-5-20251001"
+    case codex = "codex"
+    case codexSol = "codex/gpt-5.6-sol"
+    case codexTerra = "codex/gpt-5.6-terra"
+    case codexLuna = "codex/gpt-5.6-luna"
+    case codexGPT55 = "codex/gpt-5.5"
+    case codexGPT54 = "codex/gpt-5.4"
 
-    var displayName: String { name }
-    var supportsReasoningEffort: Bool { !supportedEfforts.isEmpty }
+    static let defaultModel: AgentModel = .terra
 
-    init(
-        id: String,
-        name: String,
-        supportedEfforts: [AgentReasoningEffort] = [],
-        defaultEffort: AgentReasoningEffort? = nil,
-        reasoningMandatory: Bool = false
-    ) {
-        self.id = id
-        self.name = name
-        self.supportedEfforts = supportedEfforts
-        self.defaultEffort = defaultEffort
-        self.reasoningMandatory = reasoningMandatory
+    var displayName: String {
+        switch self {
+        case .sonnet5: "Sonnet 5"
+        case .opus5: "Opus 5"
+        case .fable5: "Fable 5"
+        case .luna: "GPT-5.6 Luna"
+        case .terra: "GPT-5.6 Terra"
+        case .sol: "GPT-5.6 Sol"
+        case .claudeCode: "Claude Code"
+        case .claudeCodeFable: "Claude Code · Fable 5"
+        case .claudeCodeOpus: "Claude Code · Opus 5"
+        case .claudeCodeSonnet: "Claude Code · Sonnet 5"
+        case .claudeCodeHaiku: "Claude Code · Haiku 4.5"
+        case .codex: "Codex"
+        case .codexSol: "Codex · GPT-5.6 Sol"
+        case .codexTerra: "Codex · GPT-5.6 Terra"
+        case .codexLuna: "Codex · GPT-5.6 Luna"
+        case .codexGPT55: "Codex · GPT-5.5"
+        case .codexGPT54: "Codex · GPT-5.4"
+        }
     }
 
-    static let claudeCode = AgentModel(
-        id: "claude-code",
-        name: "Claude Code",
-        supportedEfforts: [.xhigh, .high, .medium, .low],
-        defaultEffort: .high
-    )
-
-    static let claudeCodeCatalog: [AgentModel] = [
-        claudeCode,
-        cliVariant("claude-code", "claude-fable-5", "Fable 5"),
-        cliVariant("claude-code", "claude-opus-5", "Opus 5"),
-        cliVariant("claude-code", "claude-sonnet-5", "Sonnet 5"),
-        cliVariant("claude-code", "claude-haiku-4-5-20251001", "Haiku 4.5"),
-    ]
-
-    static let codex = AgentModel(
-        id: "codex",
-        name: "Codex",
-        supportedEfforts: [.xhigh, .high, .medium, .low],
-        defaultEffort: .medium
-    )
-
-    static let codexCatalog: [AgentModel] = [
-        codex,
-        cliVariant("codex", "gpt-5.6-sol", "GPT-5.6 Sol"),
-        cliVariant("codex", "gpt-5.6-terra", "GPT-5.6 Terra"),
-        cliVariant("codex", "gpt-5.6-luna", "GPT-5.6 Luna"),
-        cliVariant("codex", "gpt-5.5", "GPT-5.5"),
-        cliVariant("codex", "gpt-5.4", "GPT-5.4"),
-    ]
-
-    private static func cliVariant(_ cli: String, _ model: String, _ name: String) -> AgentModel {
-        let base = cli == "codex" ? codex : claudeCode
-        return AgentModel(
-            id: "\(cli)/\(model)",
-            name: name,
-            supportedEfforts: base.supportedEfforts,
-            defaultEffort: base.defaultEffort
-        )
+    var provider: AgentProvider {
+        switch self {
+        case .sonnet5, .opus5, .fable5,
+             .claudeCode, .claudeCodeFable, .claudeCodeOpus, .claudeCodeSonnet, .claudeCodeHaiku:
+            .anthropic
+        case .luna, .terra, .sol,
+             .codex, .codexSol, .codexTerra, .codexLuna, .codexGPT55, .codexGPT54:
+            .openAI
+        }
     }
 
-    var isClaudeCode: Bool { id == AgentModel.claudeCode.id || id.hasPrefix("claude-code/") }
+    var isClaudeCode: Bool {
+        rawValue == "claude-code" || rawValue.hasPrefix("claude-code/")
+    }
 
-    var isCodex: Bool { id == AgentModel.codex.id || id.hasPrefix("codex/") }
+    var isCodex: Bool {
+        rawValue == "codex" || rawValue.hasPrefix("codex/")
+    }
 
     var isCLIAgent: Bool { isClaudeCode || isCodex }
 
@@ -100,54 +138,97 @@ struct AgentModel: Hashable, Identifiable, Sendable {
     var codexModelId: String? { cliModelId(prefix: "codex/") }
 
     private func cliModelId(prefix: String) -> String? {
-        guard id.hasPrefix(prefix) else { return nil }
-        return String(id.dropFirst(prefix.count))
+        guard rawValue.hasPrefix(prefix) else { return nil }
+        return String(rawValue.dropFirst(prefix.count))
     }
 
-    /// Menu group the model is listed under.
-    var provider: String {
-        if isClaudeCode { return "Claude Code" }
-        if isCodex { return "Codex" }
-        guard let vendor = id.split(separator: "/").first, id.contains("/") else { return "Other" }
-        return Self.vendorNames[String(vendor)] ?? String(vendor).capitalized
+    var maxOutputTokens: Int { 64_000 }
+
+    var requiresPaidHostedPlan: Bool {
+        self == .fable5 || self == .sol
     }
 
-    private static let vendorNames = [
-        "openai": "OpenAI",
-        "x-ai": "xAI",
-        "meta-llama": "Meta",
-        "mistralai": "Mistral",
-        "deepseek": "DeepSeek",
-        "z-ai": "Z.ai",
-    ]
+    static func persisted(_ rawValue: String) -> AgentModel? {
+        rawValue == "claude-opus-4-8" ? .opus5 : AgentModel(rawValue: rawValue)
+    }
 
-    static let fallback = AgentModel(
-        id: "anthropic/claude-sonnet-5",
-        name: "Claude Sonnet 5",
-        supportedEfforts: [.max, .xhigh, .high, .medium, .low],
-        defaultEffort: .high
-    )
+    var supportedReasoningEfforts: [AgentReasoningEffort] {
+        if isCLIAgent {
+            return [.low, .medium, .high, .xHigh]
+        }
+        switch provider {
+        case .anthropic:
+            return [.low, .medium, .high, .xHigh, .max]
+        case .openAI:
+            return AgentReasoningEffort.allCases
+        }
+    }
 
-    static let fallbackCatalog: [AgentModel] = [
-        fallback,
-        AgentModel(
-            id: "anthropic/claude-opus-5",
-            name: "Claude Opus 5",
-            supportedEfforts: [.max, .xhigh, .high, .medium, .low],
-            defaultEffort: .high
-        ),
-        AgentModel(
-            id: "openai/gpt-5.5",
-            name: "GPT-5.5",
-            supportedEfforts: [.xhigh, .high, .medium, .low, .none],
-            defaultEffort: .medium
-        ),
-        AgentModel(id: "google/gemini-3.6-flash", name: "Gemini 3.6 Flash"),
-        AgentModel(id: "x-ai/grok-4.5", name: "Grok 4.5"),
-    ]
 }
 
-enum AnthropicStopReason: String, Sendable {
+struct AgentRunSettings: Equatable, Sendable {
+    let model: AgentModel
+    let reasoningEffort: AgentReasoningEffort
+}
+
+enum AgentReasoningPreferences {
+    static func effort(for model: AgentModel, defaults: UserDefaults) -> AgentReasoningEffort {
+        guard let rawValue = defaults.string(forKey: key("effort", model: model)),
+              let effort = AgentReasoningEffort(rawValue: rawValue),
+              model.supportedReasoningEfforts.contains(effort)
+        else { return .medium }
+        return effort
+    }
+
+    static func set(_ effort: AgentReasoningEffort, for model: AgentModel, defaults: UserDefaults) {
+        defaults.set(effort.rawValue, forKey: key("effort", model: model))
+    }
+
+    private static func key(_ setting: String, model: AgentModel) -> String {
+        "agentReasoning.\(setting).\(model.rawValue)"
+    }
+}
+
+enum AgentRoute: Equatable, Sendable {
+    case direct
+    case hosted
+    case unavailable
+}
+
+enum AgentRouting {
+    static func route(
+        model: AgentModel,
+        credentials: AgentCredentialSnapshot,
+        hasHostedCredits: Bool,
+        hasPaidPlan: Bool
+    ) -> AgentRoute {
+        if model.isCLIAgent { return .direct }
+        if !credentials[model.provider].isEmpty { return .direct }
+        if model.requiresPaidHostedPlan && !hasPaidPlan { return .unavailable }
+        return hasHostedCredits ? .hosted : .unavailable
+    }
+}
+
+struct AgentCredentialSnapshot: Equatable, Sendable {
+    private let apiKeys: [AgentProvider: String]
+
+    init(_ apiKeys: [AgentProvider: String] = [:]) {
+        self.apiKeys = apiKeys
+    }
+
+    subscript(provider: AgentProvider) -> String {
+        apiKeys[provider, default: ""]
+    }
+
+    @concurrent
+    static func loadFromKeychain() async -> AgentCredentialSnapshot {
+        AgentCredentialSnapshot(Dictionary(uniqueKeysWithValues: AgentProvider.allCases.map {
+            ($0, $0.storedAPIKey)
+        }))
+    }
+}
+
+enum AgentStopReason: String, Sendable {
     case endTurn = "end_turn"
     case toolUse = "tool_use"
     case maxTokens = "max_tokens"
@@ -157,23 +238,53 @@ enum AnthropicStopReason: String, Sendable {
     case other
 }
 
-/// One turn in Anthropic content-block form; the client translates it to its wire format.
-struct AnthropicMessage: @unchecked Sendable {
+struct AgentRequestMessage: Sendable {
     enum Role: String, Sendable { case user, assistant }
     let role: Role
-    let content: [[String: Any]]
+    let content: [AgentRequestBlock]
 }
 
-struct AnthropicToolSchema: @unchecked Sendable {
+enum AgentRequestBlock: Sendable {
+    case content(AgentContentBlock)
+    case image(base64: String, mediaType: String)
+}
+
+struct AgentToolSchema: @unchecked Sendable {
     let name: String
     let description: String
     let inputSchema: [String: Any]
 }
 
-enum AnthropicStreamEvent: Sendable {
+struct AgentRequestContext: Equatable, Sendable {
+    let conversationID: UUID
+    let traceID: UUID
+    let spanID: UUID
+    let inputMessageID: UUID
+    let outputMessageID: UUID
+    let projectID: String?
+
+    func apply(to request: inout URLRequest, telemetryEnabled: Bool) {
+        request.setValue(conversationID.uuidString.lowercased(), forHTTPHeaderField: "X-Palmier-Conversation-Id")
+        request.setValue(traceID.uuidString.lowercased(), forHTTPHeaderField: "X-Palmier-Trace-Id")
+        request.setValue(spanID.uuidString.lowercased(), forHTTPHeaderField: "X-Palmier-Span-Id")
+        request.setValue(inputMessageID.uuidString.lowercased(), forHTTPHeaderField: "X-Palmier-Input-Message-Id")
+        request.setValue(outputMessageID.uuidString.lowercased(), forHTTPHeaderField: "X-Palmier-Output-Message-Id")
+        if let projectID, !projectID.isEmpty {
+            request.setValue(projectID, forHTTPHeaderField: "X-Palmier-Project-Id")
+        }
+        request.setValue(telemetryEnabled ? "1" : "0", forHTTPHeaderField: "X-Palmier-Agent-Telemetry")
+    }
+}
+
+enum AgentStreamEvent: Equatable, Sendable {
+    case thinkingDelta(String)
+    case thinkingSignature(String)
+    case redactedThinking(String)
+    case reasoningSummaryDelta(String)
+    case reasoningComplete(itemID: String?, summary: String, encryptedContent: String)
     case textDelta(String)
     case toolUseComplete(id: String, name: String, inputJSON: String)
-    case messageStop(stopReason: AnthropicStopReason)
+    case messageStop(stopReason: AgentStopReason)
 }
 
 enum AgentStreamError: LocalizedError {
@@ -182,67 +293,112 @@ enum AgentStreamError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .missingKey: "Add your OpenRouter API key in Settings › Agent to use AI chat."
+        case .missingKey: "Add your API key in Settings › Agent to use AI chat."
         case .upstream(let message): message
         }
     }
-
-    static func from(status: Int, body: String) -> AgentStreamError {
-        if status == 401 || status == 403 { return .missingKey }
-        guard let data = body.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let error = json["error"] as? [String: Any]
-        else {
-            return .upstream(body.isEmpty ? "OpenRouter error (HTTP \(status))" : String(body.prefix(500)))
-        }
-        return .upstream(error, fallback: "OpenRouter error (HTTP \(status))")
-    }
-
-    /// OpenRouter hides the real cause in error.metadata; a bare "Provider returned error" is useless to the user.
-    static func upstream(_ error: [String: Any], fallback: String) -> AgentStreamError {
-        var message = error["message"] as? String ?? fallback
-        let metadata = error["metadata"] as? [String: Any]
-        if let provider = metadata?["provider_name"] as? String, !provider.isEmpty {
-            message += " (\(provider))"
-        }
-        if let detail = metadata?["raw"].map(rawDetail), !detail.isEmpty {
-            message += ": \(detail)"
-        }
-        return .upstream(message)
-    }
-
-    private static func rawDetail(_ raw: Any) -> String {
-        if let text = raw as? String { return String(text.prefix(500)) }
-        if let object = raw as? [String: Any] {
-            if let nested = object["error"] as? [String: Any], let message = nested["message"] as? String {
-                return String(message.prefix(500))
-            }
-            if let message = object["message"] as? String { return String(message.prefix(500)) }
-            if let data = try? JSONSerialization.data(withJSONObject: object),
-               let text = String(data: data, encoding: .utf8) {
-                return String(text.prefix(500))
-            }
-        }
-        return ""
-    }
 }
 
-// MARK: - Client protocol
+enum AgentClientTransportError: LocalizedError {
+    case missingAPIKey(AgentProvider)
+    case httpError(provider: AgentProvider, status: Int, body: String)
+    case streamError(provider: AgentProvider, message: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingAPIKey(let provider):
+            "No \(provider.displayName) API key is set."
+        case .httpError(let provider, let status, let body):
+            "\(provider.displayName) API error (\(status)): \(body.prefix(500))"
+        case .streamError(let provider, let message):
+            "\(provider.displayName) stream error: \(message)"
+        }
+    }
+}
 
 protocol AgentClient: Sendable {
     func stream(
         system: String,
-        tools: [AnthropicToolSchema],
-        messages: [AnthropicMessage]
-    ) -> AsyncThrowingStream<AnthropicStreamEvent, Error>
+        tools: [AgentToolSchema],
+        messages: [AgentRequestMessage],
+        context: AgentRequestContext
+    ) -> AsyncThrowingStream<AgentStreamEvent, Error>
 }
 
-// MARK: - Usage logging
+func makeAgentStream(
+    _ operation: @escaping @Sendable (
+        AsyncThrowingStream<AgentStreamEvent, Error>.Continuation
+    ) async throws -> Void
+) -> AsyncThrowingStream<AgentStreamEvent, Error> {
+    AsyncThrowingStream { continuation in
+        let task = Task {
+            do {
+                try await operation(continuation)
+                continuation.finish()
+            } catch {
+                continuation.finish(throwing: error)
+            }
+        }
+        continuation.onTermination = { _ in task.cancel() }
+    }
+}
 
-enum AgentUsageLog {
-    static func record(promptTokens: Int, completionTokens: Int) {
-        #if DEBUG
-        print("[agent usage] prompt=\(promptTokens) completion=\(completionTokens)")
-        #endif
+enum AgentHTTP {
+    static let streamIdleTimeout: TimeInterval = 600
+
+    static func bytes(
+        for request: URLRequest,
+        makeError: (Int, String) -> any Error
+    ) async throws -> URLSession.AsyncBytes {
+        var request = request
+        request.timeoutInterval = streamIdleTimeout
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        guard let response = response as? HTTPURLResponse, response.statusCode >= 400 else {
+            return bytes
+        }
+        var body = ""
+        for try await line in bytes.lines { body += line + "\n" }
+        throw makeError(response.statusCode, body)
+    }
+}
+
+extension AgentRunSettings {
+    func requestBody(
+        system: String,
+        tools: [AgentToolSchema],
+        messages: [AgentRequestMessage]
+    ) -> [String: Any] {
+        switch model.provider {
+        case .anthropic:
+            AnthropicRequestBody.build(
+                model: model,
+                reasoningEffort: reasoningEffort,
+                system: system,
+                tools: tools,
+                messages: messages
+            )
+        case .openAI:
+            OpenAIRequestBody.build(
+                model: model,
+                reasoningEffort: reasoningEffort,
+                system: system,
+                tools: tools,
+                messages: messages
+            )
+        }
+    }
+}
+
+extension AgentProvider {
+    func parseSSE(
+        bytes: URLSession.AsyncBytes,
+        continuation: AsyncThrowingStream<AgentStreamEvent, Error>.Continuation
+    ) async throws {
+        switch self {
+        case .anthropic:
+            try await AnthropicSSE.parse(bytes: bytes, continuation: continuation)
+        case .openAI:
+            try await OpenAISSE.parse(bytes: bytes, continuation: continuation)
+        }
     }
 }

@@ -8,7 +8,7 @@ extension ToolExecutor {
         "clipId", "sourceClipId", "referenceClipId", "targetClipId", "fromClipId", "afterClipId",
         "nextClipId", "decompose",
         "mediaRef", "startFrameMediaRef", "endFrameMediaRef",
-        "sourceVideoMediaRef", "videoSourceMediaRef", "sourceMediaRef",
+        "sourceVideoMediaRef", "videoSourceMediaRef", "sourceMediaRef", "subtitleMediaRef",
         "captionGroupId", "timelineId", "trackId", "item", "from", "reference",
         "groupId", "memberId", "markerId", "transitionId", "presetId",
     ]
@@ -32,6 +32,7 @@ extension ToolExecutor {
                 if let linkGroupId = clip.linkGroupId { ids.insert(linkGroupId) }
             }
         }
+        for marker in editor.timeline.markers { ids.insert(marker.id) }
         for asset in editor.mediaAssets { ids.insert(asset.id) }
         for preset in PresetStore.builtInPresets { ids.insert(preset.id) }
         for preset in presetStore.userPresets { ids.insert(preset.id) }

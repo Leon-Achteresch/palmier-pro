@@ -6,8 +6,8 @@ import Testing
 struct ChapterSidecarWarningTests {
 
     private let markers = [
-        TimelineMarker(frame: 0, name: "Intro", kind: .chapter),
-        TimelineMarker(frame: 90, name: "Middle", kind: .chapter),
+        TimelineMarker(name: "Intro", startFrame: 0, kind: .chapter),
+        TimelineMarker(name: "Middle", startFrame: 90, kind: .chapter),
     ]
 
     private func temporaryDirectory() throws -> URL {
@@ -33,7 +33,7 @@ struct ChapterSidecarWarningTests {
         let output = directory.appendingPathComponent("movie.mp4")
 
         let warning = await ChapterSidecar.writeIfNeeded(
-            markers: [TimelineMarker(frame: 5, kind: .standard)], fps: 30, nextTo: output
+            markers: [TimelineMarker(name: "", startFrame: 5, kind: .standard)], fps: 30, nextTo: output
         )
         #expect(warning == nil)
         #expect(!FileManager.default.fileExists(atPath: ChapterSidecar.url(nextTo: output).path))

@@ -40,7 +40,7 @@ extension MediaTab {
 
 extension MediaTab {
     func gridDimensions(width: CGFloat) -> GridDimensions {
-        let spacing = AppTheme.Spacing.xl
+        let spacing = AppTheme.Spacing.md
         let outerPadding: CGFloat = AppTheme.Spacing.md * 2
         let usable = max(0, width - outerPadding)
         let cols = max(1, Int(floor((usable + spacing) / (thumbnailSize + spacing))))
@@ -90,7 +90,6 @@ extension MediaTab {
         cols: Int,
         tileWidth: CGFloat,
         spacing: CGFloat,
-        topPadding: CGFloat,
         @ViewBuilder cellView: @escaping (Cell) -> Content
     ) -> some View where Cell.ID == String {
         ScrollViewReader { proxy in
@@ -103,8 +102,8 @@ extension MediaTab {
                             .id(cell.id)
                     }
                 }
-                .padding(AppTheme.Spacing.md)
-                .padding(.top, topPadding)
+                .padding(.horizontal, AppTheme.Spacing.md)
+                .padding(.bottom, AppTheme.Spacing.md)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .coordinateSpace(name: "mediaGrid")
@@ -139,8 +138,7 @@ extension MediaTab {
                 orderedIds: layout.orderedIds,
                 cols: layout.cols,
                 tileWidth: layout.tileWidth,
-                spacing: layout.spacing,
-                topPadding: AppTheme.Spacing.sm
+                spacing: layout.spacing
             ) { cell in
                 cellView(for: cell)
             }
@@ -162,8 +160,7 @@ extension MediaTab {
                 orderedIds: orderedIds,
                 cols: dims.cols,
                 tileWidth: dims.tileWidth,
-                spacing: dims.spacing,
-                topPadding: AppTheme.Spacing.sm
+                spacing: dims.spacing
             ) { cell in
                 cellView(for: cell)
             }
@@ -200,7 +197,7 @@ extension MediaTab {
                         let rootTimelines = filteredTimelines(in: nil)
                         if !rootAssets.isEmpty || !rootTimelines.isEmpty {
                             groupedSection(
-                                title: "Library",
+                                title: L10n.string("Library"),
                                 folderId: nil,
                                 timelines: rootTimelines,
                                 assets: rootAssets,
@@ -274,7 +271,7 @@ extension MediaTab {
                 }
                 .buttonStyle(.plain)
                 .focusable(false)
-                .help(isCollapsed ? "Expand" : "Collapse")
+                .help(isCollapsed ? L10n.string("Expand") : L10n.string("Collapse"))
 
                 if let folderId {
                     Button {
@@ -292,20 +289,20 @@ extension MediaTab {
                     }
                     .buttonStyle(.plain)
                     .focusable(false)
-                    .help("Open \(title)")
+                    .help(L10n.string("Open \(title)"))
                     .contextMenu {
-                        Button("Open") {
+                        Button(L10n.string("Open")) {
                             openFolder(id: folderId)
                         }
                         Divider()
-                        Button("Delete", role: .destructive) {
+                        Button(L10n.string("Delete"), role: .destructive) {
                             editor.deleteMediaPanelItems(targeting: MediaPanelItemKey.folder(folderId))
                         }
                     }
                 } else {
                     groupedSectionTitle(title)
                 }
-                Text("\(timelines.count + assets.count)")
+                Text(verbatim: "\(timelines.count + assets.count)")
                     .font(.system(size: AppTheme.FontSize.xs))
                     .foregroundStyle(AppTheme.Text.mutedColor)
                     .monospacedDigit()
@@ -318,7 +315,7 @@ extension MediaTab {
                     .frame(height: 0.5)
 
                 if assets.isEmpty && timelines.isEmpty {
-                    Text("Empty")
+                    Text(L10n.string("Empty"))
                         .font(.system(size: AppTheme.FontSize.xs))
                         .foregroundStyle(AppTheme.Text.mutedColor)
                         .padding(.vertical, AppTheme.Spacing.sm)
@@ -368,7 +365,7 @@ extension MediaTab {
             HStack(spacing: AppTheme.Spacing.xs) {
                 ForEach(Array(segments.enumerated()), id: \.offset) { idx, segment in
                     if idx > 0 {
-                        Text("/")
+                        Text(verbatim: "/")
                             .font(.system(size: AppTheme.FontSize.xs))
                             .foregroundStyle(AppTheme.Text.mutedColor)
                     }
@@ -413,7 +410,7 @@ extension MediaTab {
         }
     }
 
-    fileprivate func timelineTile(_ timeline: Timeline) -> some View {
+    func timelineTile(_ timeline: Timeline) -> some View {
         TimelineTileView(
             timeline: timeline,
             posterImage: timelinePoster(timeline),
@@ -442,7 +439,7 @@ extension MediaTab {
     }
 
     /// First visual clip's cached asset thumbnail — no dedicated timeline render.
-    fileprivate func timelinePoster(_ timeline: Timeline) -> NSImage? {
+    func timelinePoster(_ timeline: Timeline) -> NSImage? {
         for track in timeline.tracks where track.type == .video {
             for clip in track.clips where clip.mediaType == .video || clip.mediaType == .image {
                 if let thumb = editor.mediaAssets.first(where: { $0.id == clip.mediaRef })?.thumbnail {
@@ -498,14 +495,14 @@ extension MediaTab {
         let targetIds: Set<String> = editor.selectedMediaAssetIds.contains(asset.id)
             ? editor.selectedMediaAssetIds
             : [asset.id]
-        Menu("Move to Folder") {
-            Button("New Folder") {
+        Menu(L10n.string("Move to Folder")) {
+            Button(L10n.string("New Folder")) {
                 let id = editor.createFolder(name: "New Folder", in: currentFolderId)
                 editor.moveAssetsToFolder(assetIds: targetIds, folderId: id)
                 renamingFolderId = id
             }
             if currentFolderId != nil || targetIds.contains(where: { id in editor.mediaAssets.first(where: { $0.id == id })?.folderId != nil }) {
-                Button("Library") {
+                Button(L10n.string("Library")) {
                     editor.moveAssetsToFolder(assetIds: targetIds, folderId: nil)
                 }
             }
@@ -551,6 +548,6 @@ private struct TileDragPreview: View {
         .padding(.horizontal, AppTheme.Spacing.smMd)
         .padding(.vertical, AppTheme.Spacing.sm)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: AppTheme.Radius.sm))
-        .shadow(color: .black.opacity(AppTheme.Opacity.medium), radius: 4, y: 2)
+        .shadow(color: AppTheme.MediaOverlay.backgroundColor.opacity(AppTheme.Opacity.medium), radius: 4, y: 2)
     }
 }

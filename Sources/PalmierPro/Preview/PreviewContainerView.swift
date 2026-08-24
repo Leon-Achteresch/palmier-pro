@@ -6,9 +6,10 @@ struct PreviewContainerView: View {
 
     private var isTimeline: Bool { editor.activePreviewTab == .timeline }
     private var isImage: Bool { editor.activePreviewTab.clipType == .image }
+    private var isSubtitle: Bool { editor.activePreviewTab.clipType == .subtitle }
 
-    @State private var hoveredTabId: String?
     @State private var failedImagePreviewKey: String?
+    @State private var canvasOverlays = CanvasOverlaySelection()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -16,78 +17,16 @@ struct PreviewContainerView: View {
                 .padding(.horizontal, AppTheme.Spacing.sm)
                 .panelHeaderBar()
 
-            GeometryReader { geo in
-                let aspect = generatingAspect ?? CGFloat(editor.timeline.width) / CGFloat(editor.timeline.height)
-                let fitSize = fitSize(in: geo.size, aspect: aspect)
-                let scaledWidth = fitSize.width * editor.canvasZoom
-                let scaledHeight = fitSize.height * editor.canvasZoom
-                let timelineState = timelineFrameState
-                ZStack {
-                    PreviewView()
-                    if isImage {
-                        imagePreview
-                    }
-                    if let error = activeFailedError {
-                        failedPreview(error: error)
-                    }
-                    if let asset = activeMediaAsset, asset.isGenerating {
-                        generatingPreview(label: asset.generatingLabel)
-                    } else if case .generating(let label) = timelineState {
-                        generatingPreview(label: label)
-                    }
-                    if let overlay = offlineOverlay(timelineState: timelineState) {
-                        offlinePreview(assetId: overlay.assetId, path: overlay.path, isUnprocessable: overlay.isUnprocessable)
-                    }
-                    if editor.safeAreaGuidesVisible {
-                        SafeAreaOverlayView()
-                    }
-                    if editor.chromaKeySamplingClipId != nil {
-                        ChromaKeySamplerOverlayView()
-                    } else if editor.cropEditingActive {
-                        CropOverlayView()
-                    } else if editor.cornerPinnedClip != nil {
-                        CornerPinOverlayView()
-                    } else if editor.meshWarpedClip != nil {
-                        MeshWarpOverlayView()
-                    } else {
-                        TransformOverlayView()
-                    }
-                    if let slip = editor.slipPreview, isTimeline {
-                        SlipTwoUpView(state: slip)
-                    }
-                }
-                .frame(width: scaledWidth, height: scaledHeight)
-                .simultaneousGesture(
-                    SpatialTapGesture()
-                        .onEnded { value in
-                            guard isTimeline,
-                                  !editor.cropEditingActive,
-                                  editor.chromaKeySamplingClipId == nil,
-                                  let id = PreviewHitTester.clipID(
-                                    at: value.location,
-                                    viewSize: CGSize(width: scaledWidth, height: scaledHeight),
-                                    editor: editor
-                                  ) else { return }
-                            editor.selectPreviewClip(id)
-                        }
-                )
-                .overlay(
-                    Rectangle()
-                        .stroke(Color.white.opacity(editor.canvasZoom < 1.0 ? AppTheme.Opacity.moderate : 0), lineWidth: AppTheme.BorderWidth.thin)
-                )
-                .position(x: geo.size.width / 2, y: geo.size.height / 2)
-                .offset(x: editor.canvasOffset.width, y: editor.canvasOffset.height)
+            if isSubtitle {
+                SubtitlePreviewView(url: activeMediaAsset?.url)
+            } else {
+                canvas
             }
-            .clipped()
-            .overlay(alignment: .bottom) {
-                MotionBakeStatusView()
-                    .padding(.bottom, AppTheme.Spacing.md)
-            }
-            if !isImage {
+            if isImage {
+                imageSettingsBar
+            } else if !isSubtitle {
                 scrubBar
                 transportBar
-            } else {
-                imageSettingsBar
             }
         }
         .background(AppTheme.Background.surfaceColor)
@@ -96,12 +35,99 @@ struct PreviewContainerView: View {
         }
     }
 
+    private var canvas: some View {
+        GeometryReader { geo in
+            let aspect = generatingAspect ?? CGFloat(editor.timeline.width) / CGFloat(editor.timeline.height)
+            let fitSize = fitSize(in: geo.size, aspect: aspect)
+            let scaledWidth = fitSize.width * editor.canvasZoom
+            let scaledHeight = fitSize.height * editor.canvasZoom
+            let timelineState = timelineFrameState
+            let captionPreview = isTimeline && editor.captionPreviewEnabled
+                ? editor.captionPreviewConfiguration
+                : nil
+            ZStack {
+                PreviewView()
+                if isImage {
+                    imagePreview
+                }
+                if let error = activeFailedError {
+                    failedPreview(error: error)
+                }
+                if let asset = activeMediaAsset, asset.isGenerating {
+                    generatingPreview(label: asset.generatingLabel)
+                } else if case .generating(let label) = timelineState {
+                    generatingPreview(label: label)
+                }
+                if let overlay = offlineOverlay(timelineState: timelineState) {
+                    offlinePreview(assetId: overlay.assetId, path: overlay.path, isUnprocessable: overlay.isUnprocessable)
+                }
+                if editor.safeAreaGuidesVisible {
+                    SafeAreaOverlayView()
+                }
+                CanvasViewingOverlay(selection: canvasOverlays)
+                if editor.chromaKeySamplingClipId != nil {
+                    ChromaKeySamplerOverlayView()
+                } else if editor.cropEditingActive {
+                    CropOverlayView()
+                } else if editor.cornerPinnedClip != nil {
+                    CornerPinOverlayView()
+                } else if editor.meshWarpedClip != nil {
+                    MeshWarpOverlayView()
+                } else if let configuration = captionPreview {
+                    CaptionPreviewOverlay(
+                        configuration: configuration,
+                        canvas: CGSize(
+                            width: max(1, editor.timeline.width),
+                            height: max(1, editor.timeline.height)
+                        ),
+                        size: CGSize(width: scaledWidth, height: scaledHeight),
+                        onCenterChange: { editor.captionPreviewCenterChange?($0) }
+                    )
+                } else {
+                    TransformOverlayView()
+                }
+                if let slip = editor.slipPreview, isTimeline {
+                    SlipTwoUpView(state: slip)
+                }
+            }
+            .frame(width: scaledWidth, height: scaledHeight)
+            .simultaneousGesture(
+                SpatialTapGesture()
+                    .onEnded { value in
+                        guard isTimeline,
+                              captionPreview == nil,
+                              !editor.cropEditingActive,
+                              editor.chromaKeySamplingClipId == nil,
+                              let id = PreviewHitTester.clipID(
+                                at: value.location,
+                                viewSize: CGSize(width: scaledWidth, height: scaledHeight),
+                                editor: editor
+                              ) else { return }
+                        editor.selectPreviewClip(id)
+                    }
+            )
+            .overlay(
+                Rectangle()
+                    .stroke(
+                        AppTheme.MediaOverlay.primaryColor.opacity(editor.canvasZoom < 1.0 ? AppTheme.Opacity.moderate : 0),
+                        lineWidth: AppTheme.BorderWidth.thin
+                    )
+            )
+            .position(x: geo.size.width / 2, y: geo.size.height / 2)
+            .offset(x: editor.canvasOffset.width, y: editor.canvasOffset.height)
+        }
+        .clipped()
+        .overlay(alignment: .bottom) {
+            MotionBakeStatusView()
+                .padding(.bottom, AppTheme.Spacing.md)
+        }
+    }
+
     // MARK: - Transport bar
 
     private var transportBar: some View {
-        let duration = durationFrames
         let fps = editor.timeline.fps
-        let durationTimecode = formatTimecode(frame: duration, fps: fps)
+        let durationTimecode = formatTimecode(frame: durationFrames, fps: fps)
 
         return HStack(spacing: AppTheme.Spacing.sm) {
             PreviewTimecodeText(
@@ -109,45 +135,65 @@ struct PreviewContainerView: View {
                 fps: fps,
                 durationTimecode: durationTimecode
             )
+            .layoutPriority(1)
 
-            Spacer()
-
-            HStack(spacing: AppTheme.Spacing.md) {
-                transportButton("backward.end.fill") { seekTo(0) }
-                transportButton("backward.frame.fill") { seekTo(playheadFrame - 1) }
-                transportButton(editor.isPlaying ? "pause.fill" : "play.fill") {
-                    if isTimeline {
-                        editor.togglePlayback()
-                    } else {
-                        editor.toggleSourcePlayback()
-                    }
-                }
-                transportButton("forward.frame.fill") { seekTo(playheadFrame + 1) }
-                transportButton("forward.end.fill") { seekTo(duration) }
+            ViewThatFits(in: .horizontal) {
+                transportControls(spacing: AppTheme.Spacing.md)
+                transportControls(spacing: AppTheme.Spacing.xs)
             }
+            .frame(minWidth: 0, maxWidth: .infinity)
+        }
+        .padding(.horizontal, AppTheme.Spacing.sm)
+        .frame(height: Layout.toolbarHeight)
+    }
 
-            Spacer()
+    private func transportControls(spacing: CGFloat) -> some View {
+        HStack(spacing: spacing) {
+            Spacer(minLength: 0)
+            transportButtons(spacing: spacing)
+            Spacer(minLength: 0)
+            accessoryButtons(spacing: spacing)
+        }
+    }
 
+    private func transportButtons(spacing: CGFloat) -> some View {
+        HStack(spacing: spacing) {
+            transportButton("backward.end.fill") { seekTo(0) }
+            transportButton("backward.frame.fill") { seekTo(playheadFrame - 1) }
+            transportButton(editor.isPlaying ? "pause.fill" : "play.fill") {
+                if isTimeline {
+                    editor.togglePlayback()
+                } else {
+                    editor.toggleSourcePlayback()
+                }
+            }
+            transportButton("forward.frame.fill") { seekTo(playheadFrame + 1) }
+            transportButton("forward.end.fill") { seekTo(durationFrames) }
+        }
+    }
+
+    private func accessoryButtons(spacing: CGFloat) -> some View {
+        HStack(spacing: spacing) {
             if isTimeline || editor.activePreviewTab.clipType == .video {
                 captureFrameButton
             }
+            guidesMenuButton
             settingsMenuButton(
                 systemImage: "speedometer",
                 label: editor.playbackRate.label,
-                help: "Playback Speed"
+                help: L10n.string("Playback Speed")
             ) {
                 playbackRateMenuItems
             }
             settingsMenuButton(
                 systemImage: "magnifyingglass",
                 label: zoomBadgeLabel,
-                help: "Canvas Zoom"
+                help: L10n.string("Canvas Zoom")
             ) {
                 zoomMenuItems
             }
         }
-        .padding(.horizontal, AppTheme.Spacing.lg)
-        .frame(height: 36)
+        .fixedSize()
     }
 
     // MARK: - Image settings bar
@@ -155,16 +201,17 @@ struct PreviewContainerView: View {
     private var imageSettingsBar: some View {
         HStack(spacing: AppTheme.Spacing.sm) {
             Spacer()
+            guidesMenuButton
             settingsMenuButton(
                 systemImage: "magnifyingglass",
                 label: zoomBadgeLabel,
-                help: "Canvas Zoom"
+                help: L10n.string("Canvas Zoom")
             ) {
                 zoomMenuItems
             }
         }
-        .padding(.horizontal, AppTheme.Spacing.lg)
-        .frame(height: 36)
+        .padding(.horizontal, AppTheme.Spacing.sm)
+        .frame(height: Layout.toolbarHeight)
     }
 
     // MARK: - Capture frame
@@ -176,7 +223,7 @@ struct PreviewContainerView: View {
                 .foregroundStyle(AppTheme.Text.secondaryColor)
                 .frame(width: AppTheme.IconSize.mdLg, height: AppTheme.IconSize.mdLg)
                 .hoverHighlight()
-                .help("Capture Frame to Media")
+                .help(L10n.string("Capture Frame to Media"))
         }
         .buttonStyle(.plain)
         .tourAnchor(.screenshotButton)
@@ -191,12 +238,113 @@ struct PreviewContainerView: View {
                 editor.setPlaybackRate(rate)
             } label: {
                 HStack {
-                    Text(rate.label)
+                    Text(verbatim: rate.label)
                     Spacer()
                     if editor.playbackRate == rate {
                         Image(systemName: "checkmark")
                     }
                 }
+            }
+        }
+    }
+
+    private var guidesMenuButton: some View {
+        settingsMenuButton(
+            systemImage: canvasOverlays.isEmpty ? "viewfinder" : "viewfinder.circle.fill",
+            help: L10n.string("Canvas Guides"),
+            isActive: !canvasOverlays.isEmpty
+        ) {
+            canvasGuideMenuItems
+        }
+    }
+
+    @ViewBuilder
+    private var canvasGuideMenuItems: some View {
+        Menu {
+            Button {
+                canvasOverlays.grid = nil
+            } label: {
+                selectionMenuLabel(
+                    L10n.string("None"),
+                    selected: canvasOverlays.grid == nil
+                )
+            }
+            Divider()
+            ForEach(CanvasGridOverlay.allCases) { grid in
+                Button {
+                    canvasOverlays.grid = grid
+                } label: {
+                    selectionMenuLabel(
+                        grid.label,
+                        selected: canvasOverlays.grid == grid
+                    )
+                }
+            }
+        } label: {
+            Text(L10n.string("Grid"))
+        }
+
+        Menu {
+            ForEach(CanvasGuideOverlay.allCases) { guide in
+                Toggle(
+                    L10n.string(key: guide.localizationKey),
+                    isOn: guideBinding(for: guide)
+                )
+            }
+        } label: {
+            Text(L10n.string("Safe Zones"))
+        }
+
+        Menu {
+            Button {
+                canvasOverlays.format = nil
+            } label: {
+                selectionMenuLabel(
+                    L10n.string("None"),
+                    selected: canvasOverlays.format == nil
+                )
+            }
+            Divider()
+            ForEach(CanvasFormatOverlay.allCases) { format in
+                Button {
+                    canvasOverlays.format = format
+                } label: {
+                    selectionMenuLabel(
+                        L10n.string(key: format.localizationKey),
+                        selected: canvasOverlays.format == format
+                    )
+                }
+            }
+        } label: {
+            Text(L10n.string("Format References"))
+        }
+
+        Divider()
+        Button(L10n.string("Hide Guides")) {
+            canvasOverlays.clear()
+        }
+        .disabled(canvasOverlays.isEmpty)
+    }
+
+    private func guideBinding(for guide: CanvasGuideOverlay) -> Binding<Bool> {
+        Binding(
+            get: { canvasOverlays.guides.contains(guide) },
+            set: { enabled in
+                if enabled {
+                    canvasOverlays.guides.insert(guide)
+                } else {
+                    canvasOverlays.guides.remove(guide)
+                }
+            }
+        )
+    }
+
+    private func selectionMenuLabel(_ label: String, selected: Bool) -> some View {
+        HStack {
+            Text(verbatim: label)
+            Spacer()
+            if selected {
+                Image(systemName: "checkmark")
             }
         }
     }
@@ -209,7 +357,7 @@ struct PreviewContainerView: View {
                 editor.canvasZoom = preset.value
             } label: {
                 HStack {
-                    Text(preset.label)
+                    Text(preset == .fit ? L10n.string("Fit") : preset.label)
                     Spacer()
                     if isZoomPresetActive(preset) {
                         Image(systemName: "checkmark")
@@ -221,7 +369,7 @@ struct PreviewContainerView: View {
 
     private var zoomBadgeLabel: String {
         if isZoomPresetActive(.fit) {
-            return "Fit"
+            return L10n.string("Fit")
         }
         let percent = Int(editor.canvasZoom * 100)
         return "\(percent)%"
@@ -233,22 +381,35 @@ struct PreviewContainerView: View {
 
     private func settingsMenuButton<MenuContent: View>(
         systemImage: String,
-        label: String,
+        label: String? = nil,
         help: String,
+        isActive: Bool = false,
         @ViewBuilder menu: @escaping () -> MenuContent
     ) -> some View {
         Menu {
             menu()
         } label: {
-            badgeLabel(systemImage: systemImage, text: label)
+            settingsMenuLabel(systemImage: systemImage, text: label, isActive: isActive)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
         .hoverHighlight()
-        .help(help)
-        .accessibilityLabel(help)
-        .accessibilityValue(label)
+        .help(L10n.string(key: help))
+        .accessibilityLabel(L10n.string(key: help))
+        .accessibilityValue(label.map { L10n.string(key: $0) } ?? "")
+    }
+
+    @ViewBuilder
+    private func settingsMenuLabel(systemImage: String, text: String?, isActive: Bool) -> some View {
+        if let text {
+            badgeLabel(systemImage: systemImage, text: text)
+        } else {
+            Image(systemName: systemImage)
+                .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
+                .foregroundStyle(isActive ? AppTheme.Accent.primary : AppTheme.Text.secondaryColor)
+                .frame(width: AppTheme.IconSize.mdLg, height: AppTheme.IconSize.mdLg)
+        }
     }
 
     private func badgeLabel(systemImage: String, text: String) -> some View {
@@ -288,7 +449,7 @@ struct PreviewContainerView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.black)
+        .background(AppTheme.Background.previewCanvasColor)
         .allowsHitTesting(false)
         .task(id: assetKey) {
             failedImagePreviewKey = nil
@@ -390,7 +551,7 @@ struct PreviewContainerView: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.message = "Choose the source file for this clip"
+        panel.message = L10n.string("Choose the source file for this clip")
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             editor.relinkAsset(id: assetId, to: url)
@@ -402,11 +563,13 @@ struct PreviewContainerView: View {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.message = "Choose the folder that holds your media"
+        panel.message = L10n.string("Choose the folder that holds your media")
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             let result = editor.relinkOfflineAssets(fromFolder: url)
-            editor.mediaPanelToast = "Relinked \(result.relinked) of \(result.total) offline clips."
+            editor.mediaPanelToast = MediaPanelToast(
+                message: L10n.string("Relinked \(result.relinked) of \(result.total) offline clips.")
+            )
         }
     }
 
@@ -417,7 +580,7 @@ struct PreviewContainerView: View {
                     .overlay { Image(nsImage: image).resizable().scaledToFill().blur(radius: 24) }
                     .clipped()
             }
-            Color.black.opacity(AppTheme.Opacity.strong)
+            AppTheme.MediaOverlay.backgroundColor.opacity(AppTheme.Opacity.strong)
             GeneratingOverlay(label: label, size: .preview)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -456,26 +619,26 @@ struct PreviewContainerView: View {
 
     private func offlinePreview(assetId: String?, path: String?, isUnprocessable: Bool) -> some View {
         ZStack {
-            Color.black.opacity(AppTheme.Opacity.strong)
+            AppTheme.MediaOverlay.backgroundColor.opacity(AppTheme.Opacity.strong)
             VStack(spacing: AppTheme.Spacing.md) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: AppTheme.FontSize.display))
                     .foregroundStyle(AppTheme.Status.errorColor)
-                Text(isUnprocessable ? "Couldn't Prepare Media" : "Media Offline")
+                Text(isUnprocessable ? L10n.string("Couldn't Prepare Media") : L10n.string("Media Offline"))
                     .font(.system(size: AppTheme.FontSize.lg, weight: .semibold))
-                    .foregroundStyle(AppTheme.Text.primaryColor)
+                    .foregroundStyle(AppTheme.MediaOverlay.primaryColor)
                 Text(isUnprocessable
-                    ? "Palmier loaded this clip's source file but couldn't prepare it for playback. The file may be corrupt or in an unsupported format."
-                    : "Palmier couldn't load this clip's source file. It may be missing, on an ejected drive, or unreadable.")
+                    ? L10n.string("Palmier loaded this clip's source file but couldn't prepare it for playback. The file may be corrupt or in an unsupported format.")
+                    : L10n.string("Palmier couldn't load this clip's source file. It may be missing, on an ejected drive, or unreadable."))
                     .font(.system(size: AppTheme.FontSize.sm))
-                    .foregroundStyle(AppTheme.Text.secondaryColor)
+                    .foregroundStyle(AppTheme.MediaOverlay.secondaryColor)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, AppTheme.Spacing.lg)
                 if let path {
                     Text(path)
                         .font(.system(size: AppTheme.FontSize.sm))
-                        .foregroundStyle(AppTheme.Text.secondaryColor)
+                        .foregroundStyle(AppTheme.MediaOverlay.secondaryColor)
                         .multilineTextAlignment(.center)
                         .textSelection(.enabled)
                         .lineLimit(3)
@@ -483,7 +646,7 @@ struct PreviewContainerView: View {
                         .padding(.horizontal, AppTheme.Spacing.lg)
                 }
                 if isUnprocessable {
-                    Button("Report a Problem") {
+                    Button(L10n.string("Report a Problem")) {
                         FeedbackWindowController.shared.show(prefill: Self.unprocessablePrefill(path: path))
                     }
                     .buttonStyle(.capsule(.prominent, size: .regular))
@@ -491,10 +654,10 @@ struct PreviewContainerView: View {
                 } else {
                     HStack(spacing: AppTheme.Spacing.sm) {
                         if let assetId {
-                            Button("Relink…") { relinkFile(assetId: assetId) }
+                            Button(L10n.string("Relink…")) { relinkFile(assetId: assetId) }
                                 .buttonStyle(.capsule(.prominent, size: .regular))
                         }
-                        Button("Relink Folder…") { relinkFolder() }
+                        Button(L10n.string("Relink Folder…")) { relinkFolder() }
                             .buttonStyle(.capsule(.secondary, size: .regular))
                     }
                     .padding(.top, AppTheme.Spacing.xs)
@@ -508,18 +671,18 @@ struct PreviewContainerView: View {
 
     private func failedPreview(error: String) -> some View {
         ZStack {
-            Color.black.opacity(AppTheme.Opacity.strong)
+            AppTheme.MediaOverlay.backgroundColor.opacity(AppTheme.Opacity.strong)
             VStack(spacing: AppTheme.Spacing.md) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: AppTheme.FontSize.display))
                     .foregroundStyle(.red.opacity(AppTheme.Opacity.prominent))
-                Text("Generation Failed")
+                Text(L10n.string("Generation Failed"))
                     .font(.system(size: AppTheme.FontSize.lg, weight: .semibold))
-                    .foregroundStyle(AppTheme.Text.primaryColor)
+                    .foregroundStyle(AppTheme.MediaOverlay.primaryColor)
                 ScrollView {
                     Text(error)
                         .font(.system(size: AppTheme.FontSize.md))
-                        .foregroundStyle(AppTheme.Text.secondaryColor)
+                        .foregroundStyle(AppTheme.MediaOverlay.secondaryColor)
                         .multilineTextAlignment(.center)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity)
@@ -527,22 +690,32 @@ struct PreviewContainerView: View {
                 }
                 .frame(maxWidth: 520, maxHeight: 240)
                 .fixedSize(horizontal: false, vertical: true)
+                if activeMediaAsset?.wasGenerationRefunded == true {
+                    Text(L10n.string("You were not charged for this generation"))
+                        .font(.system(size: AppTheme.FontSize.sm, weight: .medium))
+                        .foregroundStyle(AppTheme.Status.successColor)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, AppTheme.Spacing.lg)
+                }
                 if let asset = activeMediaAsset, asset.pendingDownloadURL != nil {
                     Button {
                         editor.generationService.retryDownload(asset: asset, editor: editor)
                     } label: {
                         HStack(spacing: AppTheme.Spacing.xs) {
                             Image(systemName: "arrow.clockwise")
-                            Text("Retry Download")
+                            Text(L10n.string("Retry Download"))
                         }
                         .font(.system(size: AppTheme.FontSize.sm, weight: .medium))
-                        .foregroundStyle(AppTheme.Text.primaryColor)
+                        .foregroundStyle(AppTheme.MediaOverlay.primaryColor)
                         .padding(.horizontal, AppTheme.Spacing.md)
                         .padding(.vertical, AppTheme.Spacing.sm)
                     }
                     .buttonStyle(.plain)
-                    .background(.white.opacity(AppTheme.Opacity.soft), in: .capsule)
-                    .overlay(Capsule().strokeBorder(.white.opacity(AppTheme.Opacity.muted), lineWidth: AppTheme.BorderWidth.hairline))
+                    .background(AppTheme.MediaOverlay.primaryColor.opacity(AppTheme.Opacity.soft), in: .capsule)
+                    .overlay(Capsule().strokeBorder(
+                        AppTheme.MediaOverlay.primaryColor.opacity(AppTheme.Opacity.muted),
+                        lineWidth: AppTheme.BorderWidth.hairline
+                    ))
                 }
             }
             .padding(AppTheme.Spacing.xl)
@@ -556,10 +729,10 @@ struct PreviewContainerView: View {
     private var tabBar: some View {
         HStack(spacing: AppTheme.Spacing.xs) {
             HStack(spacing: 0) {
-                navButton("chevron.left", enabled: editor.canGoBackPreviewTab, help: "Back") {
+                navButton("chevron.left", enabled: editor.canGoBackPreviewTab, help: L10n.string("Back")) {
                     editor.goBackPreviewTab()
                 }
-                navButton("chevron.right", enabled: editor.canGoForwardPreviewTab, help: "Forward") {
+                navButton("chevron.right", enabled: editor.canGoForwardPreviewTab, help: L10n.string("Forward")) {
                     editor.goForwardPreviewTab()
                 }
             }
@@ -574,41 +747,30 @@ struct PreviewContainerView: View {
 
     private func tabItem(for tab: PreviewTab) -> some View {
         let isActive = tab.id == editor.activePreviewTabId
-        let isHovered = hoveredTabId == tab.id
-        return HStack(spacing: AppTheme.Spacing.xs) {
+        return Button {
+            editor.selectPreviewTab(id: tab.id)
+        } label: {
             Text(tab == .timeline ? editor.timeline.name : tab.displayName)
-                .font(.system(size: AppTheme.FontSize.xs, weight: isActive ? .semibold : .medium))
-                .foregroundStyle(isActive || isHovered ? AppTheme.Text.primaryColor : AppTheme.Text.secondaryColor)
+                .font(.system(
+                    size: AppTheme.FontSize.xs,
+                    weight: isActive ? AppTheme.FontWeight.semibold : AppTheme.FontWeight.medium
+                ))
+                .foregroundStyle(isActive ? AppTheme.Text.primaryColor : AppTheme.Text.secondaryColor)
                 .lineLimit(1)
-
-            if tab.isCloseable {
-                TabCloseButton {
+        }
+        .buttonStyle(.plain)
+        .documentTabChrome(
+            isActive: isActive,
+            isCloseable: tab.isCloseable,
+            onClose: tab.isCloseable
+                ? {
                     withAnimation(.easeInOut(duration: AppTheme.Anim.transition)) {
                         editor.closePreviewTab(id: tab.id)
                     }
                 }
-            }
-        }
-        .padding(.horizontal, AppTheme.Spacing.xs)
-        .padding(.bottom, AppTheme.Spacing.xs)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(isActive ? tab.underlineColor : Color.clear)
-                .frame(height: AppTheme.BorderWidth.medium)
-        }
-        .fixedSize()
-        .contentShape(Rectangle())
-        .onTapGesture {
-            editor.selectPreviewTab(id: tab.id)
-        }
-        .onHover { hovering in
-            if hovering {
-                hoveredTabId = tab.id
-            } else if hoveredTabId == tab.id {
-                hoveredTabId = nil
-            }
-        }
-        .animation(.easeOut(duration: AppTheme.Anim.hover), value: isActive)
+                : nil
+        )
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 
     private func navButton(_ systemName: String, enabled: Bool, help: String, action: @escaping () -> Void) -> some View {
@@ -621,12 +783,12 @@ struct PreviewContainerView: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
-        .help(help)
+        .help(L10n.string(key: help))
     }
 
     private var overflowMenu: some View {
         Menu {
-            Button("Close All Tabs") {
+            Button(L10n.string("Close All Tabs")) {
                 withAnimation(.easeInOut(duration: AppTheme.Anim.transition)) {
                     editor.closeAllPreviewTabs()
                 }
@@ -642,7 +804,7 @@ struct PreviewContainerView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .hoverHighlight(cornerRadius: AppTheme.Radius.sm)
-        .help("More")
+        .help(L10n.string("More"))
     }
 
     // MARK: - Scrub bar
@@ -660,7 +822,7 @@ struct PreviewContainerView: View {
             let barHeight: CGFloat = active ? 4 : 3
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(Color.white.opacity(AppTheme.Opacity.soft))
+                    .fill(AppTheme.Interaction.fill(AppTheme.Opacity.soft))
                     .frame(height: barHeight)
                 PreviewScrubProgress(
                     isTimeline: isTimeline,
@@ -766,7 +928,7 @@ struct PreviewContainerView: View {
             Image(systemName: systemName)
                 .font(.system(size: AppTheme.FontSize.sm))
                 .foregroundStyle(AppTheme.Text.secondaryColor)
-                .frame(width: 32, height: 28)
+                .frame(width: AppTheme.IconSize.lgXl, height: AppTheme.IconSize.lgXl)
                 .hoverHighlight()
         }
         .buttonStyle(.plain)
@@ -816,13 +978,14 @@ private struct PreviewTimecodeText: View {
         HStack(spacing: 0) {
             Text(formatTimecode(frame: frame, fps: fps))
                 .foregroundStyle(AppTheme.Accent.timecodeColor)
-            Text(" / ")
+            Text(verbatim: " / ")
                 .foregroundStyle(AppTheme.Text.tertiaryColor)
             Text(durationTimecode)
                 .foregroundStyle(AppTheme.Text.secondaryColor)
         }
         .monospacedDigit()
         .font(.system(size: AppTheme.FontSize.sm, design: .monospaced))
+        .fixedSize()
     }
 }
 
@@ -848,9 +1011,9 @@ private struct PreviewScrubProgress: View {
                 .fill(AppTheme.Accent.primary)
                 .frame(width: max(0, g.size.width * progress), height: g.barHeight)
             Circle()
-                .fill(Color.white)
+                .fill(AppTheme.Text.primaryColor)
                 .frame(width: g.thumbSize, height: g.thumbSize)
-                .shadow(color: .black.opacity(0.3), radius: 1, y: 1)
+                .shadow(AppTheme.Shadow.sm)
                 .position(x: g.size.width * progress, y: g.size.height / 2)
         }
     }

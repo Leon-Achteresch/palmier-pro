@@ -20,10 +20,10 @@ struct ChapterMarkerSidecarTests {
 
     @Test func writesOneLinePerChapterMarkerInFrameOrder() {
         var timeline = Fixtures.timeline(fps: 30)
-        timeline.upsertMarker(TimelineMarker(frame: 30 * 3_601, name: "Outro", kind: .chapter))
-        timeline.upsertMarker(TimelineMarker(frame: 0, name: "Intro", kind: .chapter))
-        timeline.upsertMarker(TimelineMarker(frame: 30 * 90, name: "Setup", kind: .chapter))
-        timeline.upsertMarker(TimelineMarker(frame: 30 * 30, name: "Not a chapter", kind: .standard))
+        timeline.upsertMarker(TimelineMarker(name: "Outro", startFrame: 30 * 3_601, kind: .chapter))
+        timeline.upsertMarker(TimelineMarker(name: "Intro", startFrame: 0, kind: .chapter))
+        timeline.upsertMarker(TimelineMarker(name: "Setup", startFrame: 30 * 90, kind: .chapter))
+        timeline.upsertMarker(TimelineMarker(name: "Not a chapter", startFrame: 30 * 30, kind: .standard))
 
         let text = ChapterSidecar.text(markers: timeline.markers, fps: timeline.fps)
 
@@ -32,18 +32,18 @@ struct ChapterMarkerSidecarTests {
 
     @Test func unnamedChaptersFallBackToTheirNumberAndStayOnOneLine() {
         let markers = [
-            TimelineMarker(frame: 0, kind: .chapter),
-            TimelineMarker(frame: 60, name: "Two\nlines", kind: .chapter),
+            TimelineMarker(name: "", startFrame: 0, kind: .chapter),
+            TimelineMarker(name: "Two\nlines", startFrame: 60, kind: .chapter),
         ]
 
         #expect(ChapterSidecar.text(markers: markers, fps: 30) == "00:00 Chapter 1\n00:02 Two lines\n")
     }
 
     @Test func noChaptersOrInvalidFrameRateWritesNothing() {
-        let standardOnly = [TimelineMarker(frame: 10, name: "Note", kind: .standard)]
+        let standardOnly = [TimelineMarker(name: "Note", startFrame: 10, kind: .standard)]
         #expect(ChapterSidecar.text(markers: standardOnly, fps: 30) == nil)
         #expect(ChapterSidecar.text(markers: [], fps: 30) == nil)
-        #expect(ChapterSidecar.text(markers: [TimelineMarker(frame: 0, kind: .chapter)], fps: 0) == nil)
+        #expect(ChapterSidecar.text(markers: [TimelineMarker(name: "", startFrame: 0, kind: .chapter)], fps: 0) == nil)
     }
 
     @Test func sidecarSitsNextToTheExportedVideo() {

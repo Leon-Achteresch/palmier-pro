@@ -7,10 +7,11 @@ enum ClipType: String, Codable, Sendable, CaseIterable {
     case motion
     case sequence
     case adjustment
+    case subtitle
 
     var sfSymbolName: String {
         switch self {
-        case .video: "film"
+        case .video: "video"
         case .audio: "waveform"
         case .image: "photo"
         case .text: "textformat"
@@ -18,6 +19,7 @@ enum ClipType: String, Codable, Sendable, CaseIterable {
         case .motion: "wand.and.sparkles"
         case .sequence: "film.stack"
         case .adjustment: "circle.righthalf.filled"
+        case .subtitle: "captions.bubble"
         }
     }
 
@@ -31,13 +33,14 @@ enum ClipType: String, Codable, Sendable, CaseIterable {
         case .motion: "Motion"
         case .sequence: "Video"
         case .adjustment: "Adjustment"
+        case .subtitle: "Subtitle"
         }
     }
 
     var trackLabelPrefix: String { String(trackLabel.prefix(1)) }
 
     var isVisual: Bool {
-        self != .audio
+        self != .audio && self != .subtitle
     }
 
     var isSourcelessLayer: Bool {
@@ -55,6 +58,7 @@ enum ClipType: String, Codable, Sendable, CaseIterable {
         case "png", "jpg", "jpeg", "tiff", "heic", "webp": self = .image
         case "json", "lottie": self = .lottie
         case "motion": self = .motion
+        case "srt", "vtt": self = .subtitle
         default: return nil
         }
     }

@@ -66,6 +66,8 @@ struct GenerationInput: Codable, Sendable, Equatable {
     var audioInput: String?
     /// Video-only
     var generateAudio: Bool?
+    var draft: Bool?
+    var usesSourceVideo: Bool?
     var referenceImageURLs: [String]?
     var referenceVideoURLs: [String]?
     var referenceAudioURLs: [String]?
@@ -79,6 +81,8 @@ struct GenerationInput: Codable, Sendable, Equatable {
     var backendJobId: String?
     var outputIndex: Int?
     var resultURLs: [String]?
+    var costCredits: Int?
+    var refundedCredits: Int?
 }
 
 enum MediaSource: Codable, Sendable, Equatable {

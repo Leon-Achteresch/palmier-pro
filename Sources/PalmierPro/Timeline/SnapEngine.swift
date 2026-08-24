@@ -33,6 +33,7 @@ enum SnapEngine {
         playheadFrame: Int = 0,
         excludeClipIds: Set<String> = [],
         includePlayhead: Bool = false,
+        markerFrames: [Int] = [],
         beatFrames: ((Clip) -> [Int])? = nil,
         includeExcludedClipBeats: Bool = false,
         markers: [TimelineMarker] = [],
@@ -43,8 +44,12 @@ enum SnapEngine {
             targets.append(SnapTarget(frame: playheadFrame, kind: .playhead))
         }
         for marker in markers where !excludeMarkerIds.contains(marker.id) {
-            targets.append(SnapTarget(frame: marker.frame, kind: .marker))
+            targets.append(SnapTarget(frame: marker.startFrame, kind: .marker))
+            if marker.isRange {
+                targets.append(SnapTarget(frame: marker.endFrame, kind: .marker))
+            }
         }
+        targets += markerFrames.map { SnapTarget(frame: $0, kind: .marker) }
         for track in tracks {
             for clip in track.clips {
                 let excluded = excludeClipIds.contains(clip.id)

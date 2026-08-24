@@ -4,6 +4,7 @@ import PackageDescription
 
 let package = Package(
     name: "PalmierPro",
+    defaultLocalization: "en",
     platforms: [.macOS(.v26)],
     products: [
         .executable(name: "PalmierPro", targets: ["PalmierPro"]),
@@ -20,7 +21,7 @@ let package = Package(
         .package(url: "https://github.com/getsentry/sentry-cocoa", exact: "9.21.0"),
         .package(url: "https://github.com/PostHog/posthog-ios.git", exact: "3.64.4"),
         .package(url: "https://github.com/clerk/clerk-convex-swift", from: "0.1.0"),
-        .package(url: "https://github.com/clerk/clerk-ios", from: "1.2.1"),
+        .package(url: "https://github.com/clerk/clerk-ios", from: "1.3.9"),
         .package(url: "https://github.com/get-convex/convex-swift", from: "0.8.0"),
         .package(url: "https://github.com/huggingface/swift-transformers", from: "1.3.3"),
         .package(url: "https://github.com/ml-explore/mlx-swift", exact: "0.31.5"),
@@ -85,7 +86,7 @@ let package = Package(
                 .copy("Resources/MCPB/palmier-pro.mcpb"),
                 .copy("Resources/Images"),
                 .copy("Resources/Changelog"),
-                .copy("Resources/Localization"),
+                .process("Resources/Localization"),
                 .copy("Resources/Models"),
                 .copy("Resources/Mockups"),
                 .copy("Resources/MotionRuntime"),
