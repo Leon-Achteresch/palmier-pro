@@ -65,7 +65,9 @@ extension ToolExecutor {
             let time = CMTime(value: CMTimeValue(frame), timescale: timescale)
             guard let videoCG = try? await generator.image(at: time).image else { continue }
             // videoComposition already composites text via CustomVideoCompositor.
-            let labeled = InspectFrameOverlay.apply(videoCG, caption: "f\(frame)")
+            let labeled = InspectFrameOverlay.apply(
+                videoCG, caption: "f\(frame)", sketches: Self.sketchedMarkers(at: frame, in: timeline)
+            )
             guard let jpeg = ImageEncoder.encodeJPEG(labeled, quality: Self.inspectTimelineJPEGQuality) else { continue }
             imageBlocks.append(.image(base64: jpeg.base64EncodedString(), mediaType: "image/jpeg"))
             renderedFrames.append(frame)
@@ -84,6 +86,13 @@ extension ToolExecutor {
         ]
         guard let metaJSON = Self.jsonString(meta) else { throw ToolError("Failed to encode metadata") }
         return ToolResult(content: imageBlocks + [.text(metaJSON)], isError: false)
+    }
+
+    /// Markers whose sketch annotates `frame`.
+    static func sketchedMarkers(at frame: Int, in timeline: Timeline) -> [TimelineMarker] {
+        timeline.markers.filter {
+            !$0.sketch.isEmpty && ($0.isRange ? $0.intersects(frame..<(frame + 1)) : $0.startFrame == frame)
+        }
     }
 
     /// Ids of visual clips on screen at `frame`, top track first; caption clips report their group id once.

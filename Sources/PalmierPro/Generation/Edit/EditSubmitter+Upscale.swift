@@ -31,8 +31,7 @@ extension EditSubmitter {
         onComplete: (@MainActor (MediaAsset) -> Void)? = nil,
         onFailure: (@MainActor () -> Void)? = nil
     ) -> String? {
-        guard AccountService.shared.isSignedIn,
-              asset.sourceWidth != nil, asset.sourceHeight != nil,
+        guard asset.sourceWidth != nil, asset.sourceHeight != nil,
               model.supports(source: asset),
               asset.type != .video || asset.sourceFPS != nil else { return nil }
 
@@ -51,7 +50,6 @@ extension EditSubmitter {
             placeholderDuration = asset.duration > 0 ? asset.duration : Double(effectiveDuration)
         }
 
-        let sourceAssetId = asset.id
         return editor.generationService.generate(
             genInput: genInput,
             assetType: asset.type,
@@ -69,10 +67,6 @@ extension EditSubmitter {
                     sourceFPS: asset.sourceFPS,
                     settings: resolvedSettings
                 ))
-            },
-            snapshotRefs: { input, uploaded in
-                input.imageURLs = uploaded.isEmpty ? nil : uploaded
-                input.imageURLAssetIds = [sourceAssetId]
             },
             fileExtension: isImage ? "jpg" : "mp4",
             projectURL: editor.projectURL,

@@ -8,16 +8,14 @@ final class AgentService {
     private var credentials = AgentCredentialSnapshot()
     private var apiKeyObserver: NSObjectProtocol?
     private let userDefaults: UserDefaults
-    private var reasoningEfforts: [AgentModel: AgentReasoningEffort]
+    private var reasoningEfforts: [String: AgentReasoningEffort] = [:]
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
-        self.model = userDefaults.string(forKey: "agentModel")
-            .flatMap(AgentModel.persisted)
-            ?? .defaultModel
-        self.reasoningEfforts = Dictionary(uniqueKeysWithValues: AgentModel.allCases.map {
-            ($0, AgentReasoningPreferences.effort(for: $0, defaults: userDefaults))
-        })
+        let persisted = userDefaults.string(forKey: "agentModel")
+        self.model = persisted.map { raw in
+            AgentModelCatalog.shared.model(for: raw) ?? AgentModel(rawValue: raw)
+        } ?? .defaultModel
         reloadAPIKeys()
         apiKeyObserver = NotificationCenter.default.addObserver(
             forName: .agentAPIKeyChanged,
@@ -43,38 +41,32 @@ final class AgentService {
         }
     }
 
-    var route: AgentRoute {
-        AgentRouting.route(
-            model: model,
-            credentials: credentials,
-            hasHostedCredits: AccountService.shared.isSignedIn && AccountService.shared.hasCredits,
-            hasPaidPlan: AccountService.shared.isPaid
-        )
-    }
-
     var usesCLIAgent: Bool { model.isCLIAgent }
 
-    var canStream: Bool {
-        route != .unavailable
-    }
+    var canStream: Bool { credentials.hasKey(for: model) }
 
-    var availableModels: [AgentModel] { AgentModel.allCases }
+    var availableModels: [AgentModel] { AgentModelCatalog.shared.models }
 
     func canSelectModel(_ candidate: AgentModel) -> Bool {
-        !candidate.requiresPaidHostedPlan
-            || AccountService.shared.isPaid
-            || !credentials[candidate.provider].isEmpty
+        credentials.hasKey(for: candidate)
     }
 
-    var activeBYOKProvider: AgentProvider? {
-        !model.isCLIAgent && route == .direct ? model.provider : nil
-    }
+    var activeProvider: AgentProvider? { model.provider }
 
     var reasoningEffort: AgentReasoningEffort {
-        get { reasoningEfforts[model, default: .medium] }
+        get {
+            if let stored = reasoningEfforts[model.rawValue] { return stored }
+            let stored = AgentReasoningPreferences.effort(for: model, defaults: userDefaults)
+            // A model that reports no reasoning support must not send an effort it rejects.
+            let effort = model.supportedReasoningEfforts.contains(stored)
+                ? stored
+                : (model.supportedReasoningEfforts.first ?? .medium)
+            reasoningEfforts[model.rawValue] = effort
+            return effort
+        }
         set {
             guard model.supportedReasoningEfforts.contains(newValue) else { return }
-            reasoningEfforts[model] = newValue
+            reasoningEfforts[model.rawValue] = newValue
             AgentReasoningPreferences.set(newValue, for: model, defaults: userDefaults)
         }
     }
@@ -88,28 +80,16 @@ final class AgentService {
         let credentials = await AgentCredentialSnapshot.loadFromKeychain()
         self.credentials = credentials
 
-        switch AgentRouting.route(
-            model: settings.model,
-            credentials: credentials,
-            hasHostedCredits: AccountService.shared.isSignedIn && AccountService.shared.hasCredits,
-            hasPaidPlan: AccountService.shared.isPaid
-        ) {
-        case .direct:
-            return BYOKClient(
-                apiKey: credentials[settings.model.provider],
-                settings: settings
-            )
-        case .hosted:
-            return PalmierClient(settings: settings)
-        case .unavailable:
-            return nil
-        }
+        guard let provider = settings.model.provider else { return nil }
+        let apiKey = credentials[provider]
+        guard !apiKey.isEmpty else { return nil }
+        return ChatCompletionsClient(provider: provider, apiKey: apiKey, settings: settings)
     }
 
     var model: AgentModel {
         didSet {
             userDefaults.set(model.rawValue, forKey: "agentModel")
-            if case .unavailable = route {
+            if !canStream {
                 streamError = .unavailable(model)
             } else if case .some(.unavailable) = streamError {
                 streamError = nil
@@ -271,7 +251,6 @@ final class AgentService {
         draft = ""
         mentions.removeAll()
         streamError = nil
-        toolExecutor?.resetFeedbackState()
 
         sessionLoadGeneration &+= 1
         guard let projectURL else {
@@ -310,7 +289,6 @@ final class AgentService {
         currentSessionId = session.id
         messages = []
         streamError = nil
-        toolExecutor?.resetFeedbackState()
         onSessionsChanged?()
     }
 
@@ -389,11 +367,7 @@ final class AgentService {
             mentions: referencedMentions, contextHint: contextHint
         ))
         streamError = nil
-        kickOffStream(
-            conversationID: conversationID,
-            traceID: UUID(),
-            settings: runSettings
-        )
+        kickOffStream(conversationID: conversationID, settings: runSettings)
     }
 
     func postSystemNotice(_ text: String) {
@@ -408,11 +382,7 @@ final class AgentService {
         isStreaming = false
     }
 
-    private func kickOffStream(
-        conversationID: UUID,
-        traceID: UUID,
-        settings: AgentRunSettings
-    ) {
+    private func kickOffStream(conversationID: UUID, settings: AgentRunSettings) {
         currentTask?.cancel()
         isStreaming = true
         currentTask = Task { [weak self] in
@@ -421,19 +391,11 @@ final class AgentService {
                 self?.syncMessagesIntoCurrentSession()
                 self?.onSessionsChanged?()
             }
-            await self?.runLoop(
-                conversationID: conversationID,
-                traceID: traceID,
-                settings: settings
-            )
+            await self?.runLoop(conversationID: conversationID, settings: settings)
         }
     }
 
-    private func runLoop(
-        conversationID: UUID,
-        traceID: UUID,
-        settings: AgentRunSettings
-    ) async {
+    private func runLoop(conversationID: UUID, settings: AgentRunSettings) async {
         let chosenModel = settings.model
         if chosenModel.isCLIAgent {
             await runCLITurn(settings: settings)
@@ -454,10 +416,6 @@ final class AgentService {
         loop: while !Task.isCancelled {
             resolveOrphanToolUses()
             let apiMsgs = await apiMessages()
-            guard let inputMessageID = messages.last(where: { $0.role == .user })?.id else {
-                streamError = .upstream("The agent request has no user message.")
-                break loop
-            }
             let assistant = AgentMessage(role: .assistant, blocks: [])
             messages.append(assistant)
             let assistantID = assistant.id
@@ -466,21 +424,10 @@ final class AgentService {
                 let stream = client.stream(
                     system: AgentInstructions.serverInstructions + AgentInstructions.skillsSection(SkillStore.shared.skillIndex),
                     tools: tools,
-                    messages: apiMsgs,
-                    context: AgentRequestContext(
-                        conversationID: conversationID,
-                        traceID: traceID,
-                        spanID: UUID(),
-                        inputMessageID: inputMessageID,
-                        outputMessageID: assistantID,
-                        projectID: editor?.projectId
-                    )
+                    messages: apiMsgs
                 )
 
-                let finalSnapshot = try await presentAgentStream(
-                    stream,
-                    model: chosenModel
-                ) { [weak self] snapshot in
+                let finalSnapshot = try await presentAgentStream(stream) { [weak self] snapshot in
                     await self?.applyStreamSnapshot(
                         snapshot,
                         assistantID: assistantID,
@@ -597,7 +544,7 @@ final class AgentService {
                 appendTextDelta(text, toAssistant: id)
             case .toolUse(let toolId, let name, let inputJSON):
                 appendToolUse(id: toolId, name: name, inputJSON: inputJSON, toAssistant: id)
-            case .thinking, .redactedThinking, .openAIReasoning:
+            case .thinking:
                 if let index = assistantMessageIndex(id: id) {
                     messages[index].blocks.append(block)
                 }
@@ -669,12 +616,8 @@ final class AgentService {
 
     private static func isComplete(_ block: AgentContentBlock) -> Bool {
         switch block {
-        case .thinking(_, let signature):
-            !signature.isEmpty
-        case .redactedThinking(let data):
-            !data.isEmpty
-        case .openAIReasoning(_, let encryptedContent, _, _):
-            !encryptedContent.isEmpty
+        case .thinking(let text):
+            !text.isEmpty
         case .text(let text):
             !text.isEmpty
         case .toolUse, .toolResult:
@@ -866,43 +809,23 @@ struct AgentMessage: Identifiable, Codable {
 }
 
 enum AgentContentBlock: Codable, Sendable {
-    case thinking(text: String, signature: String)
-    case redactedThinking(data: String)
-    case openAIReasoning(
-        summary: String,
-        encryptedContent: String,
-        itemID: String?,
-        model: AgentModel
-    )
+    case thinking(text: String)
     case text(String)
     case toolUse(id: String, name: String, inputJSON: String)
     case toolResult(toolUseId: String, content: [ToolResult.Block], isError: Bool)
 
     private enum Kind: String, Codable {
-        case thinking, redactedThinking, openAIReasoning, text, toolUse, toolResult
+        case thinking, text, toolUse, toolResult
     }
     private enum CodingKeys: String, CodingKey {
-        case kind, text, signature, data, id, name, input, toolUseId, content, isError
-        case summary, encryptedContent, itemID, model
+        case kind, text, id, name, input, toolUseId, content, isError
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         switch try c.decode(Kind.self, forKey: .kind) {
         case .thinking:
-            self = .thinking(
-                text: try c.decode(String.self, forKey: .text),
-                signature: try c.decode(String.self, forKey: .signature)
-            )
-        case .redactedThinking:
-            self = .redactedThinking(data: try c.decode(String.self, forKey: .data))
-        case .openAIReasoning:
-            self = .openAIReasoning(
-                summary: try c.decode(String.self, forKey: .summary),
-                encryptedContent: try c.decode(String.self, forKey: .encryptedContent),
-                itemID: try c.decodeIfPresent(String.self, forKey: .itemID),
-                model: try c.decode(AgentModel.self, forKey: .model)
-            )
+            self = .thinking(text: try c.decode(String.self, forKey: .text))
         case .text:
             self = .text(try c.decode(String.self, forKey: .text))
         case .toolUse:
@@ -923,19 +846,9 @@ enum AgentContentBlock: Codable, Sendable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .thinking(let text, let signature):
+        case .thinking(let text):
             try c.encode(Kind.thinking, forKey: .kind)
             try c.encode(text, forKey: .text)
-            try c.encode(signature, forKey: .signature)
-        case .redactedThinking(let data):
-            try c.encode(Kind.redactedThinking, forKey: .kind)
-            try c.encode(data, forKey: .data)
-        case .openAIReasoning(let summary, let encryptedContent, let itemID, let model):
-            try c.encode(Kind.openAIReasoning, forKey: .kind)
-            try c.encode(summary, forKey: .summary)
-            try c.encode(encryptedContent, forKey: .encryptedContent)
-            try c.encodeIfPresent(itemID, forKey: .itemID)
-            try c.encode(model, forKey: .model)
         case .text(let s):
             try c.encode(Kind.text, forKey: .kind)
             try c.encode(s, forKey: .text)

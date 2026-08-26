@@ -2,7 +2,7 @@ import Foundation
 
 extension EditorViewModel {
     var aiEditAllowed: Bool {
-        AccountService.shared.aiAllowed || OwnKeyGeneration.keyConfigured
+        OwnKeyGeneration.keyConfigured
     }
 
     func aiEditActions(clipId: String) -> [EditAction] {

@@ -9,36 +9,8 @@ enum EditAction {
     case generateMusic
     case generateSFX
     case createVideo
-    case enhanceDraft
 
     static let editMaxDurationSeconds: Double = 10.0
-
-    var requiresPaidPlan: Bool {
-        switch self {
-        case .upscale, .edit, .lipSync, .reframe: true
-        case .generateMusic, .generateSFX, .rerun, .createVideo, .enhanceDraft: false
-        }
-    }
-
-    @MainActor
-    func paidBlocked(for mediaType: ClipType) -> Bool {
-        guard requiresPaidPlan, !AccountService.shared.isPaid else { return false }
-        switch self {
-        case .upscale:
-            return UpscaleModelConfig.models(for: mediaType).first?.paidOnly ?? true
-        case .edit:
-            let model = mediaType == .image
-                ? ImageModelConfig.imageEdit?.paidOnly
-                : VideoModelConfig.edit?.paidOnly
-            return model ?? true
-        case .lipSync:
-            return VideoModelConfig.lipSync?.paidOnly ?? true
-        case .reframe:
-            return VideoModelConfig.reframe?.paidOnly ?? true
-        case .generateMusic, .generateSFX, .rerun, .createVideo, .enhanceDraft:
-            return false
-        }
-    }
 
     func group(for mediaType: ClipType) -> AIEditActionGroup {
         switch self {
@@ -46,7 +18,7 @@ enum EditAction {
             .audio
         case .rerun where mediaType == .audio:
             .audio
-        case .upscale, .edit, .rerun, .lipSync, .reframe, .createVideo, .enhanceDraft:
+        case .upscale, .edit, .rerun, .lipSync, .reframe, .createVideo:
             .enhance
         }
     }
@@ -58,7 +30,7 @@ enum EditAction {
         case .image: candidates = [.upscale, .edit, .rerun, .createVideo]
         case .video:
             candidates = [
-                .upscale, .edit, .rerun, .lipSync, .reframe, .enhanceDraft,
+                .upscale, .edit, .rerun, .lipSync, .reframe,
                 .generateMusic, .generateSFX,
             ]
         case .audio, .text: candidates = [.upscale, .edit, .rerun]
@@ -72,12 +44,6 @@ enum EditAction {
     @MainActor
     func availability(for asset: MediaAsset, effectiveDurationOverride: Double? = nil) -> EditActionAvailability {
         switch self {
-        case .enhanceDraft:
-            guard asset.canEnhanceDraft else {
-                return .disabled(reason: L10n.string("Draft already enhanced or cache unavailable"))
-            }
-            return .available
-
         case .upscale:
             guard asset.type == .video || asset.type == .image else {
                 return .disabled(reason: L10n.string("Upscale only works on video or images"))

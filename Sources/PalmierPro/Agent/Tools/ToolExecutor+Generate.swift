@@ -2,18 +2,6 @@ import AVFoundation
 import Foundation
 
 extension ToolExecutor {
-    private var canUsePaidModels: Bool { AccountService.shared.isPaid }
-    private func modelAvailable(paidOnly: Bool) -> Bool { canUsePaidModels || !paidOnly }
-
-    private func requirePlan(for modelId: String, paidOnly: Bool) throws {
-        if paidOnly && !canUsePaidModels {
-            throw ToolError(
-                "Model '\(modelId)' requires a paid plan. Pick a free model from list_models, "
-                + "or tell the user to subscribe."
-            )
-        }
-    }
-
     private func draftMode(_ args: [String: Any], model: VideoModelConfig) throws -> Bool {
         let draft = args.bool("draft") ?? false
         if draft && !model.supportsDraft {
@@ -22,31 +10,18 @@ extension ToolExecutor {
         return draft
     }
 
-    private func defaultModelId(_ ids: [(id: String, paidOnly: Bool)], kind: String) throws -> String {
-        guard !ids.isEmpty else {
-            throw ToolError("Model catalog not loaded yet. Try again in a moment.")
+    private func defaultModelId(_ ids: [String], kind: String) throws -> String {
+        guard let first = ids.first else {
+            throw ToolError("No \(kind) model is available. Tell the user to add an API key in Settings.")
         }
-        guard let match = ids.first(where: { modelAvailable(paidOnly: $0.paidOnly) }) else {
-            throw ToolError("No \(kind) model is available on the current plan. Tell the user to subscribe.")
-        }
-        return match.id
+        return first
     }
 
-    /// Own-key models bill the user's provider account, so the Palmier plan and credits don't apply.
-    func requireGenerationAccess(modelId: String, paidOnly: Bool) throws {
-        if OwnKeyGeneration.handles(modelId) {
-            guard providerKeyPresent(for: modelId) else {
-                throw ToolError("Model '\(modelId)' runs on the user's own API key. Tell them to add it in Settings.")
-            }
-            return
+    /// Every model runs on the user's own provider key.
+    func requireGenerationAccess(modelId: String) throws {
+        guard providerKeyPresent(for: modelId) else {
+            throw ToolError("Model '\(modelId)' runs on the user's own API key. Tell them to add it in Settings.")
         }
-        guard AccountService.shared.isSignedIn else {
-            throw ToolError("Generation requires signing in to Palmier. Tell the user to sign in.")
-        }
-        guard AccountService.shared.hasCredits else {
-            throw ToolError("Out of credits. Tell the user to add credits or subscribe to keep generating.")
-        }
-        try requirePlan(for: modelId, paidOnly: paidOnly)
     }
 
     private func providerKeyPresent(for modelId: String) -> Bool {
@@ -65,22 +40,12 @@ extension ToolExecutor {
         case .adjustment:
             throw ToolError("Adjustment layers carry no media. Use add_adjustment_layers.")
         case .video:
-            if let mediaRef = args.string("enhanceDraftMediaRef") {
-                let draft = try asset(mediaRef, editor: editor, label: "Draft")
-                guard let placeholderId = editor.generationService.enhanceDraft(
-                    asset: draft,
-                    editor: editor
-                ) else {
-                    throw ToolError("Asset '\(mediaRef)' is not a completed enhanceable draft.")
-                }
-                return .ok("Draft enhancement started. Placeholder asset ID: \(placeholderId)")
-            }
             let modelId = try args.string("model") ?? defaultModelId(
-                VideoModelConfig.allModels.map { (id: $0.id, paidOnly: $0.paidOnly) }, kind: "video")
+                VideoModelConfig.allModels.map(\.id), kind: "video")
             guard let model = VideoModelConfig.allModels.first(where: { $0.id == modelId }) else {
                 throw ToolError("Unknown model '\(modelId)'. Available: \(VideoModelConfig.allModels.map(\.id).joined(separator: ", "))")
             }
-            try requireGenerationAccess(modelId: model.id, paidOnly: model.paidOnly)
+            try requireGenerationAccess(modelId: model.id)
             let hasSourceVideo = args.string("sourceVideoMediaRef") != nil
             if hasSourceVideo && !model.supportsSourceVideo {
                 throw ToolError("Model '\(model.id)' does not accept a source video.")
@@ -278,11 +243,11 @@ extension ToolExecutor {
     ) throws -> ToolResult {
         guard !prompt.isEmpty else { throw ToolError("Empty prompt") }
         let modelId = try args.string("model") ?? defaultModelId(
-            ImageModelConfig.allModels.map { (id: $0.id, paidOnly: $0.paidOnly) }, kind: "image")
+            ImageModelConfig.allModels.map(\.id), kind: "image")
         guard let model = ImageModelConfig.allModels.first(where: { $0.id == modelId }) else {
             throw ToolError("Unknown model '\(modelId)'. Available: \(ImageModelConfig.allModels.map(\.id).joined(separator: ", "))")
         }
-        try requireGenerationAccess(modelId: model.id, paidOnly: model.paidOnly)
+        try requireGenerationAccess(modelId: model.id)
         let aspectRatio = args.string("aspectRatio") ?? model.aspectRatios.first ?? ""
         let resolution = args.string("resolution") ?? model.resolutions?.first
         let quality = args.string("quality") ?? model.qualities?.last
@@ -322,12 +287,12 @@ extension ToolExecutor {
 
     func generateAudio(_ editor: EditorViewModel, _ args: [String: Any]) async throws -> ToolResult {
         let modelId = try args.string("model") ?? defaultModelId(
-            AudioModelConfig.allModels.map { (id: $0.id, paidOnly: $0.paidOnly) }, kind: "audio")
+            AudioModelConfig.allModels.map(\.id), kind: "audio")
         guard let model = AudioModelConfig.allModels.first(where: { $0.id == modelId }) else {
             throw ToolError("Unknown model '\(modelId)'. Available: \(AudioModelConfig.allModels.map(\.id).joined(separator: ", "))")
         }
         let usesOwnKey = OwnKeyGeneration.handles(model.id)
-        try requireGenerationAccess(modelId: model.id, paidOnly: model.paidOnly)
+        try requireGenerationAccess(modelId: model.id)
 
         let prompt = (args.string("prompt") ?? "").trimmingCharacters(in: .whitespaces)
         let inputAssets = AudioGenerationSubmission.InputAssets(
@@ -364,31 +329,8 @@ extension ToolExecutor {
             }
             sourceAsset = candidate
             spanSeconds = candidate.duration
-        } else if let start = args.int("videoSourceStartFrame"), let end = args.int("videoSourceEndFrame") {
-            guard acceptsVideo else {
-                throw ToolError("Model '\(model.id)' does not accept a video input (see list_models 'inputs').")
-            }
-            guard !model.usesSourceURL, !usesOwnKey else {
-                throw ToolError("Use sourceMediaRef for \(model.displayName).")
-            }
-            guard start >= 0, end > start else {
-                throw ToolError("videoSourceEndFrame must be greater than videoSourceStartFrame (>= 0).")
-            }
-            if let err = model.validate(spanSeconds: Double(end - start) / Double(max(1, editor.timeline.fps))) {
-                throw ToolError(err)
-            }
-            let mp4 = try await TimelineRenderer.render(
-                timeline: editor.timeline, resolver: editor.mediaResolver,
-                resolveTimeline: editor.timelineResolver(),
-                missingMediaRefs: editor.missingMediaRefs,
-                startFrame: start, frameCount: end - start,
-                shortSide: 240, includeAudio: false,
-                preset: AVAssetExportPresetLowQuality
-            )
-            defer { try? FileManager.default.removeItem(at: mp4) }
-            videoURL = try await GenerationBackend.uploadReference(fileURL: mp4, contentType: "video/mp4")
-            spanSeconds = Double(end - start) / Double(max(1, editor.timeline.fps))
-            placementStartFrame = start
+        } else if args.int("videoSourceStartFrame") != nil || args.int("videoSourceEndFrame") != nil {
+            throw ToolError("Timeline spans are not supported as audio source. Use sourceMediaRef.")
         }
 
         if model.acceptsSourceMedia && !model.inputs.contains(.text)
@@ -502,13 +444,6 @@ extension ToolExecutor {
         guard asset.type != .video || asset.sourceFPS != nil else {
             throw ToolError("Source FPS is not available yet. Poll get_media until the asset is ready.")
         }
-        guard AccountService.shared.isSignedIn else {
-            throw ToolError("Upscale requires signing in to Palmier. Tell the user to sign in.")
-        }
-        guard AccountService.shared.hasCredits else {
-            throw ToolError("Out of credits. Tell the user to add credits or subscribe to keep generating.")
-        }
-
         let available = UpscaleModelConfig.models(for: asset.type)
         let model: UpscaleModelConfig
         if let requested = args.string("model") {
@@ -516,16 +451,13 @@ extension ToolExecutor {
                 let ids = available.map(\.id).joined(separator: ", ")
                 throw ToolError("Model '\(requested)' does not support \(asset.type.rawValue). Available: \(ids)")
             }
-            try requirePlan(for: match.id, paidOnly: match.paidOnly)
             guard match.supports(source: asset) else {
                 throw ToolError("Model '\(requested)' is not compatible with this source's resolution or frame rate.")
             }
             model = match
         } else {
-            guard let first = available.first(where: {
-                modelAvailable(paidOnly: $0.paidOnly) && $0.supports(source: asset)
-            }) else {
-                throw ToolError("No compatible upscaler is available for this \(asset.type.rawValue) on the current plan.")
+            guard let first = available.first(where: { $0.supports(source: asset) }) else {
+                throw ToolError("No compatible upscaler is available for this \(asset.type.rawValue).")
             }
             model = first
         }
@@ -611,22 +543,18 @@ extension ToolExecutor {
         var out: [[String: Any]] = []
         if filter == nil || filter == "video" {
             out += VideoModelConfig.allModels
-                .filter { modelAvailable(paidOnly: $0.paidOnly) }
                 .map { Self.videoModelInfo($0, includeType: true) }
         }
         if filter == nil || filter == "image" {
             out += ImageModelConfig.allModels
-                .filter { modelAvailable(paidOnly: $0.paidOnly) }
                 .map { Self.imageModelInfo($0, includeType: true) }
         }
         if filter == nil || filter == "audio" {
             out += AudioModelConfig.allModels
-                .filter { modelAvailable(paidOnly: $0.paidOnly) }
                 .map { Self.audioModelInfo($0) }
         }
         if filter == nil || filter == "upscale" {
             out += UpscaleModelConfig.allModels
-                .filter { modelAvailable(paidOnly: $0.paidOnly) }
                 .map { Self.upscaleModelInfo($0) }
         }
         let body: [String: Any] = [

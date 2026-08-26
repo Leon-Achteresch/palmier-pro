@@ -65,44 +65,20 @@ struct HomeView: View {
 }
 
 private struct WelcomeTitle: View {
-    @Bindable private var account = AccountService.shared
-
     var body: some View {
-        Text(title)
+        Text(L10n.string("Welcome to Palmier Pro"))
             .font(.system(size: AppTheme.FontSize.title2, weight: .light))
             .tracking(AppTheme.Tracking.tight)
             .foregroundStyle(AppTheme.Text.primaryColor)
     }
-
-    private var title: String {
-        if let first = account.account?.user.firstName {
-            return L10n.string("Welcome to Palmier Pro, \(first)")
-        }
-        return L10n.string("Welcome to Palmier Pro")
-    }
 }
 
 private struct HomeSidebar: View {
-    @Bindable private var account = AccountService.shared
     @Bindable private var updater = Updater.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if account.isSignedIn {
-                IdentityStrip()
-            }
-
             VStack(alignment: .leading, spacing: 2) {
-                if !account.isSignedIn && !account.isMisconfigured {
-                    SidebarRowButton(
-                        label: account.isSigningIn
-                            ? L10n.string("Opening Google…")
-                            : L10n.string("Sign in with Google"),
-                        systemImage: "person.crop.circle",
-                        action: { Task { await account.signInWithGoogle() } }
-                    )
-                    .disabled(account.isSigningIn)
-                }
                 SidebarRowButton(
                     label: L10n.string("New Project"),
                     systemImage: "plus",

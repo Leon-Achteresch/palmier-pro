@@ -48,10 +48,7 @@ enum AudioTransformEditKind: CaseIterable, Equatable {
 
     @MainActor
     var model: AudioModelConfig? {
-        preferUsableModel(
-            AudioModelConfig.allModels.filter { $0.category == category },
-            paidOnly: \.paidOnly
-        )
+        AudioModelConfig.allModels.first { $0.category == category }
     }
 
     @MainActor

@@ -6,7 +6,6 @@ struct AIEditTab: View {
     let clipId: String?
     let usesOwnScrollView: Bool
     @Environment(EditorViewModel.self) private var editor
-    @Bindable private var account = AccountService.shared
     @Bindable private var openRouter = OpenRouterService.shared
     @Bindable private var elevenLabs = ElevenLabsService.shared
     @State private var replaceClipSource: Bool = false
@@ -138,15 +137,6 @@ struct AIEditTab: View {
                     description: L10n.string("Use as first frame or reference")
                 )
             }
-            if asset.canEnhanceDraft {
-                actionTile(
-                    action: .enhanceDraft,
-                    icon: "arrow.up.right.video",
-                    title: L10n.string("FLUX Enhance"),
-                    description: L10n.string("Re-render the same motion at full quality in 1080p"),
-                    detail: asset.draftEnhancementCost.map { "\($0) credits" }
-                )
-            }
         }
     }
 
@@ -262,10 +252,8 @@ struct AIEditTab: View {
             for: asset,
             effectiveDurationOverride: effectiveDurationForAvailability
         )
-        let paidBlocked = action.paidBlocked(for: asset.type)
-        let isEnabled = availability.isAvailable && !paidBlocked && aiDisabledReason == nil
-        let disabledReason = aiDisabledReason
-            ?? (paidBlocked ? L10n.string("Requires a paid plan") : availability.reason)
+        let isEnabled = availability.isAvailable && aiDisabledReason == nil
+        let disabledReason = aiDisabledReason ?? availability.reason
 
         switch action {
         case .createVideo:
@@ -287,7 +275,7 @@ struct AIEditTab: View {
                     createVideoOptions
                 }
             }
-        case .enhanceDraft, .upscale, .lipSync, .reframe, .edit,
+        case .upscale, .lipSync, .reframe, .edit,
              .generateMusic, .generateSFX, .rerun:
             actionTileSurface(
                 description: description,
@@ -320,10 +308,8 @@ struct AIEditTab: View {
             for: asset,
             effectiveDurationOverride: effectiveDurationForAvailability
         )
-        let paidBlocked = kind.model?.paidOnly == true && !account.isPaid
-        let isEnabled = availability.isAvailable && !paidBlocked && aiDisabledReason == nil
-        let disabledReason = aiDisabledReason
-            ?? (paidBlocked ? L10n.string("Requires a paid plan") : availability.reason)
+        let isEnabled = availability.isAvailable && aiDisabledReason == nil
+        let disabledReason = aiDisabledReason ?? availability.reason
 
         return actionTileSurface(
             description: L10n.string(key: kind.description),
@@ -448,8 +434,6 @@ struct AIEditTab: View {
 
     private func present(_ action: EditAction) {
         switch action {
-        case .enhanceDraft:
-            editor.generationService.enhanceDraft(asset: asset, editor: editor)
         case .upscale:
             guard let model = UpscaleModelConfig.models(for: asset.type).first else { return }
             let trim = trimmedSourceIfEnabled()
@@ -517,10 +501,9 @@ struct AIEditTab: View {
     private var shouldReplace: Bool { replaceClipSource && clipId != nil }
 
     private var aiDisabledReason: String? {
-        if account.aiAllowed || openRouter.hasKey || elevenLabs.hasKey { return nil }
-        if account.isMisconfigured { return L10n.string("Add an OpenRouter API key in Settings › Agent") }
-        if !account.isSignedIn { return L10n.string("Sign in to use AI") }
-        return nil
+        OwnKeyGeneration.keyConfigured
+            ? nil
+            : L10n.string("Add an OpenRouter or Google AI API key in Settings › Agent")
     }
 
 }

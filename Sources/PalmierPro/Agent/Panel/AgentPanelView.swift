@@ -191,15 +191,34 @@ struct AgentPanelView: View {
         }
     }
 
+    private struct ModelGroup: Identifiable {
+        let id: String
+        let models: [AgentModel]
+    }
+
+    private var modelGroups: [ModelGroup] {
+        let grouped = Dictionary(grouping: service.availableModels.filter { !$0.isCLIAgent }) { model in
+            model.provider == .google
+                ? "Google AI"
+                : model.providerModelId.split(separator: "/").first.map(String.init) ?? "OpenRouter"
+        }
+        return grouped
+            .map { ModelGroup(id: $0.key, models: $0.value) }
+            .sorted { $0.id.localizedCaseInsensitiveCompare($1.id) == .orderedAscending }
+    }
+
     private var modelPicker: some View {
         Menu {
-            ForEach(service.availableModels, id: \.self) { model in
-                Button {
-                    service.model = model
-                } label: {
-                    Text(verbatim: model.displayName)
+            ForEach(AgentModel.cliModels) { model in
+                Button { service.model = model } label: { Text(verbatim: model.displayName) }
+            }
+            Divider()
+            ForEach(modelGroups) { group in
+                Menu(group.id) {
+                    ForEach(group.models) { model in
+                        Button { service.model = model } label: { Text(verbatim: model.displayName) }
+                    }
                 }
-                .disabled(!service.canSelectModel(model))
             }
         } label: {
             footerPickerLabel(service.model.displayName) {
@@ -209,12 +228,10 @@ struct AgentPanelView: View {
                         .foregroundStyle(AppTheme.Text.tertiaryColor)
                         .accessibilityHidden(true)
                 } else {
-                    switch service.model.provider {
-                    case .anthropic:
-                        ExternalAgentLogo(agent: .claude, size: AppTheme.IconSize.xs)
-                    case .openAI:
-                        ProviderLogo(iconKey: "openai", size: AppTheme.IconSize.xs)
-                    }
+                    Image(systemName: "sparkles")
+                        .font(.system(size: AppTheme.FontSize.xxs, weight: AppTheme.FontWeight.medium))
+                        .foregroundStyle(AppTheme.Text.tertiaryColor)
+                        .accessibilityHidden(true)
                 }
             }
         }
@@ -285,7 +302,7 @@ struct AgentPanelView: View {
 
     @ViewBuilder
     private var byokIndicator: some View {
-        if let provider = service.activeBYOKProvider {
+        if let provider = service.activeProvider {
             Image(systemName: "key")
                 .font(.system(size: AppTheme.FontSize.xs))
                 .foregroundStyle(AppTheme.Text.tertiaryColor)
@@ -409,18 +426,6 @@ struct AgentPanelView: View {
     private func errorCTA(for error: AgentServiceError?) -> ErrorCTA? {
         guard let error else { return nil }
         switch error {
-        case .unauthenticated:
-            return ErrorCTA(title: L10n.string("Sign in")) {
-                SettingsWindowController.shared.show(tab: .account)
-            }
-        case .insufficientCredits:
-            return ErrorCTA(title: L10n.string("View plans")) {
-                SettingsWindowController.shared.show(tab: .account)
-            }
-        case .unavailable(let model) where model.requiresPaidHostedPlan && !AccountService.shared.isPaid:
-            return ErrorCTA(title: L10n.string("View plans")) {
-                SettingsWindowController.shared.show(tab: .account)
-            }
         case .unavailable:
             return ErrorCTA(title: L10n.string("Open Settings")) {
                 SettingsWindowController.shared.show(tab: .agent)
@@ -432,16 +437,11 @@ struct AgentPanelView: View {
 
     private func errorMessage(_ error: AgentServiceError) -> String {
         switch error {
-        case .unauthenticated:
-            L10n.string("Sign in to use AI chat.")
-        case .insufficientCredits(let message), .upstream(let message):
+        case .upstream(let message):
             message
         case .unavailable(let model):
-            if model.requiresPaidHostedPlan && !AccountService.shared.isPaid {
-                L10n.string("Subscribe or add your own API key to use this model.")
-            } else {
-                model.provider.chatPresentation.unavailableMessage
-            }
+            model.provider?.chatPresentation.unavailableMessage
+                ?? L10n.string("This agent is not available.")
         case .refusal:
             L10n.string("The selected model refused this request. Revise the prompt and try again.")
         }
@@ -471,63 +471,21 @@ struct AgentPanelView: View {
         }
     }
 
-    @ViewBuilder
     private var missingKeyState: some View {
-        let account = AccountService.shared
         VStack(spacing: AppTheme.Spacing.mdLg) {
-            Button {
-                missingKeyPrimaryAction(account: account)
-            } label: {
-                HStack(spacing: AppTheme.Spacing.sm) {
-                    if let icon = missingKeyPrimaryIcon(account: account) {
-                        Image(systemName: icon)
-                    }
-                    Text(missingKeyPrimaryLabel(account: account))
-                }
-                    .font(.system(size: AppTheme.FontSize.mdLg, weight: .semibold))
-            }
-            .buttonStyle(.capsule(.prominent, size: .regular))
-
-            if !account.isSignedIn {
-                Text(L10n.string("First-time sign-ups only"))
-                    .font(.system(size: AppTheme.FontSize.sm))
-                    .foregroundStyle(AppTheme.Text.mutedColor)
-            }
+            Text(L10n.string("Add an OpenRouter or Google AI API key to use AI chat."))
+                .font(.system(size: AppTheme.FontSize.smMd))
+                .foregroundStyle(AppTheme.Text.secondaryColor)
+                .multilineTextAlignment(.center)
 
             Button(action: { SettingsWindowController.shared.show(tab: .agent) }) {
-                Text(missingKeyLinkLabel)
-                    .underline()
-                    .foregroundStyle(AppTheme.Text.secondaryColor)
-                    .padding(.horizontal, AppTheme.Spacing.sm)
-                    .padding(.vertical, AppTheme.Spacing.xxs)
+                HStack(spacing: AppTheme.Spacing.sm) {
+                    Image(systemName: "gearshape")
+                    Text(L10n.string("Open Settings"))
+                }
+                .font(.system(size: AppTheme.FontSize.mdLg, weight: .semibold))
             }
-            .buttonStyle(.plain)
-            .font(.system(size: AppTheme.FontSize.smMd, weight: .medium))
-            .hoverHighlight(cornerRadius: AppTheme.Radius.sm)
-        }
-    }
-
-    private var missingKeyLinkLabel: String {
-        service.model.provider.chatPresentation.missingKeyLinkTitle
-    }
-
-    private func missingKeyPrimaryLabel(account: AccountService) -> String {
-        if !account.isSignedIn { return L10n.string("Log in for 250 free credits") }
-        if !account.isPaid { return L10n.string("Subscribe") }
-        return L10n.string("Open Settings")
-    }
-
-    private func missingKeyPrimaryIcon(account: AccountService) -> String? {
-        if !account.isSignedIn { return "gift.fill" }
-        if !account.isPaid { return nil }
-        return "gearshape"
-    }
-
-    private func missingKeyPrimaryAction(account: AccountService) {
-        if !account.isSignedIn {
-            Task { await account.signInWithGoogle() }
-        } else {
-            SettingsWindowController.shared.show(tab: .account)
+            .buttonStyle(.capsule(.prominent, size: .regular))
         }
     }
 
@@ -681,24 +639,19 @@ private struct PanelTab: View {
 
 @MainActor
 private extension AgentProvider {
-    var chatPresentation: (
-        byokLabel: String, byokHelp: String,
-        unavailableMessage: String, missingKeyLinkTitle: String
-    ) {
+    var chatPresentation: (byokLabel: String, byokHelp: String, unavailableMessage: String) {
         switch self {
-        case .anthropic:
+        case .openRouter:
             (
-                L10n.string("using Anthropic API key"),
-                L10n.string("Streaming through your Anthropic API key (BYOK)"),
-                L10n.string("Add an Anthropic API key or credits to use this model."),
-                L10n.string("or add your own Anthropic key")
+                L10n.string("using OpenRouter API key"),
+                L10n.string("Streaming through your OpenRouter API key"),
+                L10n.string("Add an OpenRouter API key in Settings › Agent to use this model.")
             )
-        case .openAI:
+        case .google:
             (
-                L10n.string("using OpenAI API key"),
-                L10n.string("Streaming through your OpenAI API key (BYOK)"),
-                L10n.string("Add an OpenAI API key or credits to use this model."),
-                L10n.string("or add your own OpenAI key")
+                L10n.string("using Google AI API key"),
+                L10n.string("Streaming through your Google AI API key"),
+                L10n.string("Add a Google AI API key in Settings › Agent to use this model.")
             )
         }
     }

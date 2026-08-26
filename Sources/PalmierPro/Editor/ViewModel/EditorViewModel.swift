@@ -225,6 +225,8 @@ final class EditorViewModel {
     var agentActivity = AgentActivityHighlight()
     @ObservationIgnored var agentActivityClearTask: Task<Void, Never>?
     var cropEditingActive: Bool = false
+    var sketchingMarkerId: String?
+    var sketchArrowTool: Bool = true
     var chromaKeySamplingClipId: String?
     /// Two-up in/out frames shown in the viewer while a slip drag is active.
     var slipPreview: SlipPreviewState?

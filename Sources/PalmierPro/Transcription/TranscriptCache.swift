@@ -82,34 +82,6 @@ actor TranscriptCache {
         )
     }
 
-    func cachedCloudTranscript(
-        for url: URL,
-        range: ClosedRange<Double>?,
-        language: String?
-    ) -> TranscriptionResult? {
-        guard let key = Self.key(for: url, variant: .cloud(range: range, language: language)) else { return nil }
-        return cached(key)
-    }
-
-    func hasCachedCloudTranscript(
-        for url: URL,
-        range: ClosedRange<Double>?,
-        language: String?
-    ) -> Bool {
-        guard let key = Self.key(for: url, variant: .cloud(range: range, language: language)) else { return false }
-        return memory[key] != nil || FileManager.default.fileExists(atPath: Self.diskURL(key).path)
-    }
-
-    func storeCloudTranscript(
-        _ result: TranscriptionResult,
-        for url: URL,
-        range: ClosedRange<Double>?,
-        language: String?
-    ) {
-        guard let key = Self.key(for: url, variant: .cloud(range: range, language: language)) else { return }
-        store(result, key: key)
-    }
-
     /// Drop in-memory entries so a disk clear isn't shadowed by the memory cache.
     func clearMemory() { memory.removeAll() }
 
@@ -138,28 +110,12 @@ actor TranscriptCache {
         directory.appendingPathComponent("\(key).json")
     }
 
-    private static func key(for url: URL, variant: CacheVariant = .local) -> String? {
+    private static func key(for url: URL) -> String? {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
               let size = (attrs[.size] as? NSNumber)?.int64Value,
               let mtime = attrs[.modificationDate] as? Date else { return nil }
-        let base = "\(url.path)|\(mtime.timeIntervalSince1970)|\(size)"
-        let identity = variant.prefix.map { "\($0)|\(base)" } ?? base
+        let identity = "\(url.path)|\(mtime.timeIntervalSince1970)|\(size)"
         return SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined().prefix(32).description
     }
 
-    private enum CacheVariant {
-        case local
-        case cloud(range: ClosedRange<Double>?, language: String?)
-
-        var prefix: String? {
-            switch self {
-            case .local:
-                return nil
-            case .cloud(let range, let language):
-                let lang = language ?? "auto"
-                guard let range else { return "cloud|\(lang)|full" }
-                return String(format: "cloud|%@|%.3f...%.3f", lang, range.lowerBound, range.upperBound)
-            }
-        }
-    }
 }

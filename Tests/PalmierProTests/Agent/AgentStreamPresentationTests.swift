@@ -9,7 +9,7 @@ struct AgentStreamPresentationTests {
         let chunks = Array(repeating: AgentStreamEvent.textDelta("x"), count: 1_951)
         let recorder = SnapshotRecorder()
 
-        let final = try await presentAgentStream(stream(chunks), model: .sonnet5) {
+        let final = try await presentAgentStream(stream(chunks)) {
             await recorder.append($0)
         }
 
@@ -20,27 +20,21 @@ struct AgentStreamPresentationTests {
     @Test func reducerPreservesBlockOrderAndStopReason() async throws {
         let final = try await presentAgentStream(stream([
             .thinkingDelta("Plan"),
-            .thinkingSignature("signed"),
-            .reasoningSummaryDelta("Checking"),
-            .reasoningComplete(itemID: "rs_1", summary: "", encryptedContent: "encrypted"),
+            .thinkingDelta("ning"),
             .textDelta("Done"),
             .toolUseComplete(id: "tool_1", name: "get_timeline", inputJSON: "{}"),
             .messageStop(stopReason: .toolUse),
-        ]), model: .sonnet5) { _ in }
+        ])) { _ in }
 
         #expect(final.stopReason == .toolUse)
-        #expect(final.blocks.count == 4)
-        guard case .thinking(let thinking, let signature) = final.blocks[0],
-              case .openAIReasoning(let summary, let encrypted, _, _) = final.blocks[1],
-              case .text(let text) = final.blocks[2],
-              case .toolUse(let id, let name, _) = final.blocks[3] else {
+        #expect(final.blocks.count == 3)
+        guard case .thinking(let thinking) = final.blocks[0],
+              case .text(let text) = final.blocks[1],
+              case .toolUse(let id, let name, _) = final.blocks[2] else {
             Issue.record("Unexpected final block order")
             return
         }
-        #expect(thinking == "Plan")
-        #expect(signature == "signed")
-        #expect(summary == "Checking")
-        #expect(encrypted == "encrypted")
+        #expect(thinking == "Planning")
         #expect(text == "Done")
         #expect(id == "tool_1")
         #expect(name == "get_timeline")
@@ -50,8 +44,7 @@ struct AgentStreamPresentationTests {
         let recorder = SnapshotRecorder()
         await #expect(throws: FixtureError.self) {
             try await presentAgentStream(
-                stream([.textDelta("partial")], error: FixtureError.failed),
-                model: .sonnet5
+                stream([.textDelta("partial")], error: FixtureError.failed)
             ) {
                 await recorder.append($0)
             }

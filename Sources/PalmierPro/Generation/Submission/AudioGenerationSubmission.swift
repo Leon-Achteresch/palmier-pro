@@ -20,27 +20,12 @@ struct AudioGenerationSubmission {
         onFailure: (@MainActor () -> Void)? = nil
     ) -> String {
         let usesReferences = model.supportsReferences
-        let shouldExtractAudio = !usesReferences && !references.isEmpty && model.usesSourceURL
-            && (references.first?.type == .video || trimmedSourceOverride?.hasTrim == true)
-        let extractionTrim = shouldExtractAudio ? trimmedSourceOverride : nil
-        let preprocessRef: (@Sendable (Int, MediaAsset, URL) async throws -> URL?)?
-        if shouldExtractAudio {
-            preprocessRef = { index, _, currentURL in
-                guard index == 0 else { return nil }
-                return try await AudioTrackExtractor.extract(
-                    sourceURL: currentURL,
-                    trimmedSource: extractionTrim
-                )
-            }
-        } else {
-            preprocessRef = nil
-        }
         let imageCount = genInput.referenceImageAssetIds?.count ?? 0
         let usesSourceURL = model.usesSourceURL
         let splitReferences: @Sendable ([String]) -> (image: String?, audio: [String]) = { uploaded in
             (imageCount > 0 ? uploaded.first : nil, Array(uploaded.dropFirst(imageCount)))
         }
-        let buildParams: ([String]) -> BackendGenerationParams = { [params] uploaded in
+        let buildParams: ([String]) -> GenerationParams = { [params] uploaded in
             var resolvedParams = params
             if usesReferences {
                 let referenceURLs = splitReferences(uploaded)
@@ -56,27 +41,15 @@ struct AudioGenerationSubmission {
             }
             return .audio(resolvedParams)
         }
-        let snapshotRefs: (@Sendable (inout GenerationInput, [String]) -> Void)?
-        if usesReferences {
-            snapshotRefs = { input, uploaded in
-                let referenceURLs = splitReferences(uploaded)
-                input.referenceImageURLs = referenceURLs.image.map { [$0] }
-                input.referenceAudioURLs = referenceURLs.audio.isEmpty ? nil : referenceURLs.audio
-            }
-        } else {
-            snapshotRefs = nil
-        }
         return service.generate(
             genInput: genInput,
             assetType: .audio,
             placeholderDuration: placeholderDuration,
             references: references,
-            trimmedSourceOverride: shouldExtractAudio ? nil : trimmedSourceOverride,
+            trimmedSourceOverride: trimmedSourceOverride,
             name: name,
             folderId: folderId,
             buildParams: buildParams,
-            snapshotRefs: snapshotRefs,
-            preprocessRef: preprocessRef,
             fileExtension: "mp3",
             projectURL: projectURL,
             editor: editor,

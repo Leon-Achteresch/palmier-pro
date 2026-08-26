@@ -52,9 +52,7 @@ extension ToolExecutor {
 
     @MainActor
     static var canGenerate: Bool {
-        (AccountService.shared.isSignedIn && AccountService.shared.hasCredits)
-            || OpenRouterService.shared.hasKey
-            || ElevenLabsService.shared.hasKey
+        OwnKeyGeneration.keyConfigured
     }
 
     static func rawTimelineDict(_ timeline: Timeline) -> [String: Any]? {
@@ -109,6 +107,14 @@ extension ToolExecutor {
             "status": marker.status.rawValue,
         ]
         if marker.kind != .standard { out["kind"] = marker.kind.rawValue }
+        if !marker.sketch.isEmpty {
+            out["sketch"] = marker.sketch.map { stroke -> [String: Any] in
+                [
+                    "arrow": stroke.arrow,
+                    "points": stroke.points.map { [($0.x * 1000).rounded() / 1000, ($0.y * 1000).rounded() / 1000] },
+                ]
+            }
+        }
         return out
     }
 

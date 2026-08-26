@@ -7,7 +7,6 @@ struct ExportTimelineAnalyticsSnapshotTests {
     @Test func stripsPrivateContentAndGroupsCaptions() throws {
         var generated = generationInput()
         generated.prompt = "SECRET_PROMPT"
-        generated.resultURLs = ["https://example.com/private"]
         var manifest = MediaManifest()
         manifest.entries = [
             entry("SECRET_MEDIA", "/Users/private/Movies/interview.mov", generation: generated),

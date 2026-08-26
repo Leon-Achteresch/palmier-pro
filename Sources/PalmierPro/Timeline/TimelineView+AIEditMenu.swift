@@ -9,46 +9,34 @@ extension TimelineView {
         let submenu = NSMenu()
         submenu.autoenablesItems = false
         let aiAllowed = editor.aiEditAllowed
-        let isPaid = AccountService.shared.isPaid
         let mediaType = editor.clipFor(id: clipId)?.mediaType ?? .video
         let enhanceActions = actions.filter { $0.group(for: mediaType) == .enhance }
         let audioActions = actions.filter { $0.group(for: mediaType) == .audio }
         let addAction: (EditAction) -> Void = { action in
-            let paidBlocked = action.paidBlocked(for: mediaType)
             switch action {
-            case .enhanceDraft:
-                let item = NSMenuItem(
-                    title: L10n.string("FLUX Enhance"),
-                    action: #selector(self.performAIEnhanceDraft(_:)),
-                    keyEquivalent: ""
-                )
+            case .upscale:
+                let upscaleItem = NSMenuItem(title: L10n.string("Upscale…"), action: #selector(self.performAIEditUpscale(_:)), keyEquivalent: "")
+                upscaleItem.target = self
+                upscaleItem.representedObject = clipId
+                upscaleItem.isEnabled = aiAllowed
+                submenu.addItem(upscaleItem)
+            case .reframe:
+                let item = NSMenuItem(title: L10n.string("Reframe…"), action: #selector(self.performAIEditReframe(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = clipId
                 item.isEnabled = aiAllowed
                 submenu.addItem(item)
-            case .upscale:
-                let upscaleItem = NSMenuItem(title: paidBlocked ? L10n.string("Upscale… (Paid)") : L10n.string("Upscale…"), action: #selector(self.performAIEditUpscale(_:)), keyEquivalent: "")
-                upscaleItem.target = self
-                upscaleItem.representedObject = clipId
-                upscaleItem.isEnabled = aiAllowed && !paidBlocked
-                submenu.addItem(upscaleItem)
-            case .reframe:
-                let item = NSMenuItem(title: paidBlocked ? L10n.string("Reframe… (Paid)") : L10n.string("Reframe…"), action: #selector(self.performAIEditReframe(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = clipId
-                item.isEnabled = aiAllowed && !paidBlocked
-                submenu.addItem(item)
             case .lipSync:
-                let item = NSMenuItem(title: paidBlocked ? L10n.string("Lip Sync… (Paid)") : L10n.string("Lip Sync…"), action: #selector(self.performAIEditLipSync(_:)), keyEquivalent: "")
+                let item = NSMenuItem(title: L10n.string("Lip Sync…"), action: #selector(self.performAIEditLipSync(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = clipId
-                item.isEnabled = aiAllowed && !paidBlocked
+                item.isEnabled = aiAllowed
                 submenu.addItem(item)
             case .edit:
-                let item = NSMenuItem(title: paidBlocked ? L10n.string("Edit… (Paid)") : L10n.string("Edit…"), action: #selector(self.performAIEditEdit(_:)), keyEquivalent: "")
+                let item = NSMenuItem(title: L10n.string("Edit…"), action: #selector(self.performAIEditEdit(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = clipId
-                item.isEnabled = aiAllowed && !paidBlocked
+                item.isEnabled = aiAllowed
                 submenu.addItem(item)
             case .generateMusic, .generateSFX:
                 let kind: VideoToAudioEditKind = action == .generateMusic ? .music : .sfx
@@ -90,11 +78,8 @@ extension TimelineView {
             submenu.addItem(.sectionHeader(title: L10n.string("AI Audio")))
             audioActions.filter { $0 == .rerun }.forEach(addAction)
             for kind in audioTransforms {
-                let paidBlocked = kind.model?.paidOnly == true && !isPaid
-                let localizedTitle = L10n.string(key: kind.menuTitle)
-                let title = paidBlocked ? L10n.string("\(localizedTitle) (Paid)") : localizedTitle
                 let item = NSMenuItem(
-                    title: title,
+                    title: L10n.string(key: kind.menuTitle),
                     action: #selector(performAIEditAudioTransform(_:)),
                     keyEquivalent: ""
                 )
@@ -103,7 +88,7 @@ extension TimelineView {
                     "clipId": clipId,
                     "kind": kind == .cleanup ? "cleanup" : "dubbing",
                 ]
-                item.isEnabled = aiAllowed && !paidBlocked
+                item.isEnabled = aiAllowed
                 submenu.addItem(item)
             }
             audioActions.filter { $0 != .rerun }.forEach(addAction)
@@ -114,13 +99,6 @@ extension TimelineView {
     @objc private func performAIEditEdit(_ sender: Any?) {
         guard let clipId = (sender as? NSMenuItem)?.representedObject as? String else { return }
         editor.beginAIEdit(clipId: clipId)
-    }
-
-    @objc private func performAIEnhanceDraft(_ sender: Any?) {
-        guard let clipId = (sender as? NSMenuItem)?.representedObject as? String,
-              let clip = editor.clipFor(id: clipId),
-              let asset = editor.mediaAssets.first(where: { $0.id == clip.mediaRef }) else { return }
-        editor.generationService.enhanceDraft(asset: asset, editor: editor)
     }
 
     @objc private func performAIEditReframe(_ sender: Any?) {

@@ -17,7 +17,7 @@ enum OwnKeyGeneration {
     @MainActor
     static func run(
         modelId: String,
-        buildParams: ([String]) -> BackendGenerationParams,
+        buildParams: ([String]) -> GenerationParams,
         references: [MediaAsset],
         trimmedSource: TrimmedSource?
     ) async throws -> [URL] {

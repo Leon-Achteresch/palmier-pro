@@ -30,7 +30,7 @@ extension ToolExecutor {
                 + "Pick one from list_models where supportsFirstFrame and supportsLastFrame are true."
             )
         }
-        try requireGenerationAccess(modelId: model.id, paidOnly: model.paidOnly)
+        try requireGenerationAccess(modelId: model.id)
 
         let site: TransitionSite
         switch editor.transitionSite(afterClipId: input.afterClipId) {
@@ -175,11 +175,10 @@ extension ToolExecutor {
     private func defaultTransitionModelId() throws -> String {
         guard let model = VideoModelConfig.allModels.first(where: {
             !$0.requiresSourceVideo && $0.supportsFirstFrame && $0.supportsLastFrame
-                && (AccountService.shared.isPaid || !$0.paidOnly || OwnKeyGeneration.handles($0.id))
         }) else {
             throw ToolError(
-                "No video model supports first and last frames on the current plan. "
-                + "Use list_models or tell the user to subscribe / add an API key."
+                "No video model supports first and last frames. "
+                + "Use list_models or tell the user to add an API key."
             )
         }
         return model.id

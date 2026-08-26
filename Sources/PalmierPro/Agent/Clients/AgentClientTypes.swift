@@ -5,43 +5,41 @@ extension Notification.Name {
 }
 
 enum AgentProvider: String, CaseIterable, Sendable {
-    case anthropic
-    case openAI
+    case openRouter
+    case google
 
     var displayName: String {
         switch self {
-        case .anthropic: "Anthropic"
-        case .openAI: "OpenAI"
+        case .openRouter: "OpenRouter"
+        case .google: "Google AI"
         }
     }
 
-    private var credentialStorage: (account: String, environment: String) {
+    /// Both providers speak the OpenAI chat-completions dialect, so one client serves them.
+    var chatCompletionsURL: URL {
         switch self {
-        case .anthropic: ("anthropic-api-key", "ANTHROPIC_API_KEY")
-        case .openAI: ("openai-api-key", "OPENAI_API_KEY")
+        case .openRouter:
+            URL(string: "https://openrouter.ai/api/v1/chat/completions")!
+        case .google:
+            URL(string: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")!
         }
-    }
-
-    fileprivate var storedAPIKey: String {
-        #if DEBUG
-        let environmentValue = ProcessInfo.processInfo.environment[credentialStorage.environment]?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !environmentValue.isEmpty { return environmentValue }
-        #endif
-        return KeychainStore.load(account: credentialStorage.account) ?? ""
     }
 
     @concurrent
     func loadAPIKey() async -> String {
-        storedAPIKey
+        switch self {
+        case .openRouter: OpenRouterKeychain.load() ?? ""
+        case .google: GeminiKeychain.load() ?? ""
+        }
     }
 
     @concurrent
     func setAPIKey(_ key: String?) async {
-        if let key {
-            KeychainStore.save(key, account: credentialStorage.account)
-        } else {
-            KeychainStore.delete(account: credentialStorage.account)
+        switch self {
+        case .openRouter:
+            if let key { OpenRouterKeychain.save(key) } else { OpenRouterKeychain.delete() }
+        case .google:
+            if let key { GeminiKeychain.save(key) } else { GeminiKeychain.delete() }
         }
         NotificationCenter.default.post(name: .agentAPIKeyChanged, object: rawValue)
     }
@@ -69,72 +67,83 @@ enum AgentReasoningEffort: String, CaseIterable, Sendable {
     }
 }
 
-enum AgentModel: String, CaseIterable, Codable, Sendable {
-    case sonnet5 = "claude-sonnet-5"
-    case opus5 = "claude-opus-5"
-    case fable5 = "claude-fable-5"
-    case luna = "gpt-5.6-luna"
-    case terra = "gpt-5.6-terra"
-    case sol = "gpt-5.6-sol"
-    case claudeCode = "claude-code"
-    case claudeCodeFable = "claude-code/claude-fable-5"
-    case claudeCodeOpus = "claude-code/claude-opus-5"
-    case claudeCodeSonnet = "claude-code/claude-sonnet-5"
-    case claudeCodeHaiku = "claude-code/claude-haiku-4-5-20251001"
-    case codex = "codex"
-    case codexSol = "codex/gpt-5.6-sol"
-    case codexTerra = "codex/gpt-5.6-terra"
-    case codexLuna = "codex/gpt-5.6-luna"
-    case codexGPT55 = "codex/gpt-5.5"
-    case codexGPT54 = "codex/gpt-5.4"
+/// A chat model the user can run: an OpenRouter slug, a Google model, or a local CLI agent.
+struct AgentModel: Hashable, Sendable, Identifiable {
+    let rawValue: String
+    let displayName: String
+    let supportedReasoningEfforts: [AgentReasoningEffort]
 
-    static let defaultModel: AgentModel = .terra
+    var id: String { rawValue }
 
-    var displayName: String {
-        switch self {
-        case .sonnet5: "Sonnet 5"
-        case .opus5: "Opus 5"
-        case .fable5: "Fable 5"
-        case .luna: "GPT-5.6 Luna"
-        case .terra: "GPT-5.6 Terra"
-        case .sol: "GPT-5.6 Sol"
-        case .claudeCode: "Claude Code"
-        case .claudeCodeFable: "Claude Code · Fable 5"
-        case .claudeCodeOpus: "Claude Code · Opus 5"
-        case .claudeCodeSonnet: "Claude Code · Sonnet 5"
-        case .claudeCodeHaiku: "Claude Code · Haiku 4.5"
-        case .codex: "Codex"
-        case .codexSol: "Codex · GPT-5.6 Sol"
-        case .codexTerra: "Codex · GPT-5.6 Terra"
-        case .codexLuna: "Codex · GPT-5.6 Luna"
-        case .codexGPT55: "Codex · GPT-5.5"
-        case .codexGPT54: "Codex · GPT-5.4"
+    init(
+        rawValue: String,
+        displayName: String? = nil,
+        supportedReasoningEfforts: [AgentReasoningEffort] = AgentModel.defaultEfforts
+    ) {
+        self.rawValue = rawValue
+        self.displayName = displayName ?? AgentModel.derivedDisplayName(rawValue)
+        self.supportedReasoningEfforts = supportedReasoningEfforts
+    }
+
+    static let defaultEfforts: [AgentReasoningEffort] = [.low, .medium, .high]
+    static let cliEfforts: [AgentReasoningEffort] = [.low, .medium, .high, .xHigh]
+
+    static let openRouterPrefix = "openrouter:"
+    static let googlePrefix = "google:"
+
+    static let claudeCode = AgentModel(
+        rawValue: "claude-code",
+        displayName: "Claude Code",
+        supportedReasoningEfforts: cliEfforts
+    )
+    static let codex = AgentModel(
+        rawValue: "codex",
+        displayName: "Codex",
+        supportedReasoningEfforts: cliEfforts
+    )
+    static let cliModels: [AgentModel] = [claudeCode, codex]
+    static let defaultModel = claudeCode
+
+    static func openRouter(
+        id: String,
+        name: String? = nil,
+        efforts: [AgentReasoningEffort] = defaultEfforts
+    ) -> AgentModel {
+        AgentModel(
+            rawValue: openRouterPrefix + id,
+            displayName: name ?? id,
+            supportedReasoningEfforts: efforts
+        )
+    }
+
+    static func google(id: String, name: String? = nil) -> AgentModel {
+        AgentModel(
+            rawValue: googlePrefix + id,
+            displayName: name ?? id,
+            supportedReasoningEfforts: defaultEfforts
+        )
+    }
+
+    var provider: AgentProvider? {
+        if rawValue.hasPrefix(Self.openRouterPrefix) { return .openRouter }
+        if rawValue.hasPrefix(Self.googlePrefix) { return .google }
+        return nil
+    }
+
+    /// The id the provider expects in the request body.
+    var providerModelId: String {
+        guard let provider else { return rawValue }
+        switch provider {
+        case .openRouter: return String(rawValue.dropFirst(Self.openRouterPrefix.count))
+        case .google: return String(rawValue.dropFirst(Self.googlePrefix.count))
         }
     }
 
-    var provider: AgentProvider {
-        switch self {
-        case .sonnet5, .opus5, .fable5,
-             .claudeCode, .claudeCodeFable, .claudeCodeOpus, .claudeCodeSonnet, .claudeCodeHaiku:
-            .anthropic
-        case .luna, .terra, .sol,
-             .codex, .codexSol, .codexTerra, .codexLuna, .codexGPT55, .codexGPT54:
-            .openAI
-        }
-    }
-
-    var isClaudeCode: Bool {
-        rawValue == "claude-code" || rawValue.hasPrefix("claude-code/")
-    }
-
-    var isCodex: Bool {
-        rawValue == "codex" || rawValue.hasPrefix("codex/")
-    }
-
+    var isClaudeCode: Bool { rawValue == "claude-code" || rawValue.hasPrefix("claude-code/") }
+    var isCodex: Bool { rawValue == "codex" || rawValue.hasPrefix("codex/") }
     var isCLIAgent: Bool { isClaudeCode || isCodex }
 
     var claudeCodeModelId: String? { cliModelId(prefix: "claude-code/") }
-
     var codexModelId: String? { cliModelId(prefix: "codex/") }
 
     private func cliModelId(prefix: String) -> String? {
@@ -142,28 +151,11 @@ enum AgentModel: String, CaseIterable, Codable, Sendable {
         return String(rawValue.dropFirst(prefix.count))
     }
 
-    var maxOutputTokens: Int { 64_000 }
-
-    var requiresPaidHostedPlan: Bool {
-        self == .fable5 || self == .sol
+    private static func derivedDisplayName(_ rawValue: String) -> String {
+        if rawValue.hasPrefix(openRouterPrefix) { return String(rawValue.dropFirst(openRouterPrefix.count)) }
+        if rawValue.hasPrefix(googlePrefix) { return String(rawValue.dropFirst(googlePrefix.count)) }
+        return rawValue
     }
-
-    static func persisted(_ rawValue: String) -> AgentModel? {
-        rawValue == "claude-opus-4-8" ? .opus5 : AgentModel(rawValue: rawValue)
-    }
-
-    var supportedReasoningEfforts: [AgentReasoningEffort] {
-        if isCLIAgent {
-            return [.low, .medium, .high, .xHigh]
-        }
-        switch provider {
-        case .anthropic:
-            return [.low, .medium, .high, .xHigh, .max]
-        case .openAI:
-            return AgentReasoningEffort.allCases
-        }
-    }
-
 }
 
 struct AgentRunSettings: Equatable, Sendable {
@@ -189,26 +181,6 @@ enum AgentReasoningPreferences {
     }
 }
 
-enum AgentRoute: Equatable, Sendable {
-    case direct
-    case hosted
-    case unavailable
-}
-
-enum AgentRouting {
-    static func route(
-        model: AgentModel,
-        credentials: AgentCredentialSnapshot,
-        hasHostedCredits: Bool,
-        hasPaidPlan: Bool
-    ) -> AgentRoute {
-        if model.isCLIAgent { return .direct }
-        if !credentials[model.provider].isEmpty { return .direct }
-        if model.requiresPaidHostedPlan && !hasPaidPlan { return .unavailable }
-        return hasHostedCredits ? .hosted : .unavailable
-    }
-}
-
 struct AgentCredentialSnapshot: Equatable, Sendable {
     private let apiKeys: [AgentProvider: String]
 
@@ -220,11 +192,18 @@ struct AgentCredentialSnapshot: Equatable, Sendable {
         apiKeys[provider, default: ""]
     }
 
+    func hasKey(for model: AgentModel) -> Bool {
+        guard let provider = model.provider else { return model.isCLIAgent }
+        return !self[provider].isEmpty
+    }
+
     @concurrent
     static func loadFromKeychain() async -> AgentCredentialSnapshot {
-        AgentCredentialSnapshot(Dictionary(uniqueKeysWithValues: AgentProvider.allCases.map {
-            ($0, $0.storedAPIKey)
-        }))
+        var keys: [AgentProvider: String] = [:]
+        for provider in AgentProvider.allCases {
+            keys[provider] = await provider.loadAPIKey()
+        }
+        return AgentCredentialSnapshot(keys)
     }
 }
 
@@ -255,33 +234,8 @@ struct AgentToolSchema: @unchecked Sendable {
     let inputSchema: [String: Any]
 }
 
-struct AgentRequestContext: Equatable, Sendable {
-    let conversationID: UUID
-    let traceID: UUID
-    let spanID: UUID
-    let inputMessageID: UUID
-    let outputMessageID: UUID
-    let projectID: String?
-
-    func apply(to request: inout URLRequest, telemetryEnabled: Bool) {
-        request.setValue(conversationID.uuidString.lowercased(), forHTTPHeaderField: "X-Palmier-Conversation-Id")
-        request.setValue(traceID.uuidString.lowercased(), forHTTPHeaderField: "X-Palmier-Trace-Id")
-        request.setValue(spanID.uuidString.lowercased(), forHTTPHeaderField: "X-Palmier-Span-Id")
-        request.setValue(inputMessageID.uuidString.lowercased(), forHTTPHeaderField: "X-Palmier-Input-Message-Id")
-        request.setValue(outputMessageID.uuidString.lowercased(), forHTTPHeaderField: "X-Palmier-Output-Message-Id")
-        if let projectID, !projectID.isEmpty {
-            request.setValue(projectID, forHTTPHeaderField: "X-Palmier-Project-Id")
-        }
-        request.setValue(telemetryEnabled ? "1" : "0", forHTTPHeaderField: "X-Palmier-Agent-Telemetry")
-    }
-}
-
 enum AgentStreamEvent: Equatable, Sendable {
     case thinkingDelta(String)
-    case thinkingSignature(String)
-    case redactedThinking(String)
-    case reasoningSummaryDelta(String)
-    case reasoningComplete(itemID: String?, summary: String, encryptedContent: String)
     case textDelta(String)
     case toolUseComplete(id: String, name: String, inputJSON: String)
     case messageStop(stopReason: AgentStopReason)
@@ -320,8 +274,7 @@ protocol AgentClient: Sendable {
     func stream(
         system: String,
         tools: [AgentToolSchema],
-        messages: [AgentRequestMessage],
-        context: AgentRequestContext
+        messages: [AgentRequestMessage]
     ) -> AsyncThrowingStream<AgentStreamEvent, Error>
 }
 
@@ -362,43 +315,8 @@ enum AgentHTTP {
     }
 }
 
-extension AgentRunSettings {
-    func requestBody(
-        system: String,
-        tools: [AgentToolSchema],
-        messages: [AgentRequestMessage]
-    ) -> [String: Any] {
-        switch model.provider {
-        case .anthropic:
-            AnthropicRequestBody.build(
-                model: model,
-                reasoningEffort: reasoningEffort,
-                system: system,
-                tools: tools,
-                messages: messages
-            )
-        case .openAI:
-            OpenAIRequestBody.build(
-                model: model,
-                reasoningEffort: reasoningEffort,
-                system: system,
-                tools: tools,
-                messages: messages
-            )
-        }
-    }
-}
-
-extension AgentProvider {
-    func parseSSE(
-        bytes: URLSession.AsyncBytes,
-        continuation: AsyncThrowingStream<AgentStreamEvent, Error>.Continuation
-    ) async throws {
-        switch self {
-        case .anthropic:
-            try await AnthropicSSE.parse(bytes: bytes, continuation: continuation)
-        case .openAI:
-            try await OpenAISSE.parse(bytes: bytes, continuation: continuation)
-        }
-    }
+enum AgentServiceError: Error {
+    case unavailable(AgentModel)
+    case refusal(AgentModel)
+    case upstream(String)
 }

@@ -8,7 +8,7 @@ enum GeminiOmniRunner {
     @MainActor
     static func run(
         catalogId: String,
-        params: BackendGenerationParams,
+        params: GenerationParams,
         references: [MediaAsset],
         trimmedSource: TrimmedSource?
     ) async throws -> [URL] {

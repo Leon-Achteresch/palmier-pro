@@ -21,6 +21,29 @@ extension EditorViewModel {
         return Set(frames).sorted()
     }
 
+    /// Markers whose sketch belongs on the canvas at `frame`, plus the one being sketched.
+    func sketchedTimelineMarkers(at frame: Int) -> [TimelineMarker] {
+        timeline.markers.filter { marker in
+            guard !marker.sketch.isEmpty else { return false }
+            if marker.id == sketchingMarkerId { return true }
+            return marker.isRange ? marker.intersects(frame..<(frame + 1)) : marker.startFrame == frame
+        }
+    }
+
+    func changeMarkerSketch(
+        markerId: String,
+        actionName: String,
+        _ edit: (inout [MarkerStroke]) -> Void
+    ) {
+        guard var marker = timelineMarker(id: markerId) else { return }
+        edit(&marker.sketch)
+        do {
+            _ = try changeTimelineMarkers(updates: [marker], actionName: actionName)
+        } catch {
+            refuseWithToast(L10n.string("Couldn't change the sketch."))
+        }
+    }
+
     @discardableResult
     func addTimelineMarkerAtSelection() -> TimelineMarker? {
         guard case .timeline = activePreviewTab else {
@@ -127,6 +150,10 @@ extension EditorViewModel {
         guard marker.startFrame >= 0, marker.durationFrames >= 0, !end.overflow,
               components.allSatisfy({ $0.isFinite && (0...1).contains($0) }) else {
             throw TimelineMarkerValidationError.invalidRange
+        }
+        guard marker.sketch.count <= MarkerStroke.maximumStrokes,
+              marker.sketch.allSatisfy(\.isValid) else {
+            throw TimelineMarkerValidationError.invalidSketch
         }
         var marker = marker
         marker.name = name

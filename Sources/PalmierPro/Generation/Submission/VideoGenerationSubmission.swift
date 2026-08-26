@@ -8,10 +8,7 @@ struct VideoGenerationSubmission {
     let trimmedSourceOverride: TrimmedSource?
     let name: String?
     let folderId: String?
-    let buildParams: ([String]) -> BackendGenerationParams
-    let snapshotRefs: (@Sendable (inout GenerationInput, [String]) -> Void)?
-    let preprocessRef: (@Sendable (Int, MediaAsset, URL) async throws -> URL?)?
-    let preprocessSourceVideo: (@Sendable (URL) async throws -> URL?)?
+    let buildParams: ([String]) -> GenerationParams
 
     @MainActor
     @discardableResult
@@ -31,9 +28,6 @@ struct VideoGenerationSubmission {
             name: name,
             folderId: folderId,
             buildParams: buildParams,
-            snapshotRefs: snapshotRefs,
-            preprocessRef: preprocessRef,
-            preprocessSourceVideo: preprocessSourceVideo,
             fileExtension: "mp4",
             projectURL: projectURL,
             editor: editor,
@@ -68,27 +62,6 @@ struct VideoGenerationSubmission {
             genInput.referenceImageAssetIds = assetIds(inputAssets.imageRefs)
             genInput.referenceVideoAssetIds = assetIds(inputAssets.videoRefs)
             genInput.referenceAudioAssetIds = assetIds(inputAssets.audioRefs)
-            let maxSourceVideoResolution = model.caps.maxSourceVideoResolution
-            let requiredSourceVideoEncoding = model.caps.requiredSourceVideoEncoding
-            let preprocessSourceVideo: (@Sendable (URL) async throws -> URL?)?
-            if maxSourceVideoResolution != nil || requiredSourceVideoEncoding != nil {
-                preprocessSourceVideo = { @Sendable url in
-                    try await VideoPreprocessor.transcodeIfNeeded(
-                        url: url,
-                        maxResolution: maxSourceVideoResolution,
-                        requiredEncoding: requiredSourceVideoEncoding
-                    )
-                }
-            } else {
-                preprocessSourceVideo = nil
-            }
-            let snapshotRefs = videoInputSnapshotter(
-                frameCount: sourceCount,
-                imageRefCount: imageRefCount,
-                videoRefCount: videoRefCount,
-                audioRefCount: audioRefCount
-            )
-
             return VideoGenerationSubmission(
                 genInput: genInput,
                 placeholderDuration: placeholderDuration,
@@ -119,10 +92,7 @@ struct VideoGenerationSubmission {
                         generateAudio: generateAudio,
                         draft: genInput.draft
                     ))
-                },
-                snapshotRefs: snapshotRefs,
-                preprocessRef: nil,
-                preprocessSourceVideo: preprocessSourceVideo
+                }
             )
         }
 
@@ -135,23 +105,6 @@ struct VideoGenerationSubmission {
         genInput.referenceImageAssetIds = assetIds(inputAssets.imageRefs)
         genInput.referenceVideoAssetIds = assetIds(inputAssets.videoRefs)
         genInput.referenceAudioAssetIds = assetIds(inputAssets.audioRefs)
-
-        let snapshotRefs = videoInputSnapshotter(
-            frameCount: frameCount,
-            imageRefCount: imageRefCount,
-            videoRefCount: videoRefCount,
-            audioRefCount: audioRefCount
-        )
-        let preprocessRef: (@Sendable (Int, MediaAsset, URL) async throws -> URL?)?
-        if inputAssets.videoRefs.isEmpty {
-            preprocessRef = nil
-        } else {
-            // currentURL may already be a trimmed extract; downscale must chain onto it.
-            preprocessRef = { _, asset, currentURL in
-                guard asset.type == .video else { return nil }
-                return try await VideoPreprocessor.downscaleIfNeeded(url: currentURL)
-            }
-        }
 
         return VideoGenerationSubmission(
             genInput: genInput,
@@ -176,10 +129,7 @@ struct VideoGenerationSubmission {
                     draft: genInput.draft
                 )
                 return .video(params)
-            },
-            snapshotRefs: snapshotRefs,
-            preprocessRef: preprocessRef,
-            preprocessSourceVideo: nil
+            }
         )
     }
 

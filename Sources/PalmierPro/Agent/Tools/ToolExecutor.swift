@@ -70,7 +70,6 @@ final class ToolExecutor {
         mcpClientInfo = clientInfo
     }
 
-    var feedbackState = FeedbackState()
     var lastTranscriptSession: TranscriptSession?
     lazy var presetStore: PresetStore = .shared
 
@@ -199,7 +198,6 @@ final class ToolExecutor {
                 editor: editor
             )
         }
-        feedbackState.record(result, for: tool)
         let elapsed = started.duration(to: .now).seconds
         let telemetry = result.isError ? "Agent tool failed" : "Agent tool finished"
         let payload: Telemetry.Payload = [
@@ -262,7 +260,7 @@ final class ToolExecutor {
     private static func canReadInactiveProject(_ tool: ToolName) -> Bool {
         switch tool {
         case .getTimeline, .inspectTimeline, .getMedia, .inspectMedia, .searchMedia,
-             .getMulticam, .getTranscript, .detectBeats, .measureLoudness, .inspectColor, .listModels, .sendFeedback,
+             .getMulticam, .getTranscript, .detectBeats, .measureLoudness, .inspectColor, .listModels,
              .readProjectContext, .reviewTimeline, .manageReferences:
             true
         default:
@@ -390,7 +388,6 @@ final class ToolExecutor {
         case .listModels:    return listModels(args)
         case .organizeMedia: return try organizeMedia(editor, args)
         case .manageProxies: return try await manageProxies(editor, args)
-        case .sendFeedback:  return try await sendFeedback(editor, args)
         case .setProjectSettings: return try setProjectSettings(editor, args)
         case .createTimeline:     return try createTimeline(editor, args)
         case .setActiveTimeline:  return try setActiveTimeline(editor, args)

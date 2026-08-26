@@ -33,7 +33,13 @@ final class SampleProjectService {
         }
     }
 
-    private var baseURL: URL? { BackendConfig.convexHttpURL }
+    /// Optional self-hosted sample library; absent by default, which hides the sample UI.
+    private var baseURL: URL? {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: "PalmierSamplesBaseURL") as? String,
+              !value.isEmpty
+        else { return nil }
+        return URL(string: value)
+    }
 
     // MARK: - Listing
 

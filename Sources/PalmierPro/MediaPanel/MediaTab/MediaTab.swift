@@ -3,8 +3,6 @@ import UniformTypeIdentifiers
 
 struct MediaTab: View {
     @Environment(EditorViewModel.self) var editor
-    @Bindable private var openRouter = OpenRouterService.shared
-    @Bindable private var elevenLabs = ElevenLabsService.shared
 
     // Toolbar state
     @State var sortMode: SortMode = .dateAdded
@@ -301,9 +299,7 @@ struct MediaTab: View {
     }
 
     private var actionsRow: some View {
-        let showGenerate = !AccountService.shared.isMisconfigured
-            || openRouter.hasKey
-            || elevenLabs.hasKey
+        let showGenerate = OwnKeyGeneration.keyConfigured
         return HStack(spacing: AppTheme.Spacing.xs) {
             if editor.isMediaPanelSearchExpanded {
                 ExpandablePanelSearch(
@@ -603,8 +599,7 @@ struct MediaTab: View {
     }
 
     private var overflowMenu: some View {
-        let canOrganize = (openRouter.hasKey || !AccountService.shared.isMisconfigured)
-            && !editor.mediaAssets.isEmpty
+        let canOrganize = editor.agentService.canStream && !editor.mediaAssets.isEmpty
         return toolbarMenuIcon(systemName: "ellipsis") {
             Button(action: createNewFolderInCurrent) {
                 Label(L10n.string("New Folder"), systemImage: "folder.badge.plus")

@@ -66,17 +66,11 @@ struct AgentMessageView: View {
     @ViewBuilder
     private var assistantBody: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-            ForEach(Array(message.blocks.enumerated()), id: \.offset) { _, block in
+            ForEach(Array(message.blocks.enumerated()), id: \.offset) { offset, block in
                 switch block {
-                case .thinking(let text, let signature):
+                case .thinking(let text):
                     if !text.isEmpty {
-                        ThinkingSummaryView(text: text, isComplete: !signature.isEmpty)
-                    }
-                case .redactedThinking:
-                    EmptyView()
-                case .openAIReasoning(let summary, let encryptedContent, _, _):
-                    if !summary.isEmpty {
-                        ThinkingSummaryView(text: summary, isComplete: !encryptedContent.isEmpty)
+                        ThinkingSummaryView(text: text, isComplete: offset < message.blocks.count - 1)
                     }
                 case .text(let text):
                     MarkdownText(text: text)

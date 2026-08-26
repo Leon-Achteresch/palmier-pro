@@ -1,17 +1,10 @@
 import Foundation
-import Combine
-@preconcurrency import ConvexMobile
 
 enum ModelKind: Sendable {
     case video(VideoModelConfig)
     case image(ImageModelConfig)
     case audio(AudioModelConfig)
     case upscale(UpscaleModelConfig)
-}
-
-@MainActor
-func preferUsableModel<M>(_ models: [M], paidOnly: KeyPath<M, Bool>) -> M? {
-    models.first { AccountService.shared.isPaid || !$0[keyPath: paidOnly] } ?? models.first
 }
 
 enum ModelRegistry {
@@ -45,80 +38,18 @@ enum ModelRegistry {
 @MainActor
 final class ModelCatalog {
     static let shared = ModelCatalog()
-    private static let supportedCatalogVersion: Double = 4
-
     private(set) var video: [VideoModelConfig] = []
     private(set) var image: [ImageModelConfig] = []
     private(set) var audio: [AudioModelConfig] = []
     private(set) var upscale: [UpscaleModelConfig] = []
     private(set) var byId: [String: ModelKind] = [:]
     private(set) var isLoaded: Bool = false
-    private(set) var lastError: String?
 
-    @ObservationIgnored private var backendEntries: [CatalogEntry] = []
     @ObservationIgnored private var elevenLabsEntries: [CatalogEntry] = []
     @ObservationIgnored private var openRouterEntries: [CatalogEntry] = []
     @ObservationIgnored private var geminiEntries: [CatalogEntry] = []
-    @ObservationIgnored private var subscription: AnyCancellable?
-    @ObservationIgnored private var didConfigure = false
-    @ObservationIgnored private var retryTask: Task<Void, Never>?
-    @ObservationIgnored private var failureCount = 0
 
     private init() {}
-
-    func configure() {
-        guard !didConfigure else { return }
-        didConfigure = true
-        startSubscription()
-    }
-
-    private func startSubscription() {
-        guard let client = AccountService.shared.convex else { return }
-
-        subscription = client
-            .subscribe(
-                to: "models:list",
-                with: ["catalogVersion": Self.supportedCatalogVersion],
-                yielding: [CatalogEntry].self
-            )
-            .receive(on: DispatchQueue.main)
-            .sink(
-                receiveCompletion: { [weak self] completion in
-                    if case .failure(let err) = completion {
-                        self?.handleFailure(err)
-                    }
-                },
-                receiveValue: { [weak self] entries in
-                    self?.failureCount = 0
-                    self?.apply(entries)
-                }
-            )
-    }
-
-    private func handleFailure(_ err: ClientError) {
-        failureCount += 1
-        lastError = err.localizedDescription
-        // First failure goes to Sentry; retries only log locally.
-        if failureCount == 1 {
-            Log.generation.error("ModelCatalog subscription failed: \(err.localizedDescription)")
-        } else {
-            Log.generation.warning("ModelCatalog subscription failed (attempt \(self.failureCount)): \(err.localizedDescription)")
-        }
-        let delay = min(pow(2.0, Double(failureCount - 1)), 60)
-        retryTask?.cancel()
-        retryTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(delay))
-            guard !Task.isCancelled else { return }
-            self?.startSubscription()
-        }
-    }
-
-    private func apply(_ entries: [CatalogEntry]) {
-        backendEntries = entries
-        isLoaded = true
-        lastError = nil
-        rebuild()
-    }
 
     /// Models the user runs on their own ElevenLabs key; they live alongside the backend catalog.
     func setElevenLabsEntries(_ entries: [CatalogEntry]) {
@@ -142,7 +73,7 @@ final class ModelCatalog {
     }
 
     private func rebuild() {
-        let entries = backendEntries + elevenLabsEntries + openRouterEntries + geminiEntries
+        let entries = elevenLabsEntries + openRouterEntries + geminiEntries
         var newVideo: [VideoModelConfig] = []
         var newImage: [ImageModelConfig] = []
         var newAudio: [AudioModelConfig] = []

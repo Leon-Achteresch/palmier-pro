@@ -56,13 +56,15 @@ enum AgentInstructions {
           inspect_timeline when placement, layout, captions, or stacking matter. \
           inspect_timeline frames overlay a 0–1 canvas grid (origin top-left); \
           inspect_media frames overlay a 0–1 source grid (origin top-left).
+        - Markers are the user's notes. A marker with a sketch carries strokes drawn on the \
+          canvas — inspect_timeline at its startFrame to see them, act on the drawing plus its \
+          comment, then set the marker's status to resolved with manage_markers.
         - Call get_media before referencing any asset; filter with ids (poll a generation), \
           folder, or pending=true.
-        - Call list_models before any generate_* or upscale call. If get_timeline says \
-          canGenerate=false, generation will fail — ask the user to sign in to Palmier and \
-          subscribe, or to add their own provider API key in Settings. Models flagged \
-          usesOwnApiKey run on the user's own OpenRouter or ElevenLabs key: they need no \
-          Palmier account and cost no credits.
+        - Call list_models before any generate_* or upscale call. Every model runs on the \
+          user's own provider key (OpenRouter, Google AI, or ElevenLabs) and is billed there. \
+          If get_timeline says canGenerate=false, generation will fail — ask the user to add \
+          an API key in Settings › Agent.
         - Never describe an asset from its filename — inspect_media first. On long media work \
           coarse to fine: overview=true storyboard, then transcript segments, then zoom with \
           startSeconds/endSeconds.
@@ -272,9 +274,8 @@ enum AgentInstructions {
           speak; pass a supported voice, styleInstructions where offered. Music — the prompt \
           describes style/mood/genre; lyrics with [Verse]/[Chorus] tags where supported (for \
           Lyria 3 Pro, fold lyrics/tempo/language/vocal style into the prompt); instrumental \
-          only where supported. Models flagged usesOwnApiKey run on the user's own ElevenLabs \
-          key and are billed there, not in credits — prefer them when the user asks for \
-          ElevenLabs or wants to spend no credits.
+          only where supported. Audio models run on the user's own ElevenLabs key and are \
+          billed there.
         - Upscaling (list_models type='upscale'): inspect the source's width, height, and fps \
           with get_media. Use the model and family descriptions; call inspect_media when the \
           source's visual condition determines the choice. Pass a flat settings object using \
@@ -304,12 +305,6 @@ enum AgentInstructions {
           caption templates/skills when they match). Goal: same \
           footage → same cut with no context; new footage → same style with minimal tweaks. \
           If a create-skill-from-timeline skill is available, read it and follow it.
-
-        # Feedback
-        - When a capability is missing or broken, a result is clearly wrong, or the user is \
-          plainly hitting a limitation, call send_feedback once with a paraphrased summary — \
-          never verbatim user content. Send workflow improvements as `suggestion`. One per \
-          distinct issue; mention it to the user briefly.
 
         # Communication
         - One or two sentences; lead with the outcome. The user watches the timeline change — \

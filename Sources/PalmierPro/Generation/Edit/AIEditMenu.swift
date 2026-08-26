@@ -35,9 +35,6 @@ struct AIEditMenu: View {
                                 Button(L10n.string("Set as reference")) { createVideo(asReference: true) }
                             }
                         }
-                        if enhanceActions.contains(.enhanceDraft) {
-                            Button(L10n.string("FLUX Enhance")) { enhanceDraft() }
-                        }
                     }
                 }
                 if !audioActions.isEmpty || !availableAudioTransforms.isEmpty {
@@ -64,9 +61,7 @@ struct AIEditMenu: View {
         }
     }
 
-    private var aiAllowed: Bool {
-        AccountService.shared.aiAllowed || OwnKeyGeneration.keyConfigured
-    }
+    private var aiAllowed: Bool { OwnKeyGeneration.keyConfigured }
 
     private var availableActions: [EditAction] {
         EditAction.available(for: asset)
@@ -84,31 +79,18 @@ struct AIEditMenu: View {
         AudioTransformEditKind.available(for: asset)
     }
 
-    @ViewBuilder
     private func editActionButton(
         _ title: String,
         action: EditAction,
         perform: @escaping () -> Void
     ) -> some View {
-        if action.paidBlocked(for: asset.type) {
-            Button {
-                SettingsWindowController.shared.show(tab: .account)
-            } label: {
-                Label(L10n.string("\(title) (Paid)"), systemImage: "lock.fill")
-            }
-        } else {
-            Button(title, action: perform)
-        }
+        Button(title, action: perform)
     }
 
     private func runUpscale() {
         guard let model = UpscaleModelConfig.models(for: asset.type).first else { return }
         let stored = EditSubmitter.upscaleSeed(for: asset, model: model)
         editor.seedGenerationPanel(asset: asset, stored: stored)
-    }
-
-    private func enhanceDraft() {
-        editor.generationService.enhanceDraft(asset: asset, editor: editor)
     }
 
     private func edit() {

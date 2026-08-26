@@ -7,7 +7,7 @@ enum OpenRouterRunner {
     }
 
     @MainActor
-    static func run(catalogId: String, params: BackendGenerationParams) async throws -> [URL] {
+    static func run(catalogId: String, params: GenerationParams) async throws -> [URL] {
         guard let apiKey = OpenRouterService.shared.currentKey() else {
             throw OpenRouterAPI.APIError(message: "Add your OpenRouter API key in Settings › Agent.")
         }

@@ -29,8 +29,6 @@ struct MediaManifestEntry: Codable, Sendable, Equatable, Identifiable {
     var sourceFPS: Double?
     var hasAudio: Bool?
     var folderId: String?
-    var cachedRemoteURL: String?
-    var cachedRemoteURLExpiresAt: Date?
     var generationStatus: String?
     var importInput: MediaImportInput?
     var proxyStatus: String?
@@ -78,11 +76,7 @@ struct GenerationInput: Codable, Sendable, Equatable {
     var referenceVideoAssetIds: [String]?
     var referenceAudioAssetIds: [String]?
     var createdAt: Date?
-    var backendJobId: String?
     var outputIndex: Int?
-    var resultURLs: [String]?
-    var costCredits: Int?
-    var refundedCredits: Int?
 }
 
 enum MediaSource: Codable, Sendable, Equatable {

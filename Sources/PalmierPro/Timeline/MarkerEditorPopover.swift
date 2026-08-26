@@ -64,6 +64,12 @@ struct MarkerEditorPopover: View {
                 }
                 .buttonStyle(.capsule(.secondary, size: .small))
                 Spacer()
+                Button(L10n.string("Sketch")) {
+                    guard apply() else { return }
+                    editor.seekToFrame(marker.startFrame)
+                    editor.sketchingMarkerId = marker.id
+                }
+                .buttonStyle(.capsule(.secondary, size: .small))
                 Button(L10n.string("Done")) { apply() }
                     .buttonStyle(.capsule(.prominent, size: .small))
                     .keyboardShortcut(.return, modifiers: .command)
@@ -99,7 +105,8 @@ struct MarkerEditorPopover: View {
             onCommit: update
         )
     }
-    private func apply() {
+    @discardableResult
+    private func apply() -> Bool {
         do {
             _ = try editor.changeTimelineMarkers(
                 updates: [draft],
@@ -107,8 +114,10 @@ struct MarkerEditorPopover: View {
             )
             editor.selectedTimelineMarkerIds = []
             onDismiss()
+            return true
         } catch {
             editor.refuseWithToast(L10n.string("Check the marker name, position, and duration."))
+            return false
         }
     }
 }

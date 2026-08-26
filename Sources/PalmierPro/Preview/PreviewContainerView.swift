@@ -65,27 +65,30 @@ struct PreviewContainerView: View {
                     SafeAreaOverlayView()
                 }
                 CanvasViewingOverlay(selection: canvasOverlays)
-                if editor.chromaKeySamplingClipId != nil {
-                    ChromaKeySamplerOverlayView()
-                } else if editor.cropEditingActive {
-                    CropOverlayView()
-                } else if editor.cornerPinnedClip != nil {
-                    CornerPinOverlayView()
-                } else if editor.meshWarpedClip != nil {
-                    MeshWarpOverlayView()
-                } else if let configuration = captionPreview {
-                    CaptionPreviewOverlay(
-                        configuration: configuration,
-                        canvas: CGSize(
-                            width: max(1, editor.timeline.width),
-                            height: max(1, editor.timeline.height)
-                        ),
-                        size: CGSize(width: scaledWidth, height: scaledHeight),
-                        onCenterChange: { editor.captionPreviewCenterChange?($0) }
-                    )
-                } else {
-                    TransformOverlayView()
+                if editor.sketchingMarkerId == nil {
+                    if editor.chromaKeySamplingClipId != nil {
+                        ChromaKeySamplerOverlayView()
+                    } else if editor.cropEditingActive {
+                        CropOverlayView()
+                    } else if editor.cornerPinnedClip != nil {
+                        CornerPinOverlayView()
+                    } else if editor.meshWarpedClip != nil {
+                        MeshWarpOverlayView()
+                    } else if let configuration = captionPreview {
+                        CaptionPreviewOverlay(
+                            configuration: configuration,
+                            canvas: CGSize(
+                                width: max(1, editor.timeline.width),
+                                height: max(1, editor.timeline.height)
+                            ),
+                            size: CGSize(width: scaledWidth, height: scaledHeight),
+                            onCenterChange: { editor.captionPreviewCenterChange?($0) }
+                        )
+                    } else {
+                        TransformOverlayView()
+                    }
                 }
+                MarkerSketchOverlayView()
                 if let slip = editor.slipPreview, isTimeline {
                     SlipTwoUpView(state: slip)
                 }
@@ -96,6 +99,7 @@ struct PreviewContainerView: View {
                     .onEnded { value in
                         guard isTimeline,
                               captionPreview == nil,
+                              editor.sketchingMarkerId == nil,
                               !editor.cropEditingActive,
                               editor.chromaKeySamplingClipId == nil,
                               let id = PreviewHitTester.clipID(
@@ -117,6 +121,9 @@ struct PreviewContainerView: View {
             .offset(x: editor.canvasOffset.width, y: editor.canvasOffset.height)
         }
         .clipped()
+        .overlay(alignment: .top) {
+            MarkerSketchToolbar()
+        }
         .overlay(alignment: .bottom) {
             MotionBakeStatusView()
                 .padding(.bottom, AppTheme.Spacing.md)
@@ -645,13 +652,7 @@ struct PreviewContainerView: View {
                         .truncationMode(.middle)
                         .padding(.horizontal, AppTheme.Spacing.lg)
                 }
-                if isUnprocessable {
-                    Button(L10n.string("Report a Problem")) {
-                        FeedbackWindowController.shared.show(prefill: Self.unprocessablePrefill(path: path))
-                    }
-                    .buttonStyle(.capsule(.prominent, size: .regular))
-                    .padding(.top, AppTheme.Spacing.xs)
-                } else {
+                if !isUnprocessable {
                     HStack(spacing: AppTheme.Spacing.sm) {
                         if let assetId {
                             Button(L10n.string("Relink…")) { relinkFile(assetId: assetId) }
@@ -690,33 +691,6 @@ struct PreviewContainerView: View {
                 }
                 .frame(maxWidth: 520, maxHeight: 240)
                 .fixedSize(horizontal: false, vertical: true)
-                if activeMediaAsset?.wasGenerationRefunded == true {
-                    Text(L10n.string("You were not charged for this generation"))
-                        .font(.system(size: AppTheme.FontSize.sm, weight: .medium))
-                        .foregroundStyle(AppTheme.Status.successColor)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, AppTheme.Spacing.lg)
-                }
-                if let asset = activeMediaAsset, asset.pendingDownloadURL != nil {
-                    Button {
-                        editor.generationService.retryDownload(asset: asset, editor: editor)
-                    } label: {
-                        HStack(spacing: AppTheme.Spacing.xs) {
-                            Image(systemName: "arrow.clockwise")
-                            Text(L10n.string("Retry Download"))
-                        }
-                        .font(.system(size: AppTheme.FontSize.sm, weight: .medium))
-                        .foregroundStyle(AppTheme.MediaOverlay.primaryColor)
-                        .padding(.horizontal, AppTheme.Spacing.md)
-                        .padding(.vertical, AppTheme.Spacing.sm)
-                    }
-                    .buttonStyle(.plain)
-                    .background(AppTheme.MediaOverlay.primaryColor.opacity(AppTheme.Opacity.soft), in: .capsule)
-                    .overlay(Capsule().strokeBorder(
-                        AppTheme.MediaOverlay.primaryColor.opacity(AppTheme.Opacity.muted),
-                        lineWidth: AppTheme.BorderWidth.hairline
-                    ))
-                }
             }
             .padding(AppTheme.Spacing.xl)
             .fixedSize(horizontal: false, vertical: true)

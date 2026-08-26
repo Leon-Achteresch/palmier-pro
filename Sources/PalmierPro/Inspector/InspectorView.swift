@@ -425,7 +425,7 @@ struct InspectorView: View {
         if !audios.isEmpty { tabs.append(.audio) }
         if selectedMulticamGroupId != nil { tabs.append(.multicam) }
         if aiEditEligible(selection: selection, resolvedClipAsset: resolvedClipAsset)
-            && (!AccountService.shared.isMisconfigured || openRouter.hasKey || elevenLabs.hasKey) {
+            && OwnKeyGeneration.keyConfigured {
             tabs.append(.ai)
         }
         return tabs
@@ -1196,18 +1196,6 @@ struct InspectorView: View {
                 .textSelection(.enabled)
                 .help(Text(verbatim: metadata))
             Spacer(minLength: AppTheme.Spacing.xs)
-            if let cost = gen.costCredits {
-                HStack(spacing: AppTheme.Spacing.xxs) {
-                    Image(systemName: "dollarsign.circle.fill")
-                    Text(verbatim: cost.formatted())
-                }
-                .font(.system(size: AppTheme.FontSize.xs, weight: AppTheme.FontWeight.medium))
-                .monospacedDigit()
-                .foregroundStyle(AppTheme.Text.tertiaryColor)
-                .fixedSize()
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(CostEstimator.localizedUsedCredits(cost))
-            }
         }
     }
 

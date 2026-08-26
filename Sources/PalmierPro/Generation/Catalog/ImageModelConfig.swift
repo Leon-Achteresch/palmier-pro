@@ -35,10 +35,7 @@ struct ImageModelConfig: Identifiable, Sendable {
 
     @MainActor
     static var imageEdit: ImageModelConfig? {
-        preferUsableModel(
-            [nanoBananaPro].compactMap { $0 } + allModels.filter(\.supportsImageReference),
-            paidOnly: \.paidOnly
-        )
+        ([nanoBananaPro].compactMap { $0 } + allModels.filter(\.supportsImageReference)).first
     }
 
     let entry: CatalogEntry

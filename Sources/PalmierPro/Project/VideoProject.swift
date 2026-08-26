@@ -672,8 +672,8 @@ class VideoProject: NSDocument {
                     }
                     continue
                 }
-                if asset.isRecoveringGeneration {
-                    asset.generationStatus = .generating
+                if asset.isGenerating {
+                    asset.generationStatus = .failed("Generation was interrupted. Run it again.")
                     manifestUpdates.append(asset)
                     continue
                 }
@@ -690,7 +690,7 @@ class VideoProject: NSDocument {
                 asset.generationStatus = .none
                 manifestUpdates.append(asset)
             }
-            if asset.generationStatus != .none, !asset.canResumeGeneration {
+            if asset.generationStatus != .none {
                 asset.generationStatus = .none
                 manifestUpdates.append(asset)
             }

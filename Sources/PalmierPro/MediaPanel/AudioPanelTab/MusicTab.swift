@@ -2,11 +2,9 @@ import SwiftUI
 
 struct MusicSection: View {
     @Environment(EditorViewModel.self) var editor
-    @Bindable private var account = AccountService.shared
     @Binding var isExpanded: Bool
 
     @State private var selectedModelId: String?
-    @State private var mode: MusicGenerationSubmission.Mode = .videoToMusic
     @State private var prompt: String = ""
     @State private var textDuration: Double = 90
     @State private var isGenerating = false
@@ -14,7 +12,7 @@ struct MusicSection: View {
     @State private var note: String?
 
     private var models: [AudioModelConfig] {
-        AudioModelConfig.allModels.filter { $0.inputs.contains(.video) && $0.category == .music }
+        AudioModelConfig.allModels.filter { $0.category == .music && $0.inputs.contains(.text) }
     }
 
     private var model: AudioModelConfig? {
@@ -22,15 +20,6 @@ struct MusicSection: View {
         return models.first
     }
 
-    private func supportsTextMode(_ m: AudioModelConfig) -> Bool {
-        m.category == .music && m.inputs.contains(.text)
-    }
-
-    /// Text mode only when the selected model supports text-to-music.
-    private var effectiveMode: MusicGenerationSubmission.Mode {
-        (model.map(supportsTextMode) ?? false) ? mode : .videoToMusic
-    }
-    private var isTextMode: Bool { effectiveMode == .textToMusic }
 
     private var textDurationRange: ClosedRange<Double> {
         guard let range = model?.durationRange else { return 1...600 }
@@ -39,13 +28,6 @@ struct MusicSection: View {
 
     private var defaultTextDuration: Double {
         Double(model?.durationRange?.defaultValue ?? 90)
-    }
-
-    private var source: EditorViewModel.TimelineSpan? { editor.selectedTimelineSpan() }
-
-    private var spanSeconds: Double {
-        guard let source else { return 0 }
-        return Double(source.frameCount) / Double(max(1, editor.timeline.fps))
     }
 
     /// Where a text-to-music clip lands: the marked range start, else the playhead.
@@ -57,47 +39,23 @@ struct MusicSection: View {
         prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var costDuration: Int {
-        isTextMode ? Int(textDuration.rounded()) : Int(spanSeconds.rounded())
-    }
-
-    private var estimatedCost: Int? {
-        guard let model, costDuration > 0 else { return nil }
-        return CostEstimator.audioCost(
-            model: model,
-            prompt: trimmedPrompt,
-            durationSeconds: costDuration,
-            input: isTextMode ? .text : .video
-        )
-    }
+    private var costDuration: Int { Int(textDuration.rounded()) }
 
     private var validationNote: String? {
+        guard OwnKeyGeneration.keyConfigured else {
+            return L10n.string("Add an OpenRouter or Google AI API key in Settings › Agent")
+        }
         guard let model else { return L10n.string("No music models available.") }
-        if isTextMode {
-            if trimmedPrompt.isEmpty { return L10n.string("Describe the music to generate.") }
-            let params = AudioGenerationParams(
-                prompt: trimmedPrompt,
-                voice: nil,
-                lyrics: nil,
-                styleInstructions: nil,
-                instrumental: false,
-                durationSeconds: costDuration
-            )
-            if let issue = model.validate(params: params) { return issue }
-        } else {
-            guard source != nil else {
-                return L10n.string("Add video to the timeline, then mark a range to score only part of it.")
-            }
-            if let issue = model.validate(spanSeconds: spanSeconds) { return issue }
-        }
-        if let cost = estimatedCost, cost > AccountService.shared.remainingCredits,
-           AccountService.shared.budgetCredits != nil {
-            return CostEstimator.localizedInsufficientCredits(
-                cost,
-                remaining: AccountService.shared.remainingCredits
-            )
-        }
-        return nil
+        if trimmedPrompt.isEmpty { return L10n.string("Describe the music to generate.") }
+        let params = AudioGenerationParams(
+            prompt: trimmedPrompt,
+            voice: nil,
+            lyrics: nil,
+            styleInstructions: nil,
+            instrumental: false,
+            durationSeconds: costDuration
+        )
+        return model.validate(params: params)
     }
 
     private var canGenerate: Bool {
@@ -105,16 +63,7 @@ struct MusicSection: View {
     }
 
     private var generateLabel: String {
-        if let cost = estimatedCost, cost > 0 { return CostEstimator.localizedGenerateLabel(cost) }
-        return L10n.string("Generate")
-    }
-
-    private var sourceSummary: String {
-        guard let source else { return L10n.string("No video") }
-        let range = "\(clock(source.startFrame)) – \(clock(source.startFrame + source.frameCount)) · \(String(format: "%.1fs", spanSeconds))"
-        return editor.validSelectedTimelineRange == nil
-            ? L10n.string("Whole timeline · \(range)")
-            : range
+        L10n.string("Generate")
     }
 
     var body: some View {
@@ -143,51 +92,21 @@ struct MusicSection: View {
         }
     }
 
-    @ViewBuilder
     private var sourceControls: some View {
-        if model.map(supportsTextMode) == true {
-            InspectorRow(
-                label: L10n.string("Input"),
-                labelAlignment: .leading,
-                onReset: { mode = .videoToMusic }
-            ) {
-                Menu {
-                    Button(L10n.string("Video to Music")) { mode = .videoToMusic }
-                    Button(L10n.string("Text to Music")) { mode = .textToMusic }
-                } label: { EditorMenuValue(text: modeLabel(effectiveMode), expanded: true) }
-                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).focusable(false)
-                .frame(maxWidth: .infinity)
-            }
-        }
-        if isTextMode {
-            InspectorRow(
-                label: L10n.string("Duration"),
-                labelHelp: L10n.string("Length of the generated music. It's placed at the playhead, or at the marked range start."),
-                labelAlignment: .leading,
-                onReset: { textDuration = defaultTextDuration }
-            ) {
-                ScrubbableNumberField(
-                    value: textDuration,
-                    range: textDurationRange,
-                    format: "%.0f",
-                    valueSuffix: " s",
-                    dragValueAdjustment: { $0.rounded() },
-                    onChanged: { textDuration = $0.rounded() }
-                ) { textDuration = $0.rounded() }
-            }
-        } else {
-            InspectorRow(
-                label: L10n.string("Video"),
-                labelHelp: L10n.string("Uses the whole timeline by default. Mark a range on the timeline to score only that span."),
-                labelAlignment: .leading
-            ) { valueText(sourceSummary) }
-        }
-    }
-
-    private func modeLabel(_ m: MusicGenerationSubmission.Mode) -> String {
-        switch m {
-        case .videoToMusic: L10n.string("Video to Music")
-        case .textToMusic: L10n.string("Text to Music")
+        InspectorRow(
+            label: L10n.string("Duration"),
+            labelHelp: L10n.string("Length of the generated music. It's placed at the playhead, or at the marked range start."),
+            labelAlignment: .leading,
+            onReset: { textDuration = defaultTextDuration }
+        ) {
+            ScrubbableNumberField(
+                value: textDuration,
+                range: textDurationRange,
+                format: "%.0f",
+                valueSuffix: " s",
+                dragValueAdjustment: { $0.rounded() },
+                onChanged: { textDuration = $0.rounded() }
+            ) { textDuration = $0.rounded() }
         }
     }
 
@@ -252,26 +171,11 @@ struct MusicSection: View {
                 .buttonStyle(.capsule(.prominent))
                 .fixedSize()
                 .focusable(false)
-                .disabled(!canGenerate || !account.aiAllowed)
-                .help(account.aiAllowed ? String() : L10n.string("Sign in to generate"))
+                .disabled(!canGenerate)
 
                 agentMenu
             }
         }
-    }
-
-    private func valueText(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.medium))
-            .foregroundStyle(AppTheme.Text.tertiaryColor)
-            .lineLimit(1)
-    }
-
-    private func clock(_ frame: Int) -> String {
-        let total = Double(frame) / Double(max(1, editor.timeline.fps))
-        let m = Int(total) / 60
-        let s = Int(total) % 60
-        return String(format: "%d:%02d", m, s)
     }
 
     private var agentMenu: some View {
@@ -279,7 +183,7 @@ struct MusicSection: View {
             help: L10n.string("Let Agent generate music for you. Choose a starter, or ask Agent in the chat.")
         ) {
             Button {
-                musicTask("Score my timeline with music that matches the visuals. Use a video-to-music model on the full timeline span so the music follows the edit, and place it on an audio track.")
+                musicTask("Generate music that fits my timeline and place it on an audio track aligned to the edit.")
             } label: { Label(L10n.string("Generate music for the timeline"), systemImage: "music.note") }
             Menu {
                 ForEach(["Cinematic", "Upbeat", "Ambient", "Tense", "Lo-fi"], id: \.self) { mood in
@@ -302,24 +206,15 @@ struct MusicSection: View {
         note = nil
         guard let model else { return }
         let trimmed = trimmedPrompt.isEmpty ? nil : trimmedPrompt
-        let submission: MusicGenerationSubmission
-        if isTextMode {
-            let frameCount = max(1, Int(textDuration * Double(max(1, editor.timeline.fps))))
-            submission = MusicGenerationSubmission(
-                mode: .textToMusic, model: model, prompt: trimmed,
-                source: .init(startFrame: textPlacementFrame, frameCount: frameCount),
-                spanSeconds: textDuration, name: nil
-            )
-        } else {
-            guard let source else { return }
-            submission = MusicGenerationSubmission(
-                mode: .videoToMusic, model: model, prompt: trimmed,
-                source: source, spanSeconds: spanSeconds, name: nil
-            )
-        }
+        let frameCount = max(1, Int(textDuration * Double(max(1, editor.timeline.fps))))
+        let submission = MusicGenerationSubmission(
+            model: model, prompt: trimmed,
+            source: .init(startFrame: textPlacementFrame, frameCount: frameCount),
+            spanSeconds: textDuration, name: nil
+        )
 
         isGenerating = true
-        generatingLabel = (isTextMode ? MusicGenerationSubmission.Phase.generating : .exporting).label
+        generatingLabel = MusicGenerationSubmission.Phase.generating.label
         Task {
             do {
                 try await submission.run(

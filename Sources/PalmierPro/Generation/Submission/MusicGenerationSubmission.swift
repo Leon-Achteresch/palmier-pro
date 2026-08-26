@@ -1,11 +1,7 @@
-import AVFoundation
 import Foundation
 
 /// Generates music from music tab and places it on the timeline
 struct MusicGenerationSubmission {
-    enum Mode { case videoToMusic, textToMusic }
-
-    let mode: Mode
     let model: AudioModelConfig
     let prompt: String?
     let source: EditorViewModel.TimelineSpan
@@ -13,12 +9,10 @@ struct MusicGenerationSubmission {
     let name: String?
 
     enum Phase {
-        case exporting, uploading, generating
+        case generating
 
         var label: String {
             switch self {
-            case .exporting: L10n.key("Exporting…")
-            case .uploading: L10n.key("Uploading…")
             case .generating: L10n.key("Generating…")
             }
         }
@@ -32,28 +26,6 @@ struct MusicGenerationSubmission {
         onPhase: @MainActor (Phase) -> Void = { _ in },
         onFinished: @escaping @MainActor () -> Void = {}
     ) async throws {
-        var videoURL: String?
-        if mode == .videoToMusic {
-            onPhase(.exporting)
-            let mp4 = try await TimelineRenderer.render(
-                timeline: editor.timeline,
-                resolver: editor.mediaResolver,
-                resolveTimeline: editor.timelineResolver(),
-                missingMediaRefs: editor.missingMediaRefs,
-                startFrame: source.startFrame,
-                frameCount: source.frameCount,
-                shortSide: 240,
-                includeAudio: false,
-                preset: AVAssetExportPresetLowQuality
-            )
-            defer { try? FileManager.default.removeItem(at: mp4) }
-            onPhase(.uploading)
-            videoURL = try await GenerationBackend.uploadReference(
-                fileURL: mp4,
-                contentType: "video/mp4"
-            )
-        }
-
         let durationSeconds = max(1, Int(spanSeconds.rounded()))
         let params = AudioGenerationParams(
             prompt: prompt ?? "",
@@ -61,8 +33,7 @@ struct MusicGenerationSubmission {
             lyrics: nil,
             styleInstructions: nil,
             instrumental: false,
-            durationSeconds: durationSeconds,
-            videoURL: videoURL
+            durationSeconds: durationSeconds
         )
 
         var genInput = GenerationInput(
@@ -71,9 +42,7 @@ struct MusicGenerationSubmission {
             duration: durationSeconds,
             aspectRatio: ""
         )
-        genInput.audioInput = mode == .textToMusic
-            ? AudioModelConfig.Input.text.rawValue
-            : AudioModelConfig.Input.video.rawValue
+        genInput.audioInput = AudioModelConfig.Input.text.rawValue
         genInput.createdAt = Date()
 
         onPhase(.generating)

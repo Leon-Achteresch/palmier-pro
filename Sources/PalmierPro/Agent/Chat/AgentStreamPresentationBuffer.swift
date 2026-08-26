@@ -10,37 +10,16 @@ struct AgentStreamSnapshot: Sendable {
 private struct AgentStreamReducer: Sendable {
     private(set) var blocks: [AgentContentBlock] = []
     private(set) var stopReason: AgentStopReason = .endTurn
-    private let model: AgentModel
-
-    init(model: AgentModel) {
-        self.model = model
-    }
 
     @discardableResult
     mutating func apply(_ event: AgentStreamEvent) -> Bool {
         switch event {
         case .thinkingDelta(let chunk):
-            updateThinking(textDelta: chunk)
-        case .thinkingSignature(let signature):
-            updateThinking(signatureDelta: signature)
-        case .redactedThinking(let data):
-            blocks.append(.redactedThinking(data: data))
-        case .reasoningSummaryDelta(let chunk):
-            let existing = takeStreamingReasoningSummary()
-            blocks.append(.openAIReasoning(
-                summary: existing + chunk,
-                encryptedContent: "",
-                itemID: nil,
-                model: model
-            ))
-        case .reasoningComplete(let itemID, let summary, let encryptedContent):
-            let existing = takeStreamingReasoningSummary()
-            blocks.append(.openAIReasoning(
-                summary: summary.isEmpty ? existing : summary,
-                encryptedContent: encryptedContent,
-                itemID: itemID,
-                model: model
-            ))
+            if case .thinking(let existing)? = blocks.last {
+                blocks[blocks.count - 1] = .thinking(text: existing + chunk)
+            } else {
+                blocks.append(.thinking(text: chunk))
+            }
         case .textDelta(let chunk):
             if case .text(let existing)? = blocks.last {
                 blocks[blocks.count - 1] = .text(existing + chunk)
@@ -56,26 +35,6 @@ private struct AgentStreamReducer: Sendable {
         return true
     }
 
-    private mutating func updateThinking(
-        textDelta: String = "",
-        signatureDelta: String = ""
-    ) {
-        if case .thinking(let text, let signature)? = blocks.last {
-            blocks[blocks.count - 1] = .thinking(
-                text: text + textDelta,
-                signature: signature + signatureDelta
-            )
-        } else {
-            blocks.append(.thinking(text: textDelta, signature: signatureDelta))
-        }
-    }
-
-    private mutating func takeStreamingReasoningSummary() -> String {
-        guard case .openAIReasoning(let summary, _, _, let existingModel)? = blocks.last,
-              existingModel == model else { return "" }
-        blocks.removeLast()
-        return summary
-    }
 }
 
 actor AgentStreamPresentationBuffer {
@@ -87,8 +46,8 @@ actor AgentStreamPresentationBuffer {
     private var continuation: AsyncThrowingStream<AgentStreamSnapshot, Error>.Continuation?
     private var timerTask: Task<Void, Never>?
 
-    init(model: AgentModel) {
-        reducer = AgentStreamReducer(model: model)
+    init() {
+        reducer = AgentStreamReducer()
     }
 
     func snapshots() -> AsyncThrowingStream<AgentStreamSnapshot, Error> {
@@ -166,10 +125,9 @@ actor AgentStreamPresentationBuffer {
 
 func presentAgentStream(
     _ source: AsyncThrowingStream<AgentStreamEvent, Error>,
-    model: AgentModel,
     onSnapshot: @escaping @Sendable (AgentStreamSnapshot) async -> Void
 ) async throws -> AgentStreamSnapshot {
-    let buffer = AgentStreamPresentationBuffer(model: model)
+    let buffer = AgentStreamPresentationBuffer()
     let snapshots = await buffer.snapshots()
     let producer = Task.detached {
         do {

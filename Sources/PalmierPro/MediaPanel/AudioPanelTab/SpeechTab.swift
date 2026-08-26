@@ -62,7 +62,7 @@ struct SpeechAnalysisSections: View {
             }
             .buttonStyle(.capsule(.secondary))
             .disabled(editor.speakerIdentifyInFlight)
-            .help(L10n.string("Matches voices across clips, transcribing untranscribed timeline clips first (uses credits). Transcripts and voice fingerprints are cached, so re-runs are fast."))
+            .help(L10n.string("Matches voices across clips, transcribing untranscribed timeline clips on device first. Transcripts and voice fingerprints are cached, so re-runs are fast."))
         }
     }
 

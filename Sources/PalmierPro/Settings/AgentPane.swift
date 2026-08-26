@@ -9,18 +9,6 @@ struct AgentPane: View {
             SettingsSection(title: L10n.string("AI Chat")) {
                 apiKeySection
             }
-            SettingsSection(title: L10n.string("Generation")) {
-                APIKeyField(
-                    title: "OpenRouter API Key",
-                    explanation: "OpenRouter image/video generation runs on this key. No Palmier account needed. Stored in the macOS Keychain.",
-                    linkTitle: "Get OpenRouter API key",
-                    linkURL: URL(string: "https://openrouter.ai/settings/keys")!,
-                    placeholder: "sk-or-…",
-                    load: { OpenRouterKeychain.load() },
-                    save: { OpenRouterKeychain.save($0) },
-                    remove: { OpenRouterKeychain.delete() }
-                )
-            }
             SettingsSection(title: L10n.string("Integrations")) {
                 mcpSection
             }
@@ -29,12 +17,12 @@ struct AgentPane: View {
 
     private var apiKeySection: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
-            Text(L10n.string("Use your own API key for AI chat. Stored in the macOS Keychain."))
+            Text(L10n.string("AI chat, image, video, and audio generation run on your own keys. Stored in the macOS Keychain."))
                 .font(.system(size: AppTheme.FontSize.sm))
                 .foregroundStyle(AppTheme.Text.tertiaryColor)
                 .fixedSize(horizontal: false, vertical: true)
-            APIKeySettingRow(provider: .anthropic)
-            APIKeySettingRow(provider: .openAI)
+            APIKeySettingRow(provider: .openRouter)
+            APIKeySettingRow(provider: .google)
         }
     }
 
@@ -256,19 +244,19 @@ private extension AgentProvider {
         title: String, getKeyTitle: String, placeholder: String, consoleURL: URL
     ) {
         switch self {
-        case .anthropic:
+        case .openRouter:
             (
-                L10n.string("Anthropic API Key"),
-                L10n.string("Get Anthropic API key"),
-                "sk-ant-…",
-                URL(string: "https://console.anthropic.com/settings/keys")!
+                L10n.string("OpenRouter API Key"),
+                L10n.string("Get OpenRouter API key"),
+                "sk-or-…",
+                URL(string: "https://openrouter.ai/settings/keys")!
             )
-        case .openAI:
+        case .google:
             (
-                L10n.string("OpenAI API Key"),
-                L10n.string("Get OpenAI API key"),
-                "sk-…",
-                URL(string: "https://platform.openai.com/api-keys")!
+                L10n.string("Google AI API Key"),
+                L10n.string("Get Google AI API key"),
+                "AIza…",
+                URL(string: "https://aistudio.google.com/apikey")!
             )
         }
     }

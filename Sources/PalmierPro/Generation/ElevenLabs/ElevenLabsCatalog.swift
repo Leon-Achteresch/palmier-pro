@@ -1,6 +1,6 @@
 import Foundation
 
-/// Catalog entries served straight from the user's own ElevenLabs key instead of Palmier credits.
+/// Catalog entries served straight from the user's own ElevenLabs key.
 enum ElevenLabsCatalog {
     static let speechId = "elevenlabs-key-speech"
     static let soundEffectId = "elevenlabs-key-sound-effects"

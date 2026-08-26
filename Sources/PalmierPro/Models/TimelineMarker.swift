@@ -19,6 +19,7 @@ struct TimelineMarker: Codable, Sendable, Equatable, Hashable, Identifiable {
     var comment: String = ""
     var status: Status = .open
     var kind: MarkerKind = .standard
+    var sketch: [MarkerStroke] = []
 
     var endFrame: Int { startFrame + durationFrames }
     var isRange: Bool { durationFrames > 0 }
@@ -38,7 +39,7 @@ struct TimelineMarker: Codable, Sendable, Equatable, Hashable, Identifiable {
 
 extension TimelineMarker {
     private enum CodingKeys: String, CodingKey {
-        case id, name, startFrame, durationFrames, color, comment, status, kind
+        case id, name, startFrame, durationFrames, color, comment, status, kind, sketch
     }
 
     init(from decoder: Decoder) throws {
@@ -51,7 +52,8 @@ extension TimelineMarker {
             color: try values.decode(TextStyle.RGBA.self, forKey: .color),
             comment: try values.decode(String.self, forKey: .comment),
             status: try values.decodeIfPresent(Status.self, forKey: .status) ?? .open,
-            kind: try values.decodeIfPresent(MarkerKind.self, forKey: .kind) ?? .standard
+            kind: try values.decodeIfPresent(MarkerKind.self, forKey: .kind) ?? .standard,
+            sketch: try values.decodeIfPresent([MarkerStroke].self, forKey: .sketch) ?? []
         )
     }
 }
@@ -60,4 +62,5 @@ enum TimelineMarkerValidationError: Error, Equatable {
     case invalidName
     case invalidComment
     case invalidRange
+    case invalidSketch
 }

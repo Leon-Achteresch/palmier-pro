@@ -13,7 +13,6 @@ extension EditorViewModel {
         var maxWords: Int? = nil
         var maxCharacters: Int? = nil
         var gapSettings: CaptionGapSettings = .default
-        var provider: TranscriptionProvider = .local
         /// Animation applied to every generated caption clip (timed from the transcript).
         var animation: TextAnimation = TextAnimation()
     }
@@ -326,47 +325,36 @@ extension EditorViewModel {
         var targets = resolvedCaptionTargets(for: CaptionRequest(autoDetect: true))
         guard !targets.isEmpty else { return nil }
         let clips = targets.map(\.clip)
-        for provider in [TranscriptionProvider.cloud, .local] {
-            var seen: Set<String> = []
-            var results: [String: TranscriptionResult] = [:]
-            var complete = true
-            for target in targets where seen.insert(target.clip.mediaRef).inserted {
-                guard !Task.isCancelled,
-                      let url = mediaResolver.expectedURL(for: target.clip.mediaRef) else {
-                    return nil
-                }
-                let range = CaptionTranscriptMapper.sourceUnion(
-                    for: target.clip.mediaRef,
-                    clips: clips,
-                    fps: snapshot.fps
-                )
-                let cached = provider == .cloud
-                    ? await TranscriptCache.shared.cachedCloudTranscript(
-                        for: url, range: range, language: nil
-                    )
-                    : await TranscriptCache.shared.cachedTranscript(for: url, range: range)
-                guard let cached else {
-                    complete = false
-                    break
-                }
-                results[target.clip.mediaRef] = cached
-            }
-            guard complete else { continue }
+        var seen: Set<String> = []
+        var results: [String: TranscriptionResult] = [:]
+        for target in targets where seen.insert(target.clip.mediaRef).inserted {
             guard !Task.isCancelled,
-                  activeTimelineId == timelineId,
-                  timeline == snapshot,
-                  let winner = dominantSpeechTrack(targets, results) else {
+                  let url = mediaResolver.expectedURL(for: target.clip.mediaRef) else {
                 return nil
             }
-            targets = targets.filter { $0.trackId == winner }
-            return await Self.makeTimelineTranscriptDocument(PreparedTranscript(
-                timelineId: timelineId,
-                timeline: snapshot,
-                targets: targets,
-                results: results
-            ))
+            let range = CaptionTranscriptMapper.sourceUnion(
+                for: target.clip.mediaRef,
+                clips: clips,
+                fps: snapshot.fps
+            )
+            guard let cached = await TranscriptCache.shared.cachedTranscript(for: url, range: range) else {
+                return nil
+            }
+            results[target.clip.mediaRef] = cached
         }
-        return nil
+        guard !Task.isCancelled,
+              activeTimelineId == timelineId,
+              timeline == snapshot,
+              let winner = dominantSpeechTrack(targets, results) else {
+            return nil
+        }
+        targets = targets.filter { $0.trackId == winner }
+        return await Self.makeTimelineTranscriptDocument(PreparedTranscript(
+            timelineId: timelineId,
+            timeline: snapshot,
+            targets: targets,
+            results: results
+        ))
     }
 
     @concurrent
@@ -407,34 +395,6 @@ extension EditorViewModel {
             sourceTrackId: nil,
             sourceCaptionGroupId: nil
         )
-    }
-
-    // Estimate the cost of cloud transcription given the request. 0 if hit cache.
-    func captionCloudCreditCost(for request: CaptionRequest) async -> Int {
-        guard request.provider == .cloud else { return 0 }
-        let targets = resolvedCaptionTargets(for: request)
-        guard !targets.isEmpty else { return 0 }
-        let targetClips = targets.map(\.clip)
-        let language = CloudTranscription.languageIdentifier(request.locale)
-        var seen: Set<String> = []
-        var totalCost = 0
-        for t in targets where seen.insert(t.clip.mediaRef).inserted {
-            guard let url = mediaResolver.resolveURL(for: t.clip.mediaRef) else { continue }
-            let range = CaptionTranscriptMapper.sourceUnion(for: t.clip.mediaRef, clips: targetClips, fps: timeline.fps)
-            if await TranscriptCache.shared.hasCachedCloudTranscript(for: url, range: range, language: language) {
-                continue
-            }
-            let seconds: Double
-            if let range {
-                seconds = max(0, range.upperBound - range.lowerBound)
-            } else if let asset = mediaAssets.first(where: { $0.id == t.clip.mediaRef }) {
-                seconds = max(0, asset.duration)
-            } else {
-                seconds = 0
-            }
-            totalCost += CostEstimator.estimatedTranscriptionCost(durationSeconds: seconds) ?? 0
-        }
-        return totalCost
     }
 
     private func prepareTranscript(
@@ -494,7 +454,6 @@ extension EditorViewModel {
             let range = CaptionTranscriptMapper.sourceUnion(for: t.clip.mediaRef, clips: targetClips, fps: timeline.fps)
             return TranscribeJob(mediaRef: t.clip.mediaRef, url: url, range: range, isVideo: captionUsesVideoAudioExtraction(for: t.clip))
         }
-        let projectId = projectId
 
         let outcomes = await withTaskGroup(of: (String, Result<TranscriptionResult, Error>).self) { group in
             var collected: [(String, Result<TranscriptionResult, Error>)] = []
@@ -508,8 +467,7 @@ extension EditorViewModel {
                 group.addTask {
                     do {
                         let result: TranscriptionResult
-                        switch request.provider {
-                        case .local:
+                        do {
                             if request.censorProfanity || request.locale != nil {
                                 // option variants produce different transcripts — bypass the cache
                                 result = job.isVideo
@@ -518,13 +476,6 @@ extension EditorViewModel {
                             } else {
                                 result = try await TranscriptCache.shared.transcript(for: job.url, isVideo: job.isVideo, range: job.range)
                             }
-                        case .cloud:
-                            result = try await CloudTranscription.transcribe(
-                                fileURL: job.url,
-                                range: job.range,
-                                preferredLocale: request.locale,
-                                projectId: projectId
-                            )
                         }
                         return (job.mediaRef, .success(result))
                     } catch {

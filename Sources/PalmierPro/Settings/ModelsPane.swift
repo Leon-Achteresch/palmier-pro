@@ -3,14 +3,12 @@ import SwiftUI
 struct ModelsPane: View {
     private var prefs = ModelPreferences.shared
     private var catalog = ModelCatalog.shared
-    private var account = AccountService.shared
 
     @State private var query = ""
 
     private struct Row: Identifiable {
         let id: String
         let displayName: String
-        let paidOnly: Bool
         let providerIconKey: String?
     }
 
@@ -20,14 +18,10 @@ struct ModelsPane: View {
         let rows: [Row]
     }
 
-    private func isLocked(_ row: Row) -> Bool { row.paidOnly && !account.isPaid }
-
     private var sections: [Section] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         func prepare(_ rows: [Row]) -> [Row] {
-            let matched = q.isEmpty ? rows : rows.filter { $0.displayName.lowercased().contains(q) }
-            // Available models first, locked (paid-only) ones grouped at the bottom.
-            return matched.filter { !isLocked($0) } + matched.filter { isLocked($0) }
+            q.isEmpty ? rows : rows.filter { $0.displayName.lowercased().contains(q) }
         }
         return [
             Section(id: "image", title: L10n.string("Image"),
@@ -43,7 +37,6 @@ struct ModelsPane: View {
         Row(
             id: entry.id,
             displayName: entry.displayName,
-            paidOnly: entry.paidOnly,
             providerIconKey: entry.providerIconKey
         )
     }
@@ -53,7 +46,7 @@ struct ModelsPane: View {
             SettingsSection(title: "Own API Keys") {
                 APIKeyField(
                     title: "ElevenLabs API Key",
-                    explanation: "Generate speech, sound effects, and music straight from your ElevenLabs account. Billed by ElevenLabs, not in credits. Stored in the macOS Keychain.",
+                    explanation: "Generate speech, sound effects, and music straight from your ElevenLabs account. Billed by ElevenLabs. Stored in the macOS Keychain.",
                     linkTitle: "Get ElevenLabs API key",
                     linkURL: URL(string: "https://elevenlabs.io/app/settings/api-keys")!,
                     placeholder: "sk_…",
@@ -63,7 +56,7 @@ struct ModelsPane: View {
                 )
                 APIKeyField(
                     title: "Google AI API Key",
-                    explanation: "Generate and edit video and images with Gemini Omni Flash — swap objects, rewrite scenes, and recut footage. Billed by Google, not in credits. Stored in the macOS Keychain.",
+                    explanation: "Generate and edit video and images with Gemini Omni Flash — swap objects, rewrite scenes, and recut footage. Billed by Google. Stored in the macOS Keychain.",
                     linkTitle: "Get Google AI API key",
                     linkURL: URL(string: "https://aistudio.google.com/apikey")!,
                     placeholder: "AIza…",
@@ -146,33 +139,23 @@ struct ModelsPane: View {
         }
     }
 
-    @ViewBuilder
     private func modelRow(_ row: Row) -> some View {
-        let locked = isLocked(row)
         HStack(spacing: AppTheme.Spacing.md) {
             if let iconKey = row.providerIconKey {
                 ProviderLogo(iconKey: iconKey, size: AppTheme.IconSize.md)
-                    .opacity(locked ? AppTheme.Opacity.medium : AppTheme.Opacity.opaque)
             }
             Text(row.displayName)
                 .font(.system(size: AppTheme.FontSize.md))
-                .foregroundStyle(locked ? AppTheme.Text.tertiaryColor : AppTheme.Text.primaryColor)
+                .foregroundStyle(AppTheme.Text.primaryColor)
             Spacer(minLength: AppTheme.Spacing.lg)
-            if locked {
-                Button(L10n.string("Subscribe")) {
-                    SettingsWindowController.shared.show(tab: .account)
-                }
-                .buttonStyle(.capsule(.secondary))
-            } else {
-                Toggle(String(), isOn: Binding(
-                    get: { prefs.isEnabled(row.id) },
-                    set: { prefs.setEnabled(row.id, $0) }
-                ))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-                .accessibilityLabel(row.displayName)
-            }
+            Toggle(String(), isOn: Binding(
+                get: { prefs.isEnabled(row.id) },
+                set: { prefs.setEnabled(row.id, $0) }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .accessibilityLabel(row.displayName)
         }
         .padding(.vertical, AppTheme.Spacing.smMd)
     }
