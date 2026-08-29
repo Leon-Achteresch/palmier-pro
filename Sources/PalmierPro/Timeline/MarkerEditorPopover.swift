@@ -66,8 +66,9 @@ struct MarkerEditorPopover: View {
                 Spacer()
                 Button(L10n.string("Sketch")) {
                     guard apply() else { return }
-                    editor.seekToFrame(marker.startFrame)
-                    editor.sketchingMarkerId = marker.id
+                    editor.seekToFrame(draft.startFrame)
+                    editor.selectedTimelineMarkerIds = [draft.id]
+                    editor.sketchingMarkerId = draft.id
                 }
                 .buttonStyle(.capsule(.secondary, size: .small))
                 Button(L10n.string("Done")) { apply() }

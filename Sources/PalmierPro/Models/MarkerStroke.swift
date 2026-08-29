@@ -15,7 +15,7 @@ struct MarkerStroke: Codable, Sendable, Equatable, Hashable {
 
     var isValid: Bool {
         points.count >= 2 && points.count <= Self.maximumPoints
-            && points.allSatisfy { $0.x.isFinite && $0.y.isFinite }
+            && points.allSatisfy { (0...1).contains($0.x) && (0...1).contains($0.y) }
     }
 
     /// Top-left origin path in `size`, arrowhead included.

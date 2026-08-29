@@ -32,6 +32,7 @@ struct PreviewContainerView: View {
         .background(AppTheme.Background.surfaceColor)
         .onChange(of: editor.activePreviewTabId) { _, _ in
             editor.cancelChromaKeySampling()
+            editor.sketchingMarkerId = nil
         }
     }
 
@@ -88,7 +89,9 @@ struct PreviewContainerView: View {
                         TransformOverlayView()
                     }
                 }
-                MarkerSketchOverlayView()
+                if isTimeline {
+                    MarkerSketchOverlayView()
+                }
                 if let slip = editor.slipPreview, isTimeline {
                     SlipTwoUpView(state: slip)
                 }
@@ -122,7 +125,7 @@ struct PreviewContainerView: View {
         }
         .clipped()
         .overlay(alignment: .top) {
-            MarkerSketchToolbar()
+            if isTimeline { MarkerSketchToolbar() }
         }
         .overlay(alignment: .bottom) {
             MotionBakeStatusView()

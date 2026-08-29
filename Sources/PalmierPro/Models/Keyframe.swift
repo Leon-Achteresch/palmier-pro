@@ -370,6 +370,10 @@ extension Crop: KeyframeInterpolatable {
 enum AnimatableProperty: String, CaseIterable, Sendable {
     case opacity, position, scale, rotation, crop, blur, volume, speed
 
+    init?(toolName: String) {
+        self.init(rawValue: toolName == "volumeDb" ? "volume" : toolName)
+    }
+
     var displayName: String {
         switch self {
         case .opacity:  "Opacity"
@@ -545,6 +549,19 @@ extension Clip {
             setBlurKeyframeTrack(track)
         case .volume:   update(&volumeTrack)
         case .speed:    update(&speedTrack)
+        }
+    }
+
+    mutating func clearKeyframes(for property: AnimatableProperty) {
+        switch property {
+        case .opacity:  opacityTrack = nil
+        case .position: positionTrack = nil
+        case .scale:    scaleTrack = nil
+        case .rotation: rotationTrack = nil
+        case .crop:     cropTrack = nil
+        case .blur:     setBlurKeyframeTrack(nil)
+        case .volume:   volumeTrack = nil
+        case .speed:    speedTrack = nil
         }
     }
 

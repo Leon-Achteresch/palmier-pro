@@ -759,7 +759,7 @@ extension InspectorView {
                 if control.effectId == Effect.gaussianBlurType,
                    control.paramKey == Effect.gaussianBlurRadiusKey {
                     Spacer(minLength: 0)
-                    KeyframePropertyValueFields(clips: clips, property: .blur, style: .inspector)
+                    InspectorKeyframePropertyControl(clips: clips, property: .blur)
                 } else {
                     AdjustSlider(
                         value: sharedClipValue(clips) { controlValue($0, control, spec) } ?? spec.defaultValue,

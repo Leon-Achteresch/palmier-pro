@@ -21,6 +21,10 @@ struct TransformOverlayView: View {
                 }
             }
 
+            if let clip = selectedClip, clip.positionTrack?.isActive == true {
+                motionPath(clip: clip, videoRect: videoRect)
+            }
+
             if selectedClip != nil && (centerGuideX || editor.rotationSnapGuidesVisible) {
                 Rectangle()
                     .fill(centerGuideColor)
@@ -104,6 +108,71 @@ struct TransformOverlayView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Motion path
+
+    @State private var pathDragStart: (x: Double, y: Double)?
+
+    @ViewBuilder
+    private func motionPath(clip: Clip, videoRect: CGRect) -> some View {
+        let frames = clip.keyframeFrames(for: .position)
+        if let first = frames.first, let last = frames.last, last > first {
+            let step = max(1, (last - first) / 60)
+            Path { path in
+                let points = stride(from: first, through: last, by: step).map {
+                    center(of: clip, at: $0, videoRect: videoRect)
+                }
+                path.addLines(points + [center(of: clip, at: last, videoRect: videoRect)])
+            }
+            .stroke(
+                AppTheme.Accent.timecodeColor.opacity(AppTheme.Opacity.strong),
+                style: StrokeStyle(lineWidth: AppTheme.BorderWidth.thin, dash: [4, 3])
+            )
+            .allowsHitTesting(false)
+        }
+        ForEach(frames, id: \.self) { frame in
+            let point = center(of: clip, at: frame, videoRect: videoRect)
+            Circle()
+                .fill(frame == editor.activeFrame ? AppTheme.Accent.timecodeColor : AppTheme.MediaOverlay.primaryColor)
+                .frame(width: handleSize, height: handleSize)
+                .contentShape(Circle().size(width: handleSize * 2, height: handleSize * 2))
+                .position(point)
+                .onTapGesture { editor.seekToFrame(frame) }
+                .gesture(keyframeDragGesture(clip: clip, frame: frame, videoRect: videoRect))
+                .help(L10n.string("Drag to move this position keyframe"))
+        }
+    }
+
+    private func center(of clip: Clip, at frame: Int, videoRect: CGRect) -> CGPoint {
+        let transform = clip.transformAt(frame: frame)
+        return CGPoint(
+            x: videoRect.origin.x + transform.centerX * videoRect.width,
+            y: videoRect.origin.y + transform.centerY * videoRect.height
+        )
+    }
+
+    private func keyframeDragGesture(clip: Clip, frame: Int, videoRect: CGRect) -> some Gesture {
+        DragGesture(minimumDistance: AppTheme.BorderWidth.thick)
+            .onChanged { value in
+                guard videoRect.width > 0, videoRect.height > 0 else { return }
+                if pathDragStart == nil {
+                    let tl = clip.topLeftAt(frame: frame)
+                    pathDragStart = (tl.x, tl.y)
+                }
+                guard let start = pathDragStart else { return }
+                editor.applyPositionKeyframe(
+                    clipId: clip.id,
+                    frame: frame,
+                    x: start.x + value.translation.width / videoRect.width,
+                    y: start.y + value.translation.height / videoRect.height
+                )
+            }
+            .onEnded { _ in
+                guard pathDragStart != nil else { return }
+                pathDragStart = nil
+                editor.commitMoveKeyframe(clipId: clip.id)
+            }
     }
 
     // MARK: - Gestures

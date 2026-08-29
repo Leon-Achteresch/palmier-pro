@@ -41,6 +41,7 @@ struct ToolbarView: View {
                     action: { _ = editor.addAdjustmentLayer() }
                 )
                 markerButton
+                autoKeyframeButton
             }
 
             Spacer()
@@ -116,6 +117,7 @@ struct ToolbarView: View {
             .accessibilityLabel(L10n.string("Add Marker (M)"))
 
             Menu {
+                Button(L10n.string("Sketch on Canvas")) { editor.startMarkerSketch() }
                 Toggle(
                     L10n.string("Ripple Timeline Markers"),
                     isOn: Bindable(editor).rippleTimelineMarkers
@@ -130,11 +132,24 @@ struct ToolbarView: View {
             .menuStyle(.button)
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
-            .accessibilityLabel(L10n.string("Ripple Timeline Markers"))
+            .accessibilityLabel(L10n.string("Marker Options"))
         }
         .padding(.trailing, AppTheme.Spacing.xxs)
         .hoverHighlight()
         .hoverTooltip(L10n.string("Add Marker (M)"))
+    }
+
+    private var autoKeyframeButton: some View {
+        let active = editor.autoKeyframeEnabled
+        return Button { editor.autoKeyframeEnabled.toggle() } label: {
+            Image(systemName: active ? "diamond.fill" : "diamond")
+                .font(.system(size: AppTheme.FontSize.md))
+                .foregroundStyle(active ? AppTheme.Accent.timecodeColor : AppTheme.Text.secondaryColor)
+                .frame(width: 24, height: 24)
+                .hoverHighlight(isActive: active)
+        }
+        .buttonStyle(.plain)
+        .hoverTooltip(L10n.string("Auto Keyframe — canvas and inspector edits stamp a keyframe at the playhead"))
     }
 
     private func toolbarButton(_ systemName: String, help: String, action: @escaping () -> Void) -> some View {

@@ -65,3 +65,43 @@ struct MarkerSketchTests {
         #expect(editor.sketchedTimelineMarkers(at: 25).isEmpty)
     }
 }
+
+@Suite("Marker sketch sessions")
+@MainActor
+struct MarkerSketchSessionTests {
+    private func editor() -> EditorViewModel {
+        let editor = EditorViewModel()
+        editor.undo.attach(UndoManager())
+        editor.timeline = Fixtures.timeline(tracks: [
+            Fixtures.videoTrack(clips: [Fixtures.clip(id: "a", start: 0, duration: 300)])
+        ])
+        return editor
+    }
+
+    @Test func sketchingFromAMediaTabReturnsToTheTimelineCanvas() {
+        let editor = editor()
+        editor.previewTabs.append(.mediaAsset(id: "asset", name: "clip.mov", type: .video))
+        editor.activePreviewTabId = PreviewTab.mediaAssetTabId(for: "asset")
+        editor.startMarkerSketch()
+        #expect(editor.activePreviewTab == .timeline)
+        #expect(editor.sketchingMarkerId != nil)
+        #expect(editor.timeline.markers.count == 1)
+    }
+
+    @Test func sketchingReusesTheMarkerUnderThePlayheadInsteadOfAddingOne() {
+        let editor = editor()
+        editor.timeline.markers = [TimelineMarker(id: "m", name: "Note", startFrame: 42)]
+        editor.seekToFrame(42)
+        editor.startMarkerSketch()
+        #expect(editor.sketchingMarkerId == "m")
+        #expect(editor.timeline.markers.count == 1)
+    }
+
+    @Test func deletingTheSketchedMarkerEndsTheSession() throws {
+        let editor = editor()
+        editor.timeline.markers = [TimelineMarker(id: "m", name: "Note", startFrame: 0)]
+        editor.sketchingMarkerId = "m"
+        _ = try editor.changeTimelineMarkers(deleteIds: ["m"], actionName: "Delete Marker")
+        #expect(editor.sketchingMarkerId == nil)
+    }
+}

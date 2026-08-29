@@ -1188,11 +1188,12 @@ extension ToolExecutor {
             }
         }
 
-        if requested.contains(where: { $0.property == "blur" }) {
-            for id in clipIds {
-                guard editor.clipFor(id: id)?.supportsKeyframes(for: .blur) == true else {
-                    throw ToolError("Clip \(id) does not support blur keyframes.")
-                }
+        for request in requested {
+            // volumeDb/speed carry their own validation; a video clip legitimately owns both.
+            guard let property = AnimatableProperty(toolName: request.property),
+                  property != .volume, property != .speed else { continue }
+            for id in clipIds where editor.clipFor(id: id)?.supportsKeyframes(for: property) != true {
+                throw ToolError("Clip \(id) does not support \(request.property) keyframes.")
             }
         }
 

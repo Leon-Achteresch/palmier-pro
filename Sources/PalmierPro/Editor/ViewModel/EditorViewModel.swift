@@ -193,6 +193,8 @@ final class EditorViewModel {
     }() {
         didSet { UserDefaults.standard.set(safeAreaGuidesVisible, forKey: "safeAreaGuidesVisible") }
     }
+    /// While on, animatable property edits stamp a keyframe at the playhead instead of the static value.
+    var autoKeyframeEnabled: Bool = false
     var timelineVisibleWidth: Double = 0
     var timelineRenderRevision: Int = 0
     var timelineCompositionGeneration: Int = 0

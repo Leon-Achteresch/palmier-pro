@@ -30,6 +30,19 @@ extension EditorViewModel {
         }
     }
 
+    /// Sketching happens on the timeline canvas, so it always starts there — on the selected
+    /// marker, the one under the playhead, or a fresh one.
+    func startMarkerSketch() {
+        if case .mediaAsset = activePreviewTab { selectPreviewTab(id: PreviewTab.timeline.id) }
+        let existing = selectedTimelineMarkerIds.count == 1
+            ? selectedTimelineMarkerIds.first.flatMap(timelineMarker(id:))
+            : timeline.markers.first { $0.isRange ? $0.intersects(activeFrame..<(activeFrame + 1)) : $0.startFrame == activeFrame }
+        guard let marker = existing ?? addTimelineMarkerAtSelection() else { return }
+        seekToFrame(marker.startFrame)
+        selectedTimelineMarkerIds = [marker.id]
+        sketchingMarkerId = marker.id
+    }
+
     func changeMarkerSketch(
         markerId: String,
         actionName: String,
@@ -118,6 +131,7 @@ extension EditorViewModel {
             return TimelineMarkerChangeReceipt(created: [], updated: [], deletedIds: [])
         }
         timeline.markers = next
+        pruneSketchingMarker()
         registerTimelineMarkerSwap(undoMarkers: before, redoMarkers: next, actionName: actionName)
         selectedTimelineMarkerIds.subtract(deleteSet)
         return TimelineMarkerChangeReceipt(created: created, updated: updated, deletedIds: deleteIds)
@@ -160,6 +174,11 @@ extension EditorViewModel {
         return marker
     }
 
+    func pruneSketchingMarker() {
+        guard let id = sketchingMarkerId, timelineMarker(id: id) == nil else { return }
+        sketchingMarkerId = nil
+    }
+
     private func registerTimelineMarkerSwap(
         undoMarkers: [TimelineMarker],
         redoMarkers: [TimelineMarker],
@@ -169,6 +188,7 @@ extension EditorViewModel {
             vm.timelineMarkerPreview = nil
             vm.timeline.markers = undoMarkers
             vm.selectedTimelineMarkerIds.formIntersection(undoMarkers.map(\.id))
+            vm.pruneSketchingMarker()
             vm.registerTimelineMarkerSwap(
                 undoMarkers: redoMarkers, redoMarkers: undoMarkers,
                 actionName: actionName

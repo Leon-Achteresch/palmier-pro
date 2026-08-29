@@ -113,11 +113,7 @@ struct TextTab: View {
                 }
             }
         ) {
-            KeyframePropertyValueFields(
-                clips: clips,
-                property: .opacity,
-                style: .inspector
-            )
+            InspectorKeyframePropertyControl(clips: clips, property: .opacity)
         }
     }
 
@@ -133,11 +129,7 @@ struct TextTab: View {
                 }
             }
         ) {
-            KeyframePropertyValueFields(
-                clips: clips,
-                property: .position,
-                style: .inspector
-            )
+            InspectorKeyframePropertyControl(clips: clips, property: .position)
         }
     }
 
@@ -189,11 +181,7 @@ struct TextTab: View {
                 }
             }
         ) {
-            KeyframePropertyValueFields(
-                clips: clips,
-                property: .rotation,
-                style: .inspector
-            )
+            InspectorKeyframePropertyControl(clips: clips, property: .rotation)
         }
     }
 
@@ -245,7 +233,31 @@ struct TextAnimateTab: View {
             )
             if anim.preset.usesHighlight { highlightRow(anim) }
         }
+        keyframeGroup
         if clips.count == 1 { accentGroup }
+    }
+
+    private var keyframeProperties: [AnimatableProperty] {
+        AnimatableProperty.visualLaneOrder.filter { property in
+            clips.allSatisfy { $0.supportsKeyframes(for: property) }
+        }
+    }
+
+    private var keyframeGroup: some View {
+        EditorPanelGroup(L10n.string("Keyframes")) {
+            ForEach(keyframeProperties, id: \.self) { property in
+                InspectorRow(
+                    label: L10n.string(key: property.displayName),
+                    onReset: {
+                        editor.commitClipProperties(clipIds: targetIds) {
+                            $0.clearKeyframes(for: property)
+                        }
+                    }
+                ) {
+                    InspectorKeyframePropertyControl(clips: clips, property: property)
+                }
+            }
+        }
     }
 
     private var accentWords: [String] {

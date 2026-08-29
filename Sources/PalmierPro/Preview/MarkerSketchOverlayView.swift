@@ -5,6 +5,7 @@ struct MarkerSketchOverlayView: View {
     @Environment(EditorViewModel.self) private var editor
 
     @State private var livePoints: [MarkerStroke.Point] = []
+    @State private var pushedCursor = false
 
     private var sketchingMarkerId: String? { editor.sketchingMarkerId }
 
@@ -37,7 +38,14 @@ struct MarkerSketchOverlayView: View {
                     Rectangle()
                         .fill(Color.clear)
                         .contentShape(Rectangle())
-                        .onHover { $0 ? NSCursor.crosshair.push() : NSCursor.pop() }
+                        .onHover { hovering in
+                            guard hovering != pushedCursor else { return }
+                            pushedCursor = hovering
+                            if hovering { NSCursor.crosshair.push() } else { NSCursor.pop() }
+                        }
+                        .onDisappear {
+                            if pushedCursor { NSCursor.pop(); pushedCursor = false }
+                        }
                         .gesture(drawGesture(size: geo.size))
                 }
             }

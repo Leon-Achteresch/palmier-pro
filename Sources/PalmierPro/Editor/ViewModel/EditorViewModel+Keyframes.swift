@@ -215,12 +215,28 @@ extension EditorViewModel {
         }
     }
 
+    /// Motion-path keyframe drag on the canvas; close it with `commitMoveKeyframe`.
+    func applyPositionKeyframe(clipId: String, frame: Int, x: Double, y: Double) {
+        applyClipProperty(clipId: clipId) { clip in
+            guard clip.positionTrack?.isActive == true,
+                  clip.contains(timelineFrame: frame) else { return }
+            clip.upsertKeyframe(in: \.positionTrack, frame: frame, value: AnimPair(a: x, b: y))
+        }
+    }
+
     /// Closes the drag started by `applyMoveKeyframe` calls.
     func commitMoveKeyframe(clipId: String) {
         commitClipProperty(clipId: clipId, actionName: "Move Keyframe") { _ in /* applies already moved the kf */ }
     }
 
     // MARK: - Animation-aware property writes
+
+    /// Auto-keyframe stamps at the playhead, but only for a real change inside the clip.
+    private func stampsAutoKeyframe(_ clip: Clip, _ property: AnimatableProperty, changed: Bool) -> Bool {
+        autoKeyframeEnabled && changed
+            && clip.supportsKeyframes(for: property)
+            && clip.contains(timelineFrame: activeFrame)
+    }
 
     func applyOpacity(clipId: String, value: Double) {
         applyClipProperty(clipId: clipId) { self.writeOpacity(into: &$0, value: value) }
@@ -234,6 +250,8 @@ extension EditorViewModel {
         let frame = activeFrame
         if clip.opacityTrack?.isActive == true {
             guard clip.contains(timelineFrame: frame) else { return }
+            clip.upsertKeyframe(in: \.opacityTrack, frame: frame, value: value)
+        } else if stampsAutoKeyframe(clip, .opacity, changed: value != clip.rawOpacityAt(frame: frame)) {
             clip.upsertKeyframe(in: \.opacityTrack, frame: frame, value: value)
         } else {
             clip.opacity = value
@@ -255,6 +273,8 @@ extension EditorViewModel {
         if clip.blurKeyframeTrack?.isActive == true {
             guard clip.contains(timelineFrame: frame) else { return }
             clip.upsertBlurKeyframe(frame: frame, value: radius)
+        } else if stampsAutoKeyframe(clip, .blur, changed: radius != clip.blurRadius(at: frame)) {
+            clip.upsertBlurKeyframe(frame: frame, value: radius)
         } else {
             clip.setStaticBlurRadius(radius)
         }
@@ -273,6 +293,8 @@ extension EditorViewModel {
     private func writeRotation(into clip: inout Clip, valueDeg: Double) {
         if clip.rotationTrack?.isActive == true {
             guard clip.contains(timelineFrame: activeFrame) else { return }
+            clip.upsertKeyframe(in: \.rotationTrack, frame: activeFrame, value: valueDeg)
+        } else if stampsAutoKeyframe(clip, .rotation, changed: valueDeg != clip.rotationAt(frame: activeFrame)) {
             clip.upsertKeyframe(in: \.rotationTrack, frame: activeFrame, value: valueDeg)
         } else {
             clip.transform.rotation = valueDeg
@@ -364,6 +386,8 @@ extension EditorViewModel {
         if clip.positionTrack?.isActive == true {
             guard clip.contains(timelineFrame: frame) else { return }
             clip.upsertKeyframe(in: \.positionTrack, frame: frame, value: AnimPair(a: newX, b: newY))
+        } else if stampsAutoKeyframe(clip, .position, changed: newX != tl.x || newY != tl.y) {
+            clip.upsertKeyframe(in: \.positionTrack, frame: frame, value: AnimPair(a: newX, b: newY))
         } else {
             clip.transform.centerX = newX + sz.width / 2
             clip.transform.centerY = newY + sz.height / 2
@@ -394,14 +418,16 @@ extension EditorViewModel {
         commitClipProperties(clipIds: clipIds, actionName: "Reset Text Size") { clip in
             guard clip.mediaType == .text else { return }
             clip.scaleTrack = nil
-            self.writeTextSize(into: &clip, value: defaultSize)
+            self.writeTextSize(into: &clip, value: defaultSize, autoKeyframe: false)
         }
     }
 
-    private func writeTextSize(into clip: inout Clip, value: Double) {
+    private func writeTextSize(into clip: inout Clip, value: Double, autoKeyframe: Bool = true) {
         guard clip.mediaType == .text, value.isFinite, value > 0 else { return }
         var style = clip.textStyle ?? TextStyle()
-        if clip.scaleTrack?.isActive == true {
+        let currentSize = style.fontSize * clip.textScaleAt(frame: activeFrame)
+        let animates = autoKeyframe && stampsAutoKeyframe(clip, .scale, changed: value != currentSize)
+        if clip.scaleTrack?.isActive == true || animates {
             guard style.fontSize.isFinite, style.fontSize > 0 else { return }
             writeScale(into: &clip, newScale: value / style.fontSize)
         } else {
@@ -421,7 +447,8 @@ extension EditorViewModel {
     private func writeScale(into clip: inout Clip, newScale: Double) {
         guard newScale.isFinite, newScale > 0 else { return }
         if clip.mediaType == .text {
-            guard clip.scaleTrack?.isActive == true,
+            let changed = newScale != clip.textScaleAt(frame: activeFrame)
+            guard clip.scaleTrack?.isActive == true || stampsAutoKeyframe(clip, .scale, changed: changed),
                   clip.contains(timelineFrame: activeFrame) else { return }
             let baseScale = clip.textStyle?.fontScale ?? TextStyle().fontScale
             guard baseScale.isFinite, baseScale > 0,
@@ -444,6 +471,10 @@ extension EditorViewModel {
         if clip.scaleTrack?.isActive == true {
             guard clip.contains(timelineFrame: activeFrame) else { return }
             clip.upsertKeyframe(in: \.scaleTrack, frame: activeFrame, value: AnimPair(a: w, b: h))
+        } else if stampsAutoKeyframe(
+            clip, .scale, changed: w != clip.transform.width || h != clip.transform.height
+        ) {
+            clip.upsertKeyframe(in: \.scaleTrack, frame: activeFrame, value: AnimPair(a: w, b: h))
         } else {
             clip.transform.width = w
             clip.transform.height = h
@@ -462,11 +493,18 @@ extension EditorViewModel {
 
     private func writeTransform(into clip: inout Clip, newTransform: Transform) {
         let frame = activeFrame
+        let previous = clip.transformAt(frame: frame)
+        let tl = newTransform.topLeft
+        let previousTopLeft = previous.topLeft
+
         if clip.positionTrack?.isActive == true {
             if clip.contains(timelineFrame: frame) {
-                let tl = newTransform.topLeft
                 clip.upsertKeyframe(in: \.positionTrack, frame: frame, value: AnimPair(a: tl.x, b: tl.y))
             }
+        } else if stampsAutoKeyframe(
+            clip, .position, changed: tl.x != previousTopLeft.x || tl.y != previousTopLeft.y
+        ) {
+            clip.upsertKeyframe(in: \.positionTrack, frame: frame, value: AnimPair(a: tl.x, b: tl.y))
         } else {
             clip.transform.centerX = newTransform.centerX
             clip.transform.centerY = newTransform.centerY
@@ -475,6 +513,10 @@ extension EditorViewModel {
             if clip.contains(timelineFrame: frame) {
                 clip.upsertKeyframe(in: \.scaleTrack, frame: frame, value: AnimPair(a: newTransform.width, b: newTransform.height))
             }
+        } else if stampsAutoKeyframe(
+            clip, .scale, changed: newTransform.width != previous.width || newTransform.height != previous.height
+        ) {
+            clip.upsertKeyframe(in: \.scaleTrack, frame: frame, value: AnimPair(a: newTransform.width, b: newTransform.height))
         } else {
             clip.transform.width = newTransform.width
             clip.transform.height = newTransform.height
@@ -483,6 +525,8 @@ extension EditorViewModel {
             if clip.contains(timelineFrame: frame) {
                 clip.upsertKeyframe(in: \.rotationTrack, frame: frame, value: newTransform.rotation)
             }
+        } else if stampsAutoKeyframe(clip, .rotation, changed: newTransform.rotation != previous.rotation) {
+            clip.upsertKeyframe(in: \.rotationTrack, frame: frame, value: newTransform.rotation)
         } else {
             clip.transform.rotation = newTransform.rotation
         }
@@ -501,6 +545,8 @@ extension EditorViewModel {
     private func writeCrop(into clip: inout Clip, newCrop: Crop) {
         if clip.cropTrack?.isActive == true {
             guard clip.contains(timelineFrame: activeFrame) else { return }
+            clip.upsertKeyframe(in: \.cropTrack, frame: activeFrame, value: newCrop)
+        } else if stampsAutoKeyframe(clip, .crop, changed: newCrop != clip.cropAt(frame: activeFrame)) {
             clip.upsertKeyframe(in: \.cropTrack, frame: activeFrame, value: newCrop)
         } else {
             clip.crop = newCrop
