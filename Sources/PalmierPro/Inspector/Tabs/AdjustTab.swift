@@ -91,6 +91,15 @@ extension InspectorView {
         ]
     }
 
+    private var backdropControls: [EffectControl] {
+        [
+            EffectControl(effectId: "stylize.backdrop", paramKey: "background", label: L10n.string("Background")),
+            EffectControl(effectId: "stylize.backdrop", paramKey: "padding", label: L10n.string("Padding")),
+            EffectControl(effectId: "stylize.backdrop", paramKey: "cornerRadius", label: L10n.string("Corners")),
+            EffectControl(effectId: "stylize.backdrop", paramKey: "shadow", label: L10n.string("Shadow")),
+        ]
+    }
+
     private var warpControls: [EffectControl] {
         [
             EffectControl(effectId: "distort.warp", paramKey: "bend", label: "Bend"),
@@ -172,7 +181,7 @@ extension InspectorView {
     }
 
     private var effectsEffectIds: Set<String> {
-        Set((detailControls + blurControls + motionBlurControls + vignetteControls + grainControls + glowControls + warpControls + perspectiveControls + chromaKeyControls + subjectKeyControls + occlusionControls + subjectRevealControls).map(\.effectId))
+        Set((detailControls + blurControls + motionBlurControls + vignetteControls + grainControls + glowControls + backdropControls + warpControls + perspectiveControls + chromaKeyControls + subjectKeyControls + occlusionControls + subjectRevealControls).map(\.effectId))
             .union(["stylize.invert", CornerPin.effectType, MeshWarp.effectType])
     }
 
@@ -199,6 +208,7 @@ extension InspectorView {
             adjustSection(title: L10n.string("LUTs"), effectIds: ["color.lut"], clips: clips) {
                 lutContent(clips: clips)
             }
+            motionSection(clips: clips)
             adjustSection(title: L10n.string("Effects"), effectIds: effectsEffectIds, clips: clips) {
                 PresetRow(kind: .effects, clips: clips)
                 adjustSubgroup(title: L10n.string("Detail"), controls: detailControls, clips: clips)
@@ -207,6 +217,7 @@ extension InspectorView {
                 adjustSubgroup(title: L10n.string("Vignette"), controls: vignetteControls, clips: clips)
                 adjustSubgroup(title: L10n.string("Film Grain"), controls: grainControls, clips: clips)
                 adjustSubgroup(title: L10n.string("Glow"), controls: glowControls, clips: clips)
+                adjustSubgroup(title: L10n.string("Backdrop"), controls: backdropControls, clips: clips)
                 adjustSubgroup(title: L10n.string("Warp"), controls: warpControls, clips: clips)
                 adjustSubgroup(title: L10n.string("Perspective"), controls: perspectiveControls, clips: clips)
                 cornerPinRow(clips: clips)

@@ -31,14 +31,4 @@ struct MCPClientInfo: Equatable, Sendable {
         )
     }
 
-    var payload: Analytics.Payload {
-        var payload: Analytics.Payload = [
-            "name": name,
-            "version": version,
-        ]
-        if let title { payload["title"] = title }
-        if let description { payload["description"] = description }
-        if let websiteUrl { payload["websiteUrl"] = websiteUrl }
-        return payload
-    }
 }

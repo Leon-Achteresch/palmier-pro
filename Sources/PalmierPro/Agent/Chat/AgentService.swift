@@ -350,17 +350,6 @@ final class AgentService {
             ? nil
             : AgentMentionContext.hint(referencedMentions, editor: editor)
         let runSettings = snapshotRunSettings()
-        var sessionActivation = Analytics.SessionActivation(
-            isActivated: messages.contains { $0.role == .user }
-        )
-        let analyticsPayload: [String: Any] = [
-            "project_id": editor?.projectId ?? "unknown",
-            "model": runSettings.model.rawValue,
-        ]
-        if sessionActivation.activate() {
-            Analytics.capture(.agentSessionStarted, properties: analyticsPayload)
-        }
-
         resolveOrphanToolUses()
         messages.append(AgentMessage(
             role: .user, blocks: [.text(trimmed)],

@@ -47,11 +47,7 @@ enum ChapterSidecar {
             Log.export.notice("chapters sidecar written file=\(url.lastPathComponent)")
             return nil
         } catch {
-            Log.export.warning(
-                "chapters sidecar failed: \(Log.detail(error))",
-                telemetry: "Export chapters sidecar failed",
-                data: ["error": Log.detail(error)]
-            )
+            Log.export.warning("chapters sidecar failed: \(Log.detail(error))")
             return "Chapters file could not be written next to the video: \(Log.detail(error))"
         }
     }

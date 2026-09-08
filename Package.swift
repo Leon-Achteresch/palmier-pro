@@ -11,15 +11,12 @@ let package = Package(
     ],
     traits: [
         .trait(name: "BundledSpeech", description: "Include on-device speech models and MLX."),
-        .trait(name: "ProductionTelemetry", description: "Include Sentry and PostHog telemetry."),
         .trait(name: "HotReload", description: "Link interposable so InjectionIII can hot-reload SwiftUI."),
         .trait(name: "ReactNative", description: "Link react-native-macos for React Native motion scenes."),
     ],
     dependencies: [
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0"),
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.7.0"),
-        .package(url: "https://github.com/getsentry/sentry-cocoa", exact: "9.21.0"),
-        .package(url: "https://github.com/PostHog/posthog-ios.git", exact: "3.64.4"),
         .package(url: "https://github.com/huggingface/swift-transformers", from: "1.3.3"),
         .package(url: "https://github.com/ml-explore/mlx-swift", exact: "0.31.5"),
         .package(url: "https://github.com/airbnb/lottie-ios", from: "4.6.1"),
@@ -33,16 +30,6 @@ let package = Package(
             dependencies: [
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Sparkle", package: "Sparkle"),
-                .product(
-                    name: "Sentry",
-                    package: "sentry-cocoa",
-                    condition: .when(traits: ["ProductionTelemetry"])
-                ),
-                .product(
-                    name: "PostHog",
-                    package: "posthog-ios",
-                    condition: .when(traits: ["ProductionTelemetry"])
-                ),
                 .product(name: "Tokenizers", package: "swift-transformers"),
                 .product(name: "Lottie", package: "lottie-ios"),
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
@@ -88,7 +75,6 @@ let package = Package(
             ],
             swiftSettings: [
                 .define("BUNDLED_SPEECH", .when(traits: ["BundledSpeech"])),
-                .define("PRODUCTION_TELEMETRY", .when(traits: ["ProductionTelemetry"])),
                 .define("REACT_NATIVE", .when(traits: ["ReactNative"])),
             ],
             linkerSettings: [

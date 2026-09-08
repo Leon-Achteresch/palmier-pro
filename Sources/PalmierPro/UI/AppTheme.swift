@@ -13,20 +13,20 @@ enum AppTheme {
 
     enum Background {
         static let base = AppTheme.adaptive(
-            light: NSColor(red: 241/255, green: 240/255, blue: 237/255, alpha: 1),
-            dark: NSColor(red: 24/255, green: 25/255, blue: 28/255, alpha: 1)
+            light: NSColor(red: 238/255, green: 239/255, blue: 242/255, alpha: 1),
+            dark: NSColor(red: 16/255, green: 17/255, blue: 20/255, alpha: 1)
         )
         static let surface = AppTheme.adaptive(
-            light: NSColor(red: 245/255, green: 244/255, blue: 241/255, alpha: 1),
-            dark: NSColor(red: 30/255, green: 31/255, blue: 35/255, alpha: 1)
+            light: NSColor(red: 246/255, green: 247/255, blue: 249/255, alpha: 1),
+            dark: NSColor(red: 24/255, green: 26/255, blue: 30/255, alpha: 1)
         )
         static let raised = AppTheme.adaptive(
-            light: NSColor(red: 249/255, green: 248/255, blue: 245/255, alpha: 1),
-            dark: NSColor(red: 38/255, green: 39/255, blue: 44/255, alpha: 1)
+            light: NSColor(red: 252/255, green: 252/255, blue: 253/255, alpha: 1),
+            dark: NSColor(red: 33/255, green: 35/255, blue: 40/255, alpha: 1)
         )
         static let prominent = AppTheme.adaptive(
-            light: NSColor(red: 252/255, green: 251/255, blue: 248/255, alpha: 1),
-            dark: NSColor(red: 48/255, green: 49/255, blue: 55/255, alpha: 1)
+            light: NSColor.white,
+            dark: NSColor(red: 44/255, green: 47/255, blue: 53/255, alpha: 1)
         )
 
         /// Alias — empty media slot is a raised plate.
@@ -45,20 +45,20 @@ enum AppTheme {
 
     enum Border {
         static let primary = AppTheme.adaptive(
-            light: NSColor.black.withAlphaComponent(0.20),
-            dark: NSColor.white.withAlphaComponent(0.10)
+            light: NSColor.black.withAlphaComponent(0.10),
+            dark: NSColor.white.withAlphaComponent(0.08)
         )
         static let subtle = AppTheme.adaptive(
-            light: NSColor.black.withAlphaComponent(0.14),
-            dark: NSColor.white.withAlphaComponent(0.07)
+            light: NSColor.black.withAlphaComponent(0.06),
+            dark: NSColor.white.withAlphaComponent(0.05)
         )
         static let divider = AppTheme.adaptive(
-            light: NSColor.black.withAlphaComponent(0.44),
-            dark: NSColor.white.withAlphaComponent(0.24)
+            light: NSColor.black.withAlphaComponent(0.16),
+            dark: NSColor.white.withAlphaComponent(0.14)
         )
         static let panel = AppTheme.adaptive(
-            light: NSColor.black.withAlphaComponent(0.18),
-            dark: .black
+            light: NSColor.black.withAlphaComponent(0.09),
+            dark: NSColor.black.withAlphaComponent(0.6)
         )
         static let timelineClip = AppTheme.adaptive(light: .white, dark: .black)
         static let timelineClipSelected = AppTheme.adaptive(light: .black, dark: .white)
@@ -354,13 +354,13 @@ enum AppTheme {
     // MARK: - Corner radii
 
     enum Radius {
-        static let xs: CGFloat = 3
-        static let xsSm: CGFloat = 4
-        static let sm: CGFloat = 6
-        static let md: CGFloat = 10
-        static let mdLg: CGFloat = 12
-        static let lg: CGFloat = 14
-        static let xl: CGFloat = 20
+        static let xs: CGFloat = 4
+        static let xsSm: CGFloat = 6
+        static let sm: CGFloat = 8
+        static let md: CGFloat = 12
+        static let mdLg: CGFloat = 14
+        static let lg: CGFloat = 18
+        static let xl: CGFloat = 26
 
         static func concentric(outer: CGFloat, padding: CGFloat) -> CGFloat {
             max(outer - padding, 0)
@@ -585,9 +585,9 @@ enum AppTheme {
     }
 
     enum Shadow {
-        static let sm = ShadowStyle(color: .black.opacity(0.3), radius: 1, x: 0, y: 0.5)
-        static let md = ShadowStyle(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
-        static let lg = ShadowStyle(color: .black.opacity(0.25), radius: 24, x: 0, y: 8)
+        static let sm = ShadowStyle(color: .black.opacity(0.10), radius: 2, x: 0, y: 1)
+        static let md = ShadowStyle(color: .black.opacity(0.14), radius: 10, x: 0, y: 4)
+        static let lg = ShadowStyle(color: .black.opacity(0.20), radius: 32, x: 0, y: 12)
         static let overlay = ShadowStyle(
             color: .black.opacity(Opacity.strong),
             radius: Spacing.xlXxl,
@@ -599,8 +599,9 @@ enum AppTheme {
     // MARK: - Animation durations
 
     enum Anim {
-        static let hover: Double = 0.15
-        static let transition: Double = 0.2
+        static let hover: Double = 0.12
+        static let transition: Double = 0.22
+        static let spring = SwiftUI.Animation.smooth(duration: 0.28)
         static let pulse: Double = 0.8
         static let slipPreviewRefresh: Duration = .milliseconds(67)
         static let agentChangeHighlightHold: Double = 1.0

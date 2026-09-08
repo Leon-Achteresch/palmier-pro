@@ -15,7 +15,6 @@ final class OnboardingStore {
     private(set) var sampleState: OnboardingSampleState = .idle
 
     private let defaults: UserDefaults
-    private var didCaptureSurvey = false
     private var sampleTask: Task<Void, Never>?
 
     init(defaults: UserDefaults = .standard) {
@@ -31,19 +30,7 @@ final class OnboardingStore {
         move(by: -1)
     }
 
-    /// Reports the survey once, no matter how often the user steps back.
     func submitSurvey() {
-        if !didCaptureSurvey {
-            didCaptureSurvey = true
-            Analytics.capture(.onboardingCompleted, properties: [
-                "survey_version": Self.surveyVersion,
-                "roles": selection(for: .roles).sorted(),
-                "video_types": selection(for: .videoTypes).sorted(),
-                "interests": selection(for: .interests).sorted(),
-                "acquisition_source": selection(for: .acquisitionSource).sorted().first ?? "not_provided",
-                "previous_editors": selection(for: .previousEditors).sorted(),
-            ])
-        }
         advance()
     }
 

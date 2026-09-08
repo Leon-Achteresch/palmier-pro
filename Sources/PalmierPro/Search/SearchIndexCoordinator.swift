@@ -82,11 +82,7 @@ final class SearchIndexCoordinator {
     // MARK: - Triggers
 
     func projectOpened() {
-        Log.search.notice(
-            "index project opened enabled=\(VisualModelLoader.shared.enabled)",
-            telemetry: "Search index project opened",
-            data: ["enabled": VisualModelLoader.shared.enabled]
-        )
+        Log.search.notice("index project opened enabled=\(VisualModelLoader.shared.enabled)")
         Task {
             // Let project-open work (restore, thumbnails, first playback) settle before loading the model.
             try? await Task.sleep(for: .seconds(5))
@@ -101,15 +97,7 @@ final class SearchIndexCoordinator {
         guard VisualModelLoader.shared.enabled, VisualModelLoader.shared.isReady else { return }
         failedIds.removeAll()
         let assets = assetsProvider()
-        Log.search.notice(
-            "index sweep assets=\(assets.count) queuedBefore=\(queue.count)",
-            telemetry: "Search index sweep",
-            data: [
-                "assets": assets.count,
-                "ready": VisualModelLoader.shared.isReady,
-                "queuedBefore": queue.count
-            ]
-        )
+        Log.search.notice("index sweep assets=\(assets.count) queuedBefore=\(queue.count)")
         for asset in assets {
             schedule(asset)
         }
@@ -167,11 +155,7 @@ final class SearchIndexCoordinator {
         guard worker == nil else { return }
         workerGeneration += 1
         let generation = workerGeneration
-        Log.search.notice(
-            "index worker start generation=\(generation) depth=\(queue.count)",
-            telemetry: "Search index worker started",
-            data: ["generation": generation, "queueDepth": queue.count, "batchTotal": batchTotal]
-        )
+        Log.search.notice("index worker start generation=\(generation) depth=\(queue.count)")
         worker = Task(priority: .utility) { [weak self] in
             while let self, !Task.isCancelled, let work = self.dequeue() {
                 self.currentAssetFraction = 0

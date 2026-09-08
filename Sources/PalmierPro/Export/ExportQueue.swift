@@ -105,15 +105,9 @@ final class ExportQueue {
         outputURL: URL,
         source: ExportJobSource,
         projectID: String,
-        analyticsProjectID: String?,
         warnings: [String] = []
     ) throws -> ExportQueueSubmission {
         let resolver = resolver.snapshot()
-        let analyticsInput = ExportTimelineAnalyticsInput(
-            scope: .exportedTimeline(root: timeline, resolveTimeline: resolveTimeline),
-            manifest: resolver.manifestSnapshot(),
-            exportFilename: outputURL.lastPathComponent
-        )
         return try enqueue(outputURL: outputURL, projectID: projectID, source: source, warnings: warnings) { service in
             await service.export(
                 timeline: timeline,
@@ -124,12 +118,7 @@ final class ExportQueue {
                 fcpxmlVersion: fcpxmlVersion,
                 fcpxmlTarget: fcpxmlTarget,
                 missingMediaRefs: missingMediaRefs,
-                outputURL: outputURL,
-                analyticsContext: ExportAnalyticsContext(
-                    source: source.rawValue,
-                    projectId: analyticsProjectID,
-                    timelineInput: analyticsInput
-                )
+                outputURL: outputURL
             )
         }
     }
@@ -142,27 +131,13 @@ final class ExportQueue {
         outputURL: URL,
         source: ExportJobSource,
         projectID: String,
-        analyticsProjectID: String?
     ) throws -> ExportQueueSubmission {
-        let analyticsInput = ExportTimelineAnalyticsInput(
-            scope: .project(
-                timelines: projectFile.timelines,
-                rootTimelineId: projectFile.activeTimelineId
-            ),
-            manifest: manifest,
-            exportFilename: outputURL.lastPathComponent
-        )
         return try enqueue(outputURL: outputURL, projectID: projectID, source: source) { service in
             await service.exportPalmierProject(
                 projectFile: projectFile,
                 manifest: manifest,
                 sourceProjectURL: sourceProjectURL,
-                outputURL: outputURL,
-                analyticsContext: ExportAnalyticsContext(
-                    source: source.rawValue,
-                    projectId: analyticsProjectID,
-                    timelineInput: analyticsInput
-                )
+                outputURL: outputURL
             )
         }
     }

@@ -458,9 +458,6 @@ struct AgentPanelView: View {
                 VStack(spacing: AppTheme.Spacing.xs) {
                     ForEach(Self.starterPrompts) { starterPrompt in
                         AgentStarterPromptButton(starterPrompt: starterPrompt) {
-                            Analytics.capture(.agentStarterPromptClicked, properties: [
-                                "starter_prompt": starterPrompt.id,
-                            ])
                             populatePrompt(starterPrompt.prompt)
                         }
                     }

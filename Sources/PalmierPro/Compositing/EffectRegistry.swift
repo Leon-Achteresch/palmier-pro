@@ -339,6 +339,20 @@ enum EffectRegistry {
                                  warmth: p.value("warmth"))
             }
         ),
+        EffectDescriptor(
+            id: "stylize.backdrop", displayName: "Backdrop", category: "Stylize",
+            params: [
+                EffectParamSpec(key: "background", label: "Background",
+                                range: 0...Double(BackdropEffect.gradients.count - 1),
+                                defaultValue: 0, unit: ""),
+                EffectParamSpec(key: "padding", label: "Padding", range: 0...40, defaultValue: 8, unit: "%"),
+                EffectParamSpec(key: "cornerRadius", label: "Corners", range: 0...20, defaultValue: 4, unit: "%"),
+                EffectParamSpec(key: "shadow", label: "Shadow", range: 0...1, defaultValue: 0.5, unit: ""),
+            ],
+            apply: { image, p, extent in
+                BackdropEffect.apply(image, params: p, extent: extent)
+            }
+        ),
     ]
 
     private static let distort: [EffectDescriptor] = [
@@ -514,7 +528,7 @@ enum EffectRegistry {
         "blur.gaussian", "blur.sharpen",
         "blur.noiseReduction", "blur.motion", "stylize.invert", "stylize.grain", "stylize.vignette",
         "stylize.glow", "distort.warp", "distort.perspective", CornerPin.effectType, MeshWarp.effectType,
-        "mockup.iphone17", "mockup.macbook",
+        "mockup.iphone17", "mockup.macbook", "stylize.backdrop",
     ]
 
     static func insertIndex(_ effects: [Effect], for id: String) -> Int {

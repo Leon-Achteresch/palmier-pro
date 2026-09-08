@@ -40,6 +40,7 @@ enum ToolName: String, CaseIterable, Sendable {
     case setClipProperties = "set_clip_properties"
     case copyClipSettings = "copy_clip_settings"
     case setKeyframes = "set_keyframes"
+    case applyMotion = "apply_motion"
     case applyLayout = "apply_layout"
     case syncClips = "sync_clips"
     case duplicateClips = "duplicate_clips"
@@ -837,6 +838,32 @@ enum ToolDefinitions {
                         "items": ["type": "array"],
                     ],
                 ]
+            )
+        ),
+        AgentTool(
+            name: .applyMotion,
+            brief: "Apply a professional motion preset to clips in one call — entrances (focus-in, pop-in, slide-up, whip-in, spin-reveal, depth-emerge), emphasis (ken-burns, punch-in, float-hold, pulse), and exits (fade-down, scale-blur-out, flick-out, whip-out). Expands into ordinary editable keyframes; tune with intensity, durationSeconds, focus point, and stagger.",
+            description: "Give clips premium, hand-tuned motion without authoring keyframes row by row. Each preset expands into ordinary position/scale/rotation/opacity/blur keyframes on the clip — afterwards they are visible in the timeline lanes and individually editable, and set_keyframes can refine them.\n\nPresets by category:\n• entrance (animates from the clip's first frame over durationSeconds, default 0.8s): 'focus-in' (defocused, slightly large, fades sharp — calm and cinematic), 'depth-emerge' (grows from small and blurred with an overshoot settle — dramatic reveals), 'pop-in' (overshoot scale pop — snappy UI/logo energy), 'slide-up' (rises into place — titles and lower thirds), 'whip-in' (whips in from the left with motion blur feel), 'spin-reveal' (rotates and scales into place).\n• emphasis (spans the whole clip): 'ken-burns' (slow push-in drift — the documentary standard for stills), 'punch-in' (zooms into a focus point, holds, zooms back out — the screen-demo zoom; set focusX/focusY to aim it), 'float-hold' (gentle vertical bob), 'pulse' (soft scale heartbeat).\n• exit (animates into the clip's last frame over durationSeconds): 'fade-down' (sinks and fades), 'scale-blur-out' (grows, blurs, and dissolves), 'flick-out' (flicks away with rotation), 'whip-out' (whips off to the right).\n\nintensity 0–100 (default 50) scales how far the preset travels (blur amounts, overshoot, zoom depth). durationSeconds sets the entrance/exit ramp length (emphasis presets always span the clip). Combining is intended: an entrance, an emphasis, and an exit coexist on one clip because each apply only replaces keyframes inside its own segment — apply entrance and exit LAST if an emphasis preset spans the clip, or their segment will win where they overlap. Multiple clipIds receive the animation in one undoable action; stagger (frames) offsets each subsequent clip for cascading waves. Keyframes are computed from the clip's CURRENT static transform and opacity, so set framing first (set_clip_properties / apply_layout), then apply motion.",
+            inputSchema: objectSchema(
+                properties: [
+                    "clipId": ["type": "string", "description": "The clip to animate. Use clipIds for several clips."],
+                    "clipIds": [
+                        "type": "array",
+                        "items": ["type": "string"],
+                        "description": "Several clips receiving the preset in one undoable action; combine with stagger for cascaded timing.",
+                    ],
+                    "preset": [
+                        "type": "string",
+                        "enum": MotionPreset.allCases.map(\.rawValue),
+                        "description": "The motion preset to apply.",
+                    ],
+                    "intensity": ["type": "number", "description": "0–100, default 50. How pronounced the motion is."],
+                    "durationSeconds": ["type": "number", "description": "Entrance/exit ramp length in seconds (default 0.8, clamped to the clip). Ignored for emphasis presets, which span the whole clip."],
+                    "focusX": ["type": "number", "description": "punch-in only: horizontal focus 0–1 across the clip (default 0.5)."],
+                    "focusY": ["type": "number", "description": "punch-in only: vertical focus 0–1 across the clip (default 0.5)."],
+                    "stagger": ["type": "integer", "description": "Frame offset added per clip in clipIds order for wave-like cascades. Needs at least 2 clipIds."],
+                ],
+                required: ["preset"]
             )
         ),
         AgentTool(

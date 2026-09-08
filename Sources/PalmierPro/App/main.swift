@@ -5,9 +5,6 @@ if let sceneURL = MotionSceneBakeCommand.sceneURL(from: CommandLine.arguments) {
 }
 
 Log.bootstrap()
-Telemetry.start()
-Analytics.start()
-Analytics.capture(.appOpened)
 BundledFonts.register()
 ElevenLabsService.shared.configure()
 OpenRouterService.shared.configure()
