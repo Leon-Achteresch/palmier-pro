@@ -10,6 +10,9 @@ extension InspectorView {
         if !targets.isEmpty {
             EditorPanelGroup(L10n.string("Motion"), contentSpacing: AppTheme.Spacing.smMd) {
                 MotionPresetPicker(editor: editor, clipIds: targets.map(\.id))
+                if clips.count == 1, let clip = clips.first, clip.mediaType == .motion {
+                    Button(L10n.string("Open Motion Editor")) { editor.motionScenes.presentedMediaRef = clip.mediaRef }
+                }
             }
         }
     }

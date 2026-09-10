@@ -55,14 +55,14 @@ struct MotionSceneModelTests {
     }
 
     /// The render cache is keyed by this, so every field that changes the pixels must change it.
-    @Test func contentHashCoversEveryRenderInput() {
+    @Test func contentHashCoversEveryRenderInput() throws {
         let base = scene()
-        #expect(base.contentHash == scene().contentHash)
-        #expect(base.contentHash != scene(width: 321).contentHash)
-        #expect(base.contentHash != scene(height: 241).contentHash)
-        #expect(base.contentHash != scene(fps: 60).contentHash)
-        #expect(base.contentHash != scene(durationInFrames: 31).contentHash)
-        #expect(base.contentHash != scene(source: "export default () => null").contentHash)
+        #expect(try base.contentHash == scene().contentHash)
+        #expect(try base.contentHash != scene(width: 321).contentHash)
+        #expect(try base.contentHash != scene(height: 241).contentHash)
+        #expect(try base.contentHash != scene(fps: 60).contentHash)
+        #expect(try base.contentHash != scene(durationInFrames: 31).contentHash)
+        #expect(try base.contentHash != scene(source: "export default () => null").contentHash)
     }
 
     @Test func encoderSizeIsEven() {
@@ -115,16 +115,46 @@ struct MotionSceneRenderingTests {
     }
     """
 
-    private func bake(_ scene: MotionScene) async throws -> URL {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("motion-bake-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let sceneURL = directory.appendingPathComponent("scene.motion")
-        try scene.encoded().write(to: sceneURL)
-        return try await MotionVideoGenerator.motionVideo(for: sceneURL, mediaRef: "test")
+    @Test func directSeeksResetComponentStateToTheRequestedFrame() async throws {
+        let scene = MotionScene(width: 160, height: 120, fps: 30, durationInFrames: 201, source: """
+            import React from 'react';
+            import {useCurrentFrame} from 'palmier';
+            export default function Card() {
+              const frame = useCurrentFrame();
+              const [initialFrame] = React.useState(frame);
+              if (initialFrame !== frame) throw new Error('stale component state');
+              return null;
+            }
+            """)
+        let renderer = try await MotionSceneRendererFactory.renderer(for: scene)
+        defer { renderer.tearDown() }
+        try await renderer.load(scene: scene)
+        for frame in [0, 200, 20, 200] {
+            try await renderer.seek(toMilliseconds: Double(frame) / scene.fps * 1000)
+            try await renderer.assertSceneHealthy()
+        }
     }
 
-    private struct Frame {
+    private func withBakes(_ work: @MainActor (URL) async throws -> Void) async throws {
+        let package = try await MotionTestPackage.make()
+        do { try await work(package.url); try await package.remove() }
+        catch { try await package.remove(); throw error }
+    }
+
+    private func bake(_ scene: MotionScene, in directory: URL) async throws -> URL {
+        let sceneURL = try await Self.write(scene, directory: directory)
+        return try await MotionVideoGenerator.motionVideo(for: sceneURL, mediaRef: "test", outputDirectory: directory.appendingPathComponent("renders"))
+    }
+
+    @concurrent private static func write(_ scene: MotionScene, directory: URL) async throws -> URL {
+        let sceneURL = directory.appendingPathComponent("scene-\(UUID().uuidString).motion")
+        try scene.encoded().write(to: sceneURL)
+        return sceneURL
+    }
+
+    @concurrent private static func removeRender(_ url: URL) async throws { try FileManager.default.removeItem(at: url) }
+
+    private struct Frame: Sendable {
         let bgra: [UInt8]
         let width: Int
         let height: Int
@@ -137,7 +167,7 @@ struct MotionSceneRenderingTests {
     }
 
     /// AVAssetImageGenerator flattens alpha away, so the frame is read straight off the track.
-    private func firstFrame(_ url: URL) async throws -> Frame {
+    @concurrent private func firstFrame(_ url: URL) async throws -> Frame {
         let asset = AVURLAsset(url: url)
         let track = try #require(try await asset.loadTracks(withMediaType: .video).first)
         let reader = try AVAssetReader(asset: asset)
@@ -170,31 +200,37 @@ struct MotionSceneRenderingTests {
     }
 
     @Test func bakesAtTheDeclaredSizeAsAlphaProRes() async throws {
-        let scene = try MotionScene(
-            width: 320, height: 240, fps: 30, durationInFrames: 6,
-            source: Self.quadrantScene
-        ).validated()
-        let url = try await bake(scene)
+        try await withBakes { directory in
+            let scene = try MotionScene(
+                width: 320, height: 240, fps: 30, durationInFrames: 6,
+                source: Self.quadrantScene
+            ).validated()
+            let url = try await bake(scene, in: directory)
 
-        let track = try #require(try await AVURLAsset(url: url).loadTracks(withMediaType: .video).first)
-        let format = try #require(track.formatDescriptions.first as! CMFormatDescription?)
-        #expect(format.mediaSubType == CMFormatDescription.MediaSubType(rawValue: kCMVideoCodecType_AppleProRes4444))
-        #expect(format.dimensions.width == 320)
-        #expect(format.dimensions.height == 240)
+            let track = try #require(try await AVURLAsset(url: url).loadTracks(withMediaType: .video).first)
+            let format = try #require(try await track.load(.formatDescriptions).first)
+            #expect(format.mediaSubType == CMFormatDescription.MediaSubType(rawValue: kCMVideoCodecType_AppleProRes4444))
+            #expect(format.dimensions.width == 320)
+            #expect(format.dimensions.height == 240)
 
-        let frame = try await firstFrame(url)
-        #expect(frame.width == 320)
-        #expect(frame.height == 240)
+            let frame = try await firstFrame(url)
+            #expect(frame.width == 320)
+            #expect(frame.height == 240)
+
+        }
     }
 
     /// The last frame is held far out so a clip can be dragged past the animation as a freeze-frame.
     @Test func holdsTheFinalFrameSoClipsCanBeExtended() async throws {
-        let scene = try MotionScene(
-            width: 160, height: 120, fps: 30, durationInFrames: 3,
-            source: Self.quadrantScene + "\n// hold probe\n"
-        ).validated()
-        let duration = try await AVURLAsset(url: try await bake(scene)).load(.duration)
-        #expect(duration.seconds > 60)
+        try await withBakes { directory in
+            let scene = try MotionScene(
+                width: 160, height: 120, fps: 30, durationInFrames: 3,
+                source: Self.quadrantScene + "\n// hold probe\n"
+            ).validated()
+            let duration = try await AVURLAsset(url: try await bake(scene, in: directory)).load(.duration)
+            #expect(duration.seconds > 60)
+
+        }
     }
 
     /// Compositing an offscreen window needs a running NSApplication, which `swift test` does not
@@ -202,101 +238,126 @@ struct MotionSceneRenderingTests {
     /// where a top-left red quadrant reads back as R212 A255 with the other three quadrants at A0.
     @Test(.disabled("offscreen compositing is unavailable in the SwiftPM test process"))
     func bakesUprightWithPreservedAlpha() async throws {
-        let scene = try MotionScene(
-            width: 320, height: 240, fps: 30, durationInFrames: 6,
-            source: Self.quadrantScene
-        ).validated()
-        let frame = try await firstFrame(try await bake(scene))
+        try await withBakes { directory in
+            let scene = try MotionScene(
+                width: 320, height: 240, fps: 30, durationInFrames: 6,
+                source: Self.quadrantScene
+            ).validated()
+            let frame = try await firstFrame(try await bake(scene, in: directory))
 
-        let topLeft = frame.pixel(x: 40, y: 30)
-        let bottomRight = frame.pixel(x: 280, y: 210)
-        #expect(topLeft.a > 200)
-        #expect(topLeft.r > 120 && topLeft.g < 110 && topLeft.b < 110)
-        #expect(bottomRight.a == 0)
+            let topLeft = frame.pixel(x: 40, y: 30)
+            let bottomRight = frame.pixel(x: 280, y: 210)
+            #expect(topLeft.a > 200)
+            #expect(topLeft.r > 120 && topLeft.g < 110 && topLeft.b < 110)
+            #expect(bottomRight.a == 0)
+
+        }
     }
 
-    @Test func rendersTheSameBytesForTheSameSource() async throws {
-        let source = Self.quadrantScene + "\n// determinism probe\n"
-        let scene = try MotionScene(
-            width: 160, height: 120, fps: 30, durationInFrames: 4, source: source
-        ).validated()
-        let first = try await bake(scene)
-        MotionVideoGenerator.cache.clear()
-        let second = try await bake(scene)
-        #expect(try Data(contentsOf: first) == (try Data(contentsOf: second)))
+    @Test func rendersTheSamePixelsForTheSameSource() async throws {
+        try await withBakes { directory in
+            let source = Self.quadrantScene + "\n// determinism probe\n"
+            let scene = try MotionScene(
+                width: 160, height: 120, fps: 30, durationInFrames: 4, source: source
+            ).validated()
+            let first = try await bake(scene, in: directory)
+            let firstPixels = try await firstFrame(first)
+            try await Self.removeRender(first)
+            let second = try await bake(scene, in: directory)
+            #expect(firstPixels.bgra == (try await firstFrame(second)).bgra)
+
+        }
     }
 
     @Test func reusesTheCachedRenderForUnchangedSource() async throws {
-        let scene = try MotionScene(
-            width: 160, height: 120, fps: 30, durationInFrames: 4,
-            source: Self.quadrantScene + "\n// cache probe\n"
-        ).validated()
-        #expect(try await bake(scene) == (try await bake(scene)))
+        try await withBakes { directory in
+            let scene = try MotionScene(
+                width: 160, height: 120, fps: 30, durationInFrames: 4,
+                source: Self.quadrantScene + "\n// cache probe\n"
+            ).validated()
+            #expect(try await bake(scene, in: directory) == (try await bake(scene, in: directory)))
+
+        }
     }
 
     @Test func editingTheSourceProducesADifferentRender() async throws {
-        let base = try MotionScene(
-            width: 160, height: 120, fps: 30, durationInFrames: 4,
-            source: Self.quadrantScene + "\n// key probe A\n"
-        ).validated()
-        var edited = base
-        edited.source += "// key probe B\n"
-        #expect(try await bake(base) != (try await bake(edited.validated())))
+        try await withBakes { directory in
+            let base = try MotionScene(
+                width: 160, height: 120, fps: 30, durationInFrames: 4,
+                source: Self.quadrantScene + "\n// key probe A\n"
+            ).validated()
+            var edited = base
+            edited.components[0].source += "// key probe B\n"
+            #expect(try await bake(base, in: directory) != (try await bake(edited.validated(), in: directory)))
+
+        }
     }
 
     @Test func surfacesSceneFailuresInsteadOfShippingBlankFrames() async throws {
-        let broken = try MotionScene(
-            width: 160, height: 120, fps: 30, durationInFrames: 2,
-            source: "export default function Scene() { throw new Error('boom from the scene') }"
-        ).validated()
-        await #expect(throws: MotionSceneError.self) { try await bake(broken) }
+        try await withBakes { directory in
+            let broken = try MotionScene(
+                width: 160, height: 120, fps: 30, durationInFrames: 2,
+                source: "export default function Scene() { throw new Error('boom from the scene') }"
+            ).validated()
+            await #expect(throws: MotionSceneError.self) { try await bake(broken, in: directory) }
+
+        }
     }
 
     @Test func rejectsASceneWithoutADefaultExport() async throws {
-        let noExport = try MotionScene(
-            width: 160, height: 120, fps: 30, durationInFrames: 2,
-            source: "const Scene = () => null"
-        ).validated()
-        await #expect(throws: MotionSceneError.self) { try await bake(noExport) }
+        try await withBakes { directory in
+            let noExport = try MotionScene(
+                width: 160, height: 120, fps: 30, durationInFrames: 2,
+                source: "const Scene = () => null"
+            ).validated()
+            await #expect(throws: MotionSceneError.self) { try await bake(noExport, in: directory) }
+
+        }
     }
 
     @Test func rendersAPrebuiltRemocnComponentThroughTheRemotionAPI() async throws {
-        let scene = try MotionScene(
-            width: 160, height: 120, fps: 30, durationInFrames: 3,
-            source: """
-            import { Typewriter } from "@/components/remocn/typewriter"
-            import { AbsoluteFill, useCurrentFrame } from "remotion"
+        try await withBakes { directory in
+            let scene = try MotionScene(
+                width: 160, height: 120, fps: 30, durationInFrames: 3,
+                source: """
+                import { Typewriter } from "@/components/remocn/typewriter"
+                import { AbsoluteFill, useCurrentFrame } from "remotion"
 
-            export default function Scene() {
-              const frame = useCurrentFrame()
-              return (
-                <AbsoluteFill style={{ opacity: frame === 0 ? 1 : 0.99 }}>
-                  <Typewriter text="remocn" />
-                </AbsoluteFill>
-              )
-            }
-            """
-        ).validated()
-        _ = try await bake(scene)
+                export default function Scene() {
+                  const frame = useCurrentFrame()
+                  return (
+                    <AbsoluteFill style={{ opacity: frame === 0 ? 1 : 0.99 }}>
+                      <Typewriter text="remocn" />
+                    </AbsoluteFill>
+                  )
+                }
+                """
+            ).validated()
+            _ = try await bake(scene, in: directory)
+
+        }
     }
 
     @Test func rendersAPrebuiltBeuiComponent() async throws {
-        let scene = try MotionScene(
-            width: 160, height: 120, fps: 30, durationInFrames: 3,
-            source: """
-            import { TiltCard } from "@/components/beui/tilt-card"
-            import { AbsoluteFill } from "remotion"
+        try await withBakes { directory in
+            let scene = try MotionScene(
+                width: 160, height: 120, fps: 30, durationInFrames: 3,
+                source: """
+                import { TiltCard } from "@/components/beui/tilt-card"
+                import { AbsoluteFill } from "remotion"
 
-            export default function Scene() {
-              return (
-                <AbsoluteFill>
-                  <TiltCard>beui</TiltCard>
-                </AbsoluteFill>
-              )
-            }
-            """
-        ).validated()
-        _ = try await bake(scene)
+                export default function Scene() {
+                  return (
+                    <AbsoluteFill>
+                      <TiltCard>beui</TiltCard>
+                    </AbsoluteFill>
+                  )
+                }
+                """
+            ).validated()
+            _ = try await bake(scene, in: directory)
+
+        }
     }
 
     /// The catalog is what the agent authors against, so a build that drops it must fail loudly.
@@ -312,11 +373,14 @@ struct MotionSceneRenderingTests {
     }
 
     @Test func rejectsAnUnknownImport() async throws {
-        let badImport = try MotionScene(
-            width: 160, height: 120, fps: 30, durationInFrames: 2,
-            // Referenced, because the transform elides imports a scene never uses.
-            source: "import fs from 'node:fs'\nexport default () => fs.readFileSync('/etc/passwd')"
-        ).validated()
-        await #expect(throws: MotionSceneError.self) { try await bake(badImport) }
+        try await withBakes { directory in
+            let badImport = try MotionScene(
+                width: 160, height: 120, fps: 30, durationInFrames: 2,
+                // Referenced, because the transform elides imports a scene never uses.
+                source: "import fs from 'node:fs'\nexport default () => fs.readFileSync('/etc/passwd')"
+            ).validated()
+            await #expect(throws: MotionSceneError.self) { try await bake(badImport, in: directory) }
+
+        }
     }
 }

@@ -3,6 +3,9 @@
 #import <AppKit/AppKit.h>
 #import <RCTDefaultReactNativeFactoryDelegate.h>
 #import <RCTReactNativeFactory.h>
+#import <React/RCTViewManager.h>
+#import "PalmierMotionViews.inc"
+#import "PalmierMotionCapture.inc"
 
 #include <hermes/hermes.h>
 #include <jsi/jsi.h>
@@ -11,6 +14,8 @@
 #include <string>
 
 @implementation PalmierRNHost
+
++ (BOOL)prepareRendering { return prepareMotionFilters(); }
 
 + (nullable NSString *)evaluateScript:(NSString *)source error:(NSError **)error {
   try {
@@ -74,12 +79,45 @@ static void clearHostBackgrounds(NSView *view) {
   for (NSView *child in view.subviews) clearHostBackgrounds(child);
 }
 
+static NSString *const PalmierFrameCommitted = @"PalmierFrameCommitted";
+
+@interface PalmierFrameMarkerView : NSView
+@property (nonatomic, copy) NSString *payload;
+@end
+
+@implementation PalmierFrameMarkerView
+- (void)setPayload:(NSString *)payload {
+  _payload = [payload copy];
+  NSDictionary *receipt = [NSJSONSerialization JSONObjectWithData:[payload dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+  if (![receipt isKindOfClass:NSDictionary.class]) return;
+  // Delivery after the mount transaction ensures every view has received its frame properties.
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [[NSNotificationCenter defaultCenter] postNotificationName:PalmierFrameCommitted object:nil userInfo:receipt];
+  });
+}
+@end
+
+@interface PalmierFrameMarkerManager : RCTViewManager
+@end
+@implementation PalmierFrameMarkerManager
+RCT_EXPORT_MODULE(PalmierFrameMarker)
+RCT_EXPORT_VIEW_PROPERTY(payload, NSString)
+- (NSView *)view { return [PalmierFrameMarkerView new]; }
+@end
+
 @implementation PalmierRNSurface {
   NSURL *_bundleURL;
   NSSize _size;
   NSWindow *_window;
   PalmierRNFactoryDelegate *_delegate;
   RCTReactNativeFactory *_factory;
+  NSView *_rootView;
+  id _frameObserver;
+  NSString *_pendingRequest;
+  NSString *_frameError;
+  void (^_pendingCompletion)(NSError *);
+  PalmierMotionCapture *_capture;
+
 }
 
 - (instancetype)initWithBundleURL:(NSURL *)bundleURL width:(NSInteger)width height:(NSInteger)height {
@@ -95,62 +133,110 @@ static void clearHostBackgrounds(NSView *view) {
             durationInFrames:(NSInteger)durationInFrames
                   completion:(void (^)(NSError *_Nullable))completion {
   NSAssert(NSThread.isMainThread, @"React Native must be started on the main thread");
+  [self beginRequest:completion];
+  __weak PalmierRNSurface *weakSelf = self;
+  _frameObserver = [[NSNotificationCenter defaultCenter] addObserverForName:PalmierFrameCommitted object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *notification) {
+    [weakSelf receiveFrame:notification.userInfo];
+  }];
 
-  // An offscreen NSView only composites once it belongs to a window, and the window must stay
-  // non-opaque or the surround bakes out black instead of transparent.
-  _window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, _size.width, _size.height)
+  _window = [[NSWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, _size.width, _size.height)
                                         styleMask:NSWindowStyleMaskBorderless
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
   _window.opaque = NO;
   _window.backgroundColor = NSColor.clearColor;
+  _window.ignoresMouseEvents = YES;
+  _window.excludedFromWindowsMenu = YES;
 
   _delegate = [PalmierRNFactoryDelegate new];
   _delegate.sceneBundleURL = _bundleURL;
 
   @try {
     _factory = [[RCTReactNativeFactory alloc] initWithDelegate:_delegate];
-    [_factory startReactNativeWithModuleName:@"PalmierScene"
-                                    inWindow:_window
+    _rootView = [_factory.rootViewFactory viewWithModuleName:@"PalmierScene"
                            initialProperties:@{
                              @"source": source,
+                             @"requestID": _pendingRequest,
                              @"fps": @(fps),
                              @"width": @(_size.width),
                              @"height": @(_size.height),
                              @"durationInFrames": @(durationInFrames)
                            }
                                launchOptions:nil];
+    _rootView.frame = NSMakeRect(0, 0, _size.width, _size.height);
+    _window.contentView = _rootView;
+    [_window orderBack:nil];
   } @catch (NSException *exception) {
-    completion([NSError errorWithDomain:@"PalmierRNHost"
+    [self finishRequest:[NSError errorWithDomain:@"PalmierRNHost"
                                    code:2
-                               userInfo:@{NSLocalizedDescriptionKey: exception.reason ?: exception.name}]);
+                               userInfo:@{NSLocalizedDescriptionKey: exception.reason ?: exception.name}]];
     return;
   }
 
-  completion(nil);
 }
 
-- (nullable NSString *)sceneError {
-  return _delegate.capturedError;
+- (nullable NSString *)sceneError { return _frameError ?: _delegate.capturedError; }
+
+- (NSView *)presentationView { return _rootView; }
+
+- (NSString *)slotBoundsJSON {
+  NSMutableArray *slots = [NSMutableArray array];
+  collectMotionSlots(_rootView, _rootView, slots);
+  NSData *data = [NSJSONSerialization dataWithJSONObject:slots options:0 error:nil];
+  return data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : @"[]";
 }
 
-- (void)seekToMilliseconds:(double)milliseconds {
-  [_factory.rootViewFactory.reactHost callFunctionOnJSModule:@"PalmierMotion"
-                                                      method:@"seek"
-                                                        args:@[@(milliseconds)]];
+- (void)beginRequest:(void (^)(NSError *))completion {
+  if (_pendingCompletion) [self finishRequest:[NSError errorWithDomain:NSCocoaErrorDomain code:NSUserCancelledError userInfo:nil]];
+  _pendingRequest = NSUUID.UUID.UUIDString;
+  _pendingCompletion = [completion copy];
 }
 
-- (nullable CGImageRef)copySnapshot {
-  NSView *view = _window.contentView;
-  if (!view) return NULL;
-  clearHostBackgrounds(view);
+- (void)finishRequest:(NSError *)error {
+  void (^completion)(NSError *) = _pendingCompletion;
+  _pendingCompletion = nil;
+  _pendingRequest = nil;
+  if (completion) completion(error);
+}
 
-  NSBitmapImageRep *representation = [view bitmapImageRepForCachingDisplayInRect:view.bounds];
-  if (!representation) return NULL;
-  [view cacheDisplayInRect:view.bounds toBitmapImageRep:representation];
+- (void)receiveFrame:(NSDictionary *)receipt {
+  if (![_pendingRequest isEqual:receipt[@"requestID"]]) return;
+  NSString *error = [receipt[@"error"] isKindOfClass:NSString.class] ? receipt[@"error"] : nil;
+  if (error.length) _frameError = error;
+  [_rootView layoutSubtreeIfNeeded];
+  [_rootView displayIfNeeded];
+  restoreMotionMasks(_rootView);
+  [self finishRequest:self.sceneError ? [NSError errorWithDomain:@"PalmierRNHost" code:3 userInfo:@{NSLocalizedDescriptionKey:self.sceneError}] : nil];
+}
 
-  CGImageRef image = representation.CGImage;
-  return image ? (CGImageRef)CFRetain(image) : NULL;
+- (void)seekToMilliseconds:(double)milliseconds completion:(void (^)(NSError *))completion {
+  [self beginRequest:completion];
+  [_factory.rootViewFactory.reactHost callFunctionOnJSModule:@"PalmierMotion" method:@"seek" args:@[@(milliseconds), _pendingRequest]];
+}
+
+- (void)updateDocument:(NSString *)json completion:(void (^)(NSError *))completion {
+  _frameError = nil;
+  [self beginRequest:completion];
+  [_factory.rootViewFactory.reactHost callFunctionOnJSModule:@"PalmierMotion" method:@"update" args:@[json, _pendingRequest]];
+}
+
+- (void)tearDown {
+  [self finishRequest:[NSError errorWithDomain:NSCocoaErrorDomain code:NSUserCancelledError userInfo:nil]];
+  if (_frameObserver) [[NSNotificationCenter defaultCenter] removeObserver:_frameObserver];
+  _frameObserver = nil;
+  [_rootView removeFromSuperview];
+  [_window orderOut:nil];
+  _rootView = nil;
+  _factory = nil;
+  _window = nil;
+  _capture = nil;
+}
+
+- (void)captureSnapshotWithCompletion:(void (^)(CGImageRef, NSError *))completion {
+  if (!_rootView) { completion(NULL, motionCaptureError(@"The native scene has closed")); return; }
+  clearHostBackgrounds(_rootView);
+  if (!_capture) _capture = [PalmierMotionCapture new];
+  [_capture captureView:_rootView size:_size completion:completion];
 }
 
 @end

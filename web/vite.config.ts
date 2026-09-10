@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react"
 import { viteSingleFile } from "vite-plugin-singlefile"
 import path from "node:path"
 import fs from "node:fs"
+import { buildSync } from "esbuild"
 
 /// The scene catalog the agent reads before authoring: module path to the components it exports.
 function componentCatalog(): Plugin {
@@ -31,6 +32,15 @@ function componentCatalog(): Plugin {
         }
       }
       fs.writeFileSync(output, JSON.stringify(catalog, null, 2))
+      fs.copyFileSync(path.resolve(__dirname, "../runtime/scene-evaluator.js"), path.join(path.dirname(output), "scene-evaluator.js"))
+      const compilerDirectory = path.join(path.dirname(output), "Compiler")
+      fs.mkdirSync(compilerDirectory, { recursive: true })
+      fs.copyFileSync(path.resolve(__dirname, "node_modules/@esbuild/darwin-arm64/bin/esbuild"), path.join(compilerDirectory, "esbuild"))
+      fs.chmodSync(path.join(compilerDirectory, "esbuild"), 0o755)
+      fs.copyFileSync(path.resolve(__dirname, "node_modules/esbuild/LICENSE.md"), path.join(compilerDirectory, "LICENSE.md"))
+      buildSync({ entryPoints: [path.resolve(__dirname, "../runtime/component-analyzer.ts")], bundle: true, format: "iife", platform: "browser", target: "es2022",
+        outfile: path.join(compilerDirectory, "component-analyzer.js"), minify: true, nodePaths: [path.resolve(__dirname, "node_modules")] })
+      fs.copyFileSync(path.resolve(__dirname, "node_modules/typescript/LICENSE.txt"), path.join(compilerDirectory, "TypeScript-LICENSE.txt"))
     },
   }
 }

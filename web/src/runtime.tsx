@@ -1,4 +1,6 @@
 import * as React from "react"
+import * as JSXRuntime from "react/jsx-runtime"
+import * as JSXDevRuntime from "react/jsx-dev-runtime"
 import * as ReactDOM from "react-dom"
 import { createRoot, type Root } from "react-dom/client"
 import { flushSync } from "react-dom"
@@ -10,6 +12,8 @@ import { compile } from "tailwindcss"
 import { cn } from "@/lib/utils"
 
 import * as Palmier from "palmier-runtime"
+import { createSceneRenderer } from "../../runtime/scene-renderer.js"
+import { sourceFactory, runSource } from "../../runtime/frame-contract.js"
 import { AbsoluteFill, Img } from "@/lib/remotion"
 import * as RemocnUI from "@/lib/remocn-ui"
 import * as RemocnIcons from "@/lib/remocn-icons"
@@ -27,6 +31,7 @@ declare global {
       set: (ms: number) => void
       now: () => number
       flush: () => number
+      pending: () => number
     }
     __recordError?: (error: unknown) => void
     __motion: typeof api
@@ -60,13 +65,19 @@ const beuiModules = import.meta.glob("./components/beui/**/*.{tsx,ts}", { eager:
   Record<string, unknown>
 >
 
-const PalmierAPI = { ...Palmier, AbsoluteFill, Img }
+const SceneAPI = createSceneRenderer({
+  View: "div", Text: "span", Image: "img", native: false, evaluateComponent: evaluate,
+  useCurrentFrame: Palmier.useCurrentFrame, ...Palmier.PalmierInternals,
+})
+const PalmierAPI = { ...Palmier, ...SceneAPI, AbsoluteFill, Img }
 
 const UI: Record<string, unknown> = {}
 const MODULES: Record<string, unknown> = {
   palmier: PalmierAPI,
   remotion: PalmierAPI,
   react: React,
+  "react/jsx-runtime": JSXRuntime,
+  "react/jsx-dev-runtime": JSXDevRuntime,
   "react-dom": ReactDOM,
   "react-dom/client": { createRoot },
   motion: MotionDom,
@@ -160,14 +171,18 @@ window.addEventListener("error", (event) => recordError(event.error ?? event.mes
 window.addEventListener("unhandledrejection", (event) => recordError(event.reason))
 
 let sceneConfig = { fps: 30, width: 0, height: 0, durationInFrames: 0 }
+let frameRequest = 0
 
 function SceneHost({ Scene }: { Scene: React.ComponentType }) {
   const frame = useSceneFrame()
+  const epoch = React.useSyncExternalStore(subscribeTime, () => frameRequest, () => 0)
   return (
     <Palmier.PalmierInternals.ConfigContext.Provider value={sceneConfig}>
       <Palmier.PalmierInternals.TimelineContext.Provider value={{ frame }}>
         <SceneBoundary>
+          <SceneAPI.FrameEpochProvider value={epoch}>
           <Scene />
+          </SceneAPI.FrameEpochProvider>
         </SceneBoundary>
       </Palmier.PalmierInternals.TimelineContext.Provider>
     </Palmier.PalmierInternals.ConfigContext.Provider>
@@ -235,7 +250,7 @@ function evaluate(source: string) {
     jsxRuntime: "classic",
     filePath: "scene.tsx",
   })
-  const moduleExports: Record<string, unknown> = {}
+  const sceneModule: { exports: Record<string, unknown> } = { exports: {} }
   const requireShim = (name: string) => {
     const normalized = name.replace(/\.(tsx|ts|jsx|js)$/, "")
     const mod = MODULES[normalized]
@@ -246,97 +261,90 @@ function evaluate(source: string) {
     }
     return mod
   }
-  const factory = new Function("require", "exports", "module", "React", "UI", "Remocn", "PalmierMotion", code)
-  factory(requireShim, moduleExports, { exports: moduleExports }, React, UI, REMOCN, {
+  const factory = sourceFactory(code, ["require", "exports", "module", "React", "UI", "Remocn", "PalmierMotion"])
+  runSource(factory, [requireShim, sceneModule.exports, sceneModule, React, UI, REMOCN, {
     ...PalmierAPI,
     useSceneTime,
     useSceneFrame,
-  })
+  }])
 
+  const moduleExports = sceneModule.exports
   const component =
     moduleExports.default ?? moduleExports.Scene ?? moduleExports.scene ?? moduleExports.Composition
-  if (typeof component !== "function") {
+  if (typeof component !== "function" && !(component && typeof component === "object" && "$$typeof" in component)) {
     throw new Error("Scene must export a default React component: `export default function Scene() { ... }`")
   }
   return component as React.ComponentType
 }
 
-/// The renderer hosts an offscreen window, which never gets display-link callbacks, so waiting on a
-/// real animation frame would hang. Snapshots force their own paint via afterScreenUpdates instead.
-function fontsSettled() {
-  return Promise.race([
-    document.fonts.ready.then(() => undefined),
-    new Promise<void>((resolve) => setTimeout(resolve, 2000)),
-  ])
+let activeDocument: any = null
+let documentGeneration = 0
+
+function DocumentRoot() {
+  return <SceneAPI.SceneDocument document={activeDocument} />
+}
+
+async function assetsSettled() {
+  let timeout: ReturnType<typeof setTimeout>
+  try {
+    await Promise.race([
+      Promise.all([document.fonts.ready, ...Array.from(document.images).filter(image => image.src).map(image => image.decode())]),
+      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("Scene assets did not become ready")), 20000) }),
+    ])
+  } finally { clearTimeout(timeout!) }
+}
+
+function settleFrameCallbacks() {
+  let batches = 0
+  while (window.__clock.pending()) {
+    if (++batches > 32) throw new Error("Continuous imperative animations must be adapted to scene tracks or useCurrentFrame")
+    flushSync(() => { window.__clock.flush() })
+  }
+  if (document.getAnimations().length) throw new Error("CSS and imperative animations must be adapted to scene tracks or useCurrentFrame")
 }
 
 const api = {
-  async load(
-    source: string,
-    options: {
-      fps?: number
-      seed?: number
-      width?: number
-      height?: number
-      durationInFrames?: number
-    } = {},
-  ) {
+  async loadDocument(document: any) {
     sceneError = null
-    seenCandidates.clear()
-    currentTimeMs = 0
-    fps = options.fps && options.fps > 0 ? options.fps : 30
-    sceneConfig = {
-      fps,
-      width: options.width ?? 0,
-      height: options.height ?? 0,
-      durationInFrames: options.durationInFrames ?? 0,
-    }
-    window.__clock.seedRandom(options.seed ?? 0x9e3779b9)
-    window.__clock.set(0)
-
+    fps = document.fps
+    currentTimeMs = Math.min(currentTimeMs, (document.durationInFrames - 1) / fps * 1000)
+    sceneConfig = { fps, width: document.width, height: document.height, durationInFrames: document.durationInFrames }
+    activeDocument = document
+    window.__clock.seedRandom(0x9e3779b9)
+    window.__clock.set(currentTimeMs)
     try {
       if (!compiler) await startTailwind()
-      const Scene = evaluate(source)
-
-      root?.unmount()
-      const container = document.getElementById("scene")!
-      container.innerHTML = ""
-      root = createRoot(container, { onUncaughtError: recordError, onCaughtError: recordError })
-      flushSync(() => {
-        root!.render(<SceneHost Scene={Scene} />)
-      })
+      if (!root) {
+        const container = window.document.getElementById("scene")!
+        root = createRoot(container, { onUncaughtError: recordError, onCaughtError: recordError })
+      }
+      flushSync(() => root!.render(<SceneHost key={++documentGeneration} Scene={DocumentRoot} />))
+      settleFrameCallbacks()
       flushStyles()
-      await fontsSettled()
-    } catch (error) {
-      recordError(error)
-    }
+      await assetsSettled()
+      settleFrameCallbacks()
+    } catch (error) { recordError(error) }
     return this.status()
   },
 
-  seek(ms: number) {
+  async seek(ms: number) {
+    if (!Number.isFinite(ms) || ms < 0 || !activeDocument) throw new Error("Invalid scene time")
     currentTimeMs = ms
+    frameRequest++
+    window.__clock.seedRandom((Math.round(ms * fps / 1000) ^ 0x9e3779b9) >>> 0)
     window.__clock.set(ms)
     try {
-      // Covers Motion's WAAPI-accelerated path, CSS animations and CSS transitions in one step.
-      for (const animation of document.getAnimations()) {
-        animation.pause()
-        animation.currentTime = ms
-      }
-      // Covers Motion's JS frameloop and any rAF-driven scene code.
-      window.__clock.flush()
-      flushSync(() => {
-        for (const listener of timeListeners) listener()
-      })
+      if (document.getAnimations().length) throw new Error("CSS and imperative animations must be adapted to scene tracks or useCurrentFrame")
+      flushSync(() => { for (const listener of timeListeners) listener() })
+      settleFrameCallbacks()
       flushStyles()
-    } catch (error) {
-      recordError(error)
-    }
-    return sceneError === null
+      await assetsSettled()
+      settleFrameCallbacks()
+    } catch (error) { recordError(error) }
+    return this.status()
   },
 
-  status() {
-    return { ok: sceneError === null, error: sceneError }
-  },
+  status() { return { ok: sceneError === null, error: sceneError, frame: Math.round(currentTimeMs * fps / 1000) } },
 }
 
 window.__motion = api

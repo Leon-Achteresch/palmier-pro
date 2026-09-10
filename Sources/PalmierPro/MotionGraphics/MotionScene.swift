@@ -1,3 +1,4 @@
+import AVFoundation
 import CryptoKit
 import Foundation
 
@@ -6,126 +7,106 @@ import Foundation
 enum MotionSceneRuntime: String, Codable, Equatable, Sendable, CaseIterable {
     case web
     case reactNative = "react-native"
+
+    var isAvailable: Bool {
+        #if REACT_NATIVE
+        true
+        #else
+        self == .web
+        #endif
+    }
 }
 
-/// A React scene stored in the project package. The source is authored text; the rendered video is
-/// a derived artifact keyed by `contentHash`.
 struct MotionScene: Codable, Equatable, Sendable {
     static let fileExtension = "motion"
-    static let currentVersion = 1
-
-    static let maxSourceBytes = 512 * 1024
+    static let currentVersion = 2
+    static let rendererVersion = "structured-4-frame-contract"
+    static let timeScale: CMTimeScale = 600000
+    static let maxSourceBytes = 16 * 1024 * 1024
+    static let maxDocumentBytes = 64 * 1024 * 1024
     static let dimensionRange = 16...4096
     static let fpsRange = 1.0...120.0
     static let frameCountRange = 1...36000
 
-    var version: Int
+    var version: Int = currentVersion
+    var id: String = UUID().uuidString
+    var revision: Int = 0
     var width: Int
     var height: Int
     var fps: Double
     var durationInFrames: Int
-    var source: String
-    var runtime: MotionSceneRuntime
+    var runtime: MotionSceneRuntime = .web
+    var components: [MotionComponent] = []
+    var nodes: [MotionNode] = []
+    var audioCues: [MotionAudioCue] = []
+    var sounds: [String: MotionAudioSource] = [:]
+    var formats: [MotionFormat] = []
+    var background: String = "transparent"
 
-    init(
-        width: Int,
-        height: Int,
-        fps: Double,
-        durationInFrames: Int,
-        source: String,
-        runtime: MotionSceneRuntime = .web
-    ) {
-        self.version = Self.currentVersion
+    init(width: Int, height: Int, fps: Double, durationInFrames: Int, runtime: MotionSceneRuntime = .web) {
         self.width = width
         self.height = height
         self.fps = fps
         self.durationInFrames = durationInFrames
-        self.source = source
         self.runtime = runtime
     }
 
-    /// Scenes written before the React Native runtime existed carry no `runtime` key.
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        version = try container.decode(Int.self, forKey: .version)
-        width = try container.decode(Int.self, forKey: .width)
-        height = try container.decode(Int.self, forKey: .height)
-        fps = try container.decode(Double.self, forKey: .fps)
-        durationInFrames = try container.decode(Int.self, forKey: .durationInFrames)
-        source = try container.decode(String.self, forKey: .source)
-        runtime = try container.decodeIfPresent(MotionSceneRuntime.self, forKey: .runtime) ?? .web
+    init(width: Int, height: Int, fps: Double, durationInFrames: Int, source: String, runtime: MotionSceneRuntime = .web) {
+        self.init(width: width, height: height, fps: fps, durationInFrames: durationInFrames, runtime: runtime)
+        id = "scene"
+        components = [MotionComponent(id: "component", name: "Scene", source: source)]
+        nodes = [MotionNode(id: "root", name: "Scene", kind: .component, componentID: "component", durationFrames: durationInFrames,
+                            properties: ["width": .number(Double(width)), "height": .number(Double(height))])]
     }
 
     var duration: Double { Double(durationInFrames) / fps }
-
     var size: CGSize { CGSize(width: width, height: height) }
+    var encodedSize: CGSize { CGSize(width: width - width % 2, height: height - height % 2) }
 
-    /// Stable across encodings so a re-saved but unchanged scene keeps its cached render.
     var contentHash: String {
+        get throws {
+        var snapshot = self
+        snapshot.revision = 0
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(snapshot)
         var hasher = SHA256()
-        hasher.update(
-            data: Data("\(version)|\(width)|\(height)|\(fps)|\(durationInFrames)|\(runtime.rawValue)|".utf8)
-        )
-        hasher.update(data: Data(source.utf8))
+        hasher.update(data: Data(Self.rendererVersion.utf8))
+        hasher.update(data: data)
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        }
     }
 
-    func validated() throws -> MotionScene {
-        guard version <= Self.currentVersion else {
-            throw MotionSceneError.unsupportedVersion(version)
-        }
-        guard Self.dimensionRange.contains(width), Self.dimensionRange.contains(height) else {
-            throw MotionSceneError.invalidField(
-                "width/height must be \(Self.dimensionRange.lowerBound)–\(Self.dimensionRange.upperBound); got \(width)x\(height)"
-            )
-        }
-        guard fps.isFinite, Self.fpsRange.contains(fps) else {
-            throw MotionSceneError.invalidField("fps must be \(Self.fpsRange.lowerBound)–\(Self.fpsRange.upperBound); got \(fps)")
-        }
-        guard Self.frameCountRange.contains(durationInFrames) else {
-            throw MotionSceneError.invalidField(
-                "durationInFrames must be \(Self.frameCountRange.lowerBound)–\(Self.frameCountRange.upperBound); got \(durationInFrames)"
-            )
-        }
-        guard !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw MotionSceneError.invalidField("source is empty")
-        }
-        guard source.utf8.count <= Self.maxSourceBytes else {
-            throw MotionSceneError.invalidField("source is \(source.utf8.count) bytes; max \(Self.maxSourceBytes)")
-        }
-        return self
-    }
+    func time(forFrame frame: Int) -> CMTime { CMTime(seconds: Double(frame) / fps, preferredTimescale: Self.timeScale) }
 
-    /// Encoder dimensions must be even, so a scene is authored at its declared size and encoded at
-    /// the nearest even one rather than being silently rescaled.
-    var encodedSize: CGSize {
-        CGSize(width: width - width % 2, height: height - height % 2)
+    @concurrent func runtimeJSON() async throws -> String {
+        var snapshot = try validated()
+        snapshot.sounds = [:]
+        snapshot.audioCues = []
+        return String(decoding: try snapshot.encoded(), as: UTF8.self)
     }
 
     func encoded() throws -> Data {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.outputFormatting = [.sortedKeys]
         return try encoder.encode(self)
     }
 
     static func decoded(from data: Data) throws -> MotionScene {
-        guard data.count <= maxSourceBytes * 2 else {
-            throw MotionSceneError.invalidField("scene file is too large (\(data.count) bytes)")
-        }
-        let scene: MotionScene
+        guard data.count <= maxDocumentBytes else { throw MotionSceneError.invalidField("scene file is too large") }
+        struct Header: Decodable { var version: Int }
         do {
-            scene = try JSONDecoder().decode(MotionScene.self, from: data)
-        } catch {
-            throw MotionSceneError.malformed(error.localizedDescription)
-        }
-        return try scene.validated()
+            let decoder = JSONDecoder()
+            let header = try decoder.decode(Header.self, from: data)
+            guard header.version == currentVersion else { throw MotionSceneError.unsupportedVersion(header.version) }
+            return try decoder.decode(MotionScene.self, from: data).validated()
+        } catch let error as MotionSceneError { throw error }
+        catch { throw MotionSceneError.malformed(error.localizedDescription) }
     }
 
-    /// Cheap sniff for import validation; mirrors `LottieVideoGenerator.isLottie(at:)`.
     nonisolated static func isMotionScene(at url: URL) -> Bool {
         guard url.pathExtension.lowercased() == fileExtension,
-              let data = try? Data(contentsOf: url, options: .mappedIfSafe)
-        else { return false }
+              let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return false }
         return (try? decoded(from: data)) != nil
     }
 }
@@ -147,7 +128,7 @@ enum MotionSceneError: LocalizedError, Equatable {
         switch self {
         case .runtimeMissing: "the bundled motion runtime is missing"
         case .reactNativeUnavailable: "this build does not include the React Native runtime"
-        case .unsupportedVersion(let version): "scene version \(version) is newer than this app supports"
+        case .unsupportedVersion(let version): "unsupported scene version \(version); expected \(MotionScene.currentVersion)"
         case .invalidField(let detail): "invalid scene: \(detail)"
         case .malformed(let detail): "could not read scene: \(detail)"
         case .sceneFailed(let detail): detail

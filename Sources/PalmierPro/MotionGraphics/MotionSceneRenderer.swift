@@ -115,28 +115,43 @@ final class MotionSceneRenderer: NSObject, WKNavigationDelegate {
 
     // MARK: - Scene
 
+    var presentationView: NSView { webView }
+
     func load(scene: MotionScene) async throws {
+        let json = try await scene.runtimeJSON()
         try await waitForPageLoad()
-        let result = try await callJS(
-            "return await window.__motion.load(source, { fps, width, height, durationInFrames })",
-            arguments: [
-                "source": scene.source,
-                "fps": scene.fps,
-                "width": scene.width,
-                "height": scene.height,
-                "durationInFrames": scene.durationInFrames,
-            ]
-        )
-        guard let payload = result as? [String: Any] else {
-            throw MotionSceneError.sceneFailed("the motion runtime returned no result")
-        }
-        if payload["ok"] as? Bool != true {
-            throw MotionSceneError.sceneFailed(Self.message(from: payload))
-        }
+        let result = try await callJS("return await window.__motion.loadDocument(JSON.parse(json))", arguments: ["json": json])
+        try checkResult(result)
     }
 
     func seek(toMilliseconds milliseconds: Double) async throws {
-        _ = try await callJS("return window.__motion.seek(ms)", arguments: ["ms": milliseconds])
+        let result = try await callJS("return await window.__motion.seek(ms)", arguments: ["ms": milliseconds])
+        try checkResult(result)
+    }
+
+    func slotBounds() async throws -> [MotionSlotBounds] {
+        let result = try await callJS("""
+        const slots = Array.from(document.querySelectorAll('[data-motion-slot]')).map(element => {
+          const bounds = element.getBoundingClientRect();
+          let matrix = new DOMMatrix();
+          for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+            const transform = getComputedStyle(parent).transform;
+            if (transform !== 'none') matrix = new DOMMatrix(transform).multiply(matrix);
+          }
+          return {nodeID:element.dataset.motionOwner, slotID:element.dataset.motionSlot,
+            bounds:{x:bounds.x,y:bounds.y,width:bounds.width,height:bounds.height},
+            parentMatrix:[matrix.a,matrix.b,matrix.c,matrix.d,0,0]};
+        });
+        return JSON.stringify(slots);
+        """, arguments: [:])
+        guard let json = result as? String else { throw MotionSceneError.sceneFailed("could not read editable slots") }
+        return try JSONDecoder().decode([MotionSlotBounds].self, from: Data(json.utf8))
+    }
+
+    private func checkResult(_ result: Any?) throws {
+        guard let payload = result as? [String: Any], payload["ok"] as? Bool == true else {
+            throw MotionSceneError.sceneFailed((result as? [String: Any]).map(Self.message) ?? "the motion runtime returned no result")
+        }
     }
 
     /// Throws if the scene reported an error at any point, so a failed bake never ships blank frames.
@@ -154,7 +169,7 @@ final class MotionSceneRenderer: NSObject, WKNavigationDelegate {
         configuration.afterScreenUpdates = true
         // snapshotWidth is in points; WebKit returns points x scale pixels. Without it every frame
         // rasterises at 2x and pays a 4x downsample in draw() (measured 5-6x slower per frame).
-        configuration.snapshotWidth = NSNumber(value: Double(size.width) / window.backingScaleFactor)
+        configuration.snapshotWidth = NSNumber(value: Double(size.width) / (webView.window?.backingScaleFactor ?? window.backingScaleFactor))
         let image = try await webView.takeSnapshot(configuration: configuration)
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             throw MotionSceneError.snapshotFailed

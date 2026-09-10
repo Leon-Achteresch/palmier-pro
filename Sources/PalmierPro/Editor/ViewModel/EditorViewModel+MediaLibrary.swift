@@ -239,17 +239,27 @@ extension EditorViewModel {
     }
 
     @discardableResult
-    func addMediaAsset(from url: URL, folderId: String? = nil, finalize: Bool = true) -> MediaAsset? {
+    func addMediaAsset(from url: URL, folderId: String? = nil, finalize: Bool = true) async -> MediaAsset? {
+        guard !Task.isCancelled else { return nil }
+        let importingProject = projectURL
         guard let type = ClipType(fileExtension: url.pathExtension.lowercased()) else {
             mediaPanelToast = MediaPanelToast(message: L10n.string("Can't import \"\(url.lastPathComponent)\" — unsupported file type."))
             return nil
         }
-        if type == .lottie, !LottieVideoGenerator.isLottie(at: url) {
+        let valid = await Task.detached(priority: .userInitiated) {
+            switch type {
+            case .lottie: LottieVideoGenerator.isLottie(at: url)
+            case .motion: MotionScene.isMotionScene(at: url)
+            default: true
+            }
+        }.value
+        guard !Task.isCancelled, projectURL == importingProject else { return nil }
+        if type == .lottie, !valid {
             mediaPanelToast = MediaPanelToast(message: L10n.string("Can't import \"\(url.lastPathComponent)\" — not a Lottie animation."))
             return nil
         }
-        if type == .motion, !MotionScene.isMotionScene(at: url) {
-            mediaPanelToast = "Can't import \"\(url.lastPathComponent)\" — not a motion scene."
+        if type == .motion, !valid {
+            mediaPanelToast = MediaPanelToast(message: L10n.string("Can't import \"\(url.lastPathComponent)\" — not a motion scene."))
             return nil
         }
         return addMediaAsset(from: url, type: type, folderId: folderId, finalize: finalize)
@@ -453,7 +463,7 @@ extension EditorViewModel {
         do {
             let stagedURL = try await Task.detached(priority: .userInitiated) { try FileIO.stageData(data, pathExtension: fileExtension) }.value
             let destinationURL = try await commitStagedProjectMedia(stagedURL, filename: filename)
-            return addMediaAsset(from: destinationURL)
+            return await addMediaAsset(from: destinationURL)
         } catch {
             Log.project.error("importPastedImageData: write failed \(error.localizedDescription)")
             return nil

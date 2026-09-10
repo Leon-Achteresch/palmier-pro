@@ -22,12 +22,13 @@ import Testing
         )
     }
 
-    @Test func scenesWrittenBeforeTheRuntimeKeyStillLoad() throws {
+    @Test func rejectsObsoleteSingleSourceScenes() throws {
         let legacy = """
         {"version":1,"width":640,"height":360,"fps":30,"durationInFrames":30,"source":"export default function Scene() { return null }"}
         """
-        let decoded = try MotionScene.decoded(from: Data(legacy.utf8))
-        #expect(decoded.runtime == .web)
+        #expect(throws: MotionSceneError.unsupportedVersion(1)) {
+            try MotionScene.decoded(from: Data(legacy.utf8))
+        }
     }
 
     @Test func runtimeSurvivesARoundTrip() throws {
@@ -35,12 +36,12 @@ import Testing
         #expect(decoded.runtime == .reactNative)
     }
 
-    @Test func runtimeChangesTheContentHash() {
-        #expect(scene(.web).contentHash != scene(.reactNative).contentHash)
+    @Test func runtimeChangesTheContentHash() throws {
+        #expect(try scene(.web).contentHash != scene(.reactNative).contentHash)
     }
 
-    @Test func sameRuntimeAndSourceKeepTheCachedRender() {
-        #expect(scene(.reactNative).contentHash == scene(.reactNative).contentHash)
+    @Test func sameRuntimeAndSourceKeepTheCachedRender() throws {
+        #expect(try scene(.reactNative).contentHash == scene(.reactNative).contentHash)
     }
 
     @Test(arguments: MotionSceneRuntime.allCases)

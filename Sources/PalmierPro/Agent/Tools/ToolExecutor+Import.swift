@@ -57,6 +57,7 @@ extension ToolExecutor {
     }
 
     private func importFromPath(editor: EditorViewModel, path: String, name: String?, folderId: String?) async throws -> ToolResult {
+        let importingProject = editor.projectURL
         let fileURL = URL(fileURLWithPath: path)
         let status = await Task.detached(priority: .utility) {
             Self.importPathStatus(for: fileURL)
@@ -85,17 +86,16 @@ extension ToolExecutor {
         if type == .lottie, !LottieVideoGenerator.isLottie(at: fileURL) {
             throw ToolError("Unsupported Lottie file: \(fileURL.lastPathComponent)")
         }
-        if type == .motion, !MotionScene.isMotionScene(at: fileURL) {
-            throw ToolError("Unsupported motion scene: \(fileURL.lastPathComponent)")
+        if type == .motion {
+            _ = try await MotionVideoGenerator.loadScene(at: fileURL)
         }
-        guard editor.projectURL != nil else {
-            throw ToolError("No project is open; cannot import from path")
+        try Task.checkCancellation()
+        guard importingProject != nil, editor.projectURL == importingProject else {
+            throw ToolError("Project changed or closed while validating the import")
         }
 
-        let asset = try editor.undo.perform("Import Media (Agent)") {
-            guard let asset = editor.addMediaAsset(from: fileURL, finalize: false) else {
-                throw ToolError("Failed to register imported asset")
-            }
+        let asset = editor.undo.perform("Import Media (Agent)") {
+            let asset = editor.addMediaAsset(from: fileURL, type: type, finalize: false)
             applyImportMetadata(editor: editor, asset: asset, name: name, folderId: folderId)
             return asset
         }
@@ -114,6 +114,7 @@ extension ToolExecutor {
     }
 
     private func importFromBytes(editor: EditorViewModel, base64: String, mimeType: String, name: String?, folderId: String?) async throws -> ToolResult {
+        let importingProject = editor.projectURL
         guard base64.utf8.count <= Self.importBytesMaxBase64Length else {
             throw ToolError("source.bytes is too large (\(base64.utf8.count) chars; max \(Self.importBytesMaxBase64Length)). Use source.url or source.path for larger files.")
         }
@@ -130,9 +131,11 @@ extension ToolExecutor {
         if type == .lottie, !LottieVideoGenerator.isLottie(at: imported.url) {
             throw ToolError("source.bytes is not a valid Lottie animation")
         }
-        if type == .motion, !MotionScene.isMotionScene(at: imported.url) {
-            throw ToolError("source.bytes is not a valid motion scene")
+        if type == .motion {
+            _ = try await MotionVideoGenerator.loadScene(at: imported.url)
         }
+        try Task.checkCancellation()
+        guard editor.projectURL == importingProject else { throw ToolError("Project changed while validating the import") }
         let committedURL = try await editor.commitStagedProjectMedia(imported.url, filename: imported.filename)
         let asset = editor.undo.perform("Import Media (Agent)") {
             let asset = editor.addMediaAsset(from: committedURL, type: type)

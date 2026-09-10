@@ -59,6 +59,11 @@ class VideoProject: NSDocument {
     private var projectCheckpointAutosaveScheduled = false
     private var isSavingBeforeClose = false
 
+    override init() {
+        super.init()
+        editorViewModel.projectPackageCoordinator.document = self
+    }
+
     // MARK: - Persistence
 
     override class var autosavesInPlace: Bool { true }
@@ -141,6 +146,14 @@ class VideoProject: NSDocument {
 
     private func performNextSave() {
         guard let request = saveQueue.first else { return }
+        performAsynchronousFileAccess { finish in
+            MainActor.assumeIsolated {
+                self.startSave(request, finishFileAccess: finish)
+            }
+        }
+    }
+
+    private func startSave(_ request: SaveRequest, finishFileAccess: @escaping () -> Void) {
         if let date = try? request.url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate {
             fileModificationDate = date
         }
@@ -150,6 +163,7 @@ class VideoProject: NSDocument {
         snapshotSourceProjectURL = fileURL
         super.save(to: request.url, ofType: request.typeName, for: request.operation) { error in
             coordinator.saveFinished(success: error == nil)
+            finishFileAccess()
             request.completion(error)
             self.saveQueue.removeFirst()
             self.performNextSave()
@@ -460,6 +474,7 @@ class VideoProject: NSDocument {
         if editorViewModel.markSpeakers { editorViewModel.identifySpeakers() }
 
         let editorView = EditorView()
+            .modifier(MotionEditorPresentation())
             .environment(editorViewModel)
             .focusEffectDisabled()
             .background(.ultraThinMaterial)

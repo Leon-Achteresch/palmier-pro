@@ -96,7 +96,7 @@ final class MediaAsset: Identifiable {
         self.duration = duration
         self.thumbnail = thumbnail
         self.generationInput = generationInput
-        self.hasAudio = (type == .video)
+        self.hasAudio = (type == .video || type == .motion)
         if thumbnail != nil { thumbnailMaxPixelSize = .max }
     }
 
@@ -196,6 +196,7 @@ final class MediaAsset: Identifiable {
             sourceWidth = scene.width
             sourceHeight = scene.height
             sourceFPS = scene.fps
+            hasAudio = true
             return true
         }
 

@@ -55,8 +55,7 @@
     now: function () {
       return now
     },
-    // ponytail: one flush per seek — correct for sequential baking, where each rAF chain advances
-    // one step per frame. Random-access seeking would need a replay from zero; add it if scrubbing needs it.
+    // Framework callbacks are not a frame-driven animation contract.
     flush: function () {
       var due = queue
       queue = []

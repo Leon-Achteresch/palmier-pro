@@ -6,6 +6,7 @@
     "bundle": "react-native bundle --platform macos --dev false --entry-file index.js --bundle-output ../../Sources/PalmierPro/Resources/RNRuntime/main.jsbundle --assets-dest ../../Sources/PalmierPro/Resources/RNRuntime/assets"
   },
   "dependencies": {
+    "@remotion/paths": "4.0.460",
     "react": "19.1.4",
     "react-native": "0.81.6",
     "react-native-macos": "0.81.9"

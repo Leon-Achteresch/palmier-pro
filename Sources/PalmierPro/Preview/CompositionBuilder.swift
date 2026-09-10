@@ -244,7 +244,7 @@ enum CompositionBuilder {
                     Log.preview.error("lottieVideo failed mediaRef=\(clip.mediaRef) size=\(Int(lottieSize.width))x\(Int(lottieSize.height)): \(Log.detail(error))")
                     return FileManager.default.fileExists(atPath: resolvedURL.path) ? .unprocessable : .offline
                 }
-            } else if clip.mediaType == .motion {
+            } else if clip.mediaType == .motion || clip.sourceClipType == .motion {
                 do {
                     mediaURL = try await MotionVideoGenerator.motionVideo(for: resolvedURL, mediaRef: clip.mediaRef)
                 } catch {

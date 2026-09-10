@@ -304,8 +304,6 @@ extension ToolExecutor {
         return ToolResult(content: imageBlocks + [.text(metaJSON)], isError: false)
     }
 
-    /// Returns the authored source alongside rendered frames so the Agent can both see the result
-    /// and edit it without a second round trip.
     private func readMotion(asset: MediaAsset, args: [String: Any]) async throws -> ToolResult {
         let scene = try await MotionVideoGenerator.loadScene(at: asset.url)
         let requested = args.int("maxFrames") ?? Self.defaultReadVideoFrames
@@ -341,7 +339,8 @@ extension ToolExecutor {
         meta["frameCount"] = scene.durationInFrames
         meta["durationSeconds"] = scene.duration
         meta["sampledFrameIndices"] = sampledIndices
-        meta["source"] = scene.source
+        meta["sceneId"] = scene.id
+        meta["layerCount"] = scene.nodes.count
         meta["note"] = "Motion scene frames sampled evenly; transparent areas composited over gray. Edit with manage_motion_scene."
 
         guard let metaJSON = Self.jsonString(roundJSONFloatingPointNumbers(meta, toPlaces: 3)) else {

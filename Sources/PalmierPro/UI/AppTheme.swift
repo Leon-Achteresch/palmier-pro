@@ -508,6 +508,23 @@ enum AppTheme {
         )
     }
 
+    enum MotionEditor {
+        static let creationWidth: CGFloat = 560
+        static let sourceHeight: CGFloat = 260
+
+        static let width: CGFloat = 1200
+        static let height: CGFloat = 800
+        static let libraryWidth: CGFloat = 220
+        static let inspectorWidth: CGFloat = 280
+        static let timelineHeight: CGFloat = 220
+        static let curveHeight: CGFloat = 120
+        static let handleSize: CGFloat = 8
+        static let rulerHeight: CGFloat = 24
+        static let keyLaneHeight: CGFloat = 26
+        static let trackLabelWidth: CGFloat = 160
+        static let fieldWidth: CGFloat = 84
+    }
+
     enum Window {
         static let homeDefault = NSSize(width: 1200, height: 800)
         static let homeMin = NSSize(width: 760, height: 480)

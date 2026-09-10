@@ -1027,6 +1027,10 @@ struct InspectorView: View {
     private func mediaAssetInspectorContent(_ asset: MediaAsset) -> some View {
         VStack(spacing: AppTheme.Spacing.zero) {
             assetInspectorHeader(asset)
+            if asset.type == .motion {
+                Button(L10n.string("Open Motion Editor")) { editor.motionScenes.presentedMediaRef = asset.id }
+                    .padding(AppTheme.Spacing.sm)
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: AppTheme.Spacing.zero) {
                     if let gen = asset.generationInput {

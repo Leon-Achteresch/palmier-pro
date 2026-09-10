@@ -259,6 +259,7 @@ final class EditorViewModel {
     let mediaVisualCache = MediaVisualCache()
     let stabilizationJobs = StabilizationJobs()
     let deadAirMaskCache = DeadAirMaskCache()
+    let motionScenes = MotionSceneStore()
     let searchIndex = SearchIndexCoordinator()
     var projectURL: URL? {
         didSet {
@@ -584,7 +585,7 @@ final class EditorViewModel {
         prepareMediaVisuals(for: asset)
         let targetIsVideo = timeline.tracks[trackIndex].type == .video
         let shouldLink = addLinkedAudio && targetIsVideo && asset.hasAudio
-            && (asset.type == .video || asset.type == .sequence)
+            && (asset.type == .video || asset.type == .sequence || asset.type == .motion)
         let linkGroupId: String? = shouldLink ? UUID().uuidString : nil
         let trimStart = sourceSegment.map { secondsToFrame(seconds: $0.lowerBound, fps: timeline.fps) } ?? 0
         let totalSourceFrames = secondsToFrame(seconds: asset.duration, fps: timeline.fps)

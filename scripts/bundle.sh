@@ -5,6 +5,7 @@ set -euo pipefail
 #   scripts/bundle.sh [release|debug]           # ad-hoc signed dev build
 #   scripts/bundle.sh debug --fast              # fastest: skip dSYM + deep sign, just env+build
 #   scripts/bundle.sh debug --speech             # include bundled speech and MLX
+#   scripts/bundle.sh debug --react-native       # include the React Native motion host
 #   scripts/bundle.sh debug --all                # include all optional traits
 #   scripts/bundle.sh release --sign            # build + Developer ID codesign
 #   scripts/bundle.sh release --dist            # build + sign + notarize + staple + DMG
@@ -13,6 +14,7 @@ CONFIG="release"
 MODE="dev"
 ENABLE_ALL_TRAITS=false
 INCLUDE_BUNDLED_SPEECH=false
+INCLUDE_REACT_NATIVE=false
 for arg in "$@"; do
   case "$arg" in
     release|debug) CONFIG="$arg" ;;
@@ -20,6 +22,7 @@ for arg in "$@"; do
     --sign)        MODE="sign" ;;
     --dist)        MODE="dist" ;;
     --speech)      INCLUDE_BUNDLED_SPEECH=true ;;
+    --react-native) INCLUDE_REACT_NATIVE=true ;;
     --all)
       ENABLE_ALL_TRAITS=true
       INCLUDE_BUNDLED_SPEECH=true
@@ -65,6 +68,9 @@ else
   TRAITS=""
   if $INCLUDE_BUNDLED_SPEECH; then
     TRAITS="BundledSpeech"
+  fi
+  if $INCLUDE_REACT_NATIVE; then
+    TRAITS="${TRAITS:+$TRAITS,}ReactNative"
   fi
   if [ -n "$TRAITS" ]; then
     BUILD_ARGS+=(--traits "$TRAITS")
@@ -168,6 +174,21 @@ else
   exit 1
 fi
 
+if [ -d "$APP/Contents/Frameworks/hermes.framework" ]; then
+  [ -f "$RES_BUNDLE/RNRuntime/main.jsbundle" ] || { echo "missing RNRuntime/main.jsbundle — run npm run bundle in native/rn" >&2; exit 1; }
+  cp -R "$RES_BUNDLE/RNRuntime" "$APP/Contents/Resources/"
+fi
+
+COMPONENT_COMPILER="$APP/Contents/Resources/MotionRuntime/Compiler/esbuild"
+[ -x "$COMPONENT_COMPILER" ] || { echo "missing component compiler — rebuild the motion runtime" >&2; exit 1; }
+if [ "$MODE" = "dev" ]; then
+  codesign --force --sign - "$COMPONENT_COMPILER"
+elif [ "$MODE" = "fast" ]; then
+  codesign --force --sign "$SIGNING_IDENTITY" "$COMPONENT_COMPILER"
+else
+  codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$COMPONENT_COMPILER"
+fi
+
 if ! ls "$RES_BUNDLE"/*.metallib >/dev/null 2>&1; then
   echo "!! no .metallib in SwiftPM resource bundle at $RES_BUNDLE — Metal effects would be missing" >&2
   exit 1
@@ -188,7 +209,9 @@ if $INCLUDE_BUNDLED_SPEECH; then
   cp "$MLX_METALLIB" "$APP/Contents/Resources/mlx-swift_Cmlx.bundle/default.metallib"
 fi
 
-install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/PalmierPro"
+if ! otool -l "$BIN" | grep -F 'path @executable_path/../Frameworks (offset' >/dev/null; then
+  install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/PalmierPro"
+fi
 touch "$APP"
 
 if [ "$MODE" = "fast" ]; then

@@ -54,7 +54,7 @@ echo "==> thinning Hermes to arm64"
 HERMES_SRC="$PODS/hermes-engine/destroot/Library/Frameworks/macosx/hermes.framework"
 rm -rf "$OUT/hermes.framework"
 cp -R "$HERMES_SRC" "$OUT/hermes.framework"
-lipo "$HERMES_SRC/hermes" -thin arm64 -output "$OUT/hermes.framework/hermes"
+lipo "$HERMES_SRC/hermes" -thin arm64 -output "$OUT/hermes.framework/Versions/Current/hermes"
 
 rm -rf "$OUT/obj" "$OUT/libPalmierRNHost.a"
 echo "==> done"

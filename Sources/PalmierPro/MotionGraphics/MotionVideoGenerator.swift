@@ -12,16 +12,27 @@ enum MotionVideoGenerator {
     /// Final frame is held out to here so a clip can be extended past the animation (freeze-frame).
     private static let holdTailSeconds: Double = 1800
 
-    @MainActor private static var inFlight: [String: Task<URL, any Error>] = [:]
+    @MainActor private static var inFlight: [URL: Work] = [:]
+    private static let renderGate = AsyncSemaphore(value: 1)
+
+    @MainActor private final class Work {
+        var task: Task<Void, Never>?
+        var waiters: [UUID: CheckedContinuation<URL, any Error>] = [:]
+    }
 
     @concurrent
     static func loadScene(at url: URL) async throws -> MotionScene {
-        try MotionScene.decoded(from: try Data(contentsOf: url))
+        try Task.checkCancellation()
+        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max
+        guard size <= MotionScene.maxDocumentBytes else { throw MotionSceneError.invalidField("scene file is too large") }
+        let scene = try MotionScene.decoded(from: Data(contentsOf: url))
+        try Task.checkCancellation()
+        return scene
     }
 
-    static func cacheFilename(for scene: MotionScene) -> String {
+    static func cacheFilename(for scene: MotionScene) throws -> String {
         let target = scene.encodedSize
-        return "\(scene.contentHash.prefix(32))_\(Int(target.width))x\(Int(target.height)).mov"
+        return "\(try scene.contentHash.prefix(32))_\(Int(target.width))x\(Int(target.height)).mov"
     }
 
     /// Pre-registers every unbaked scene a timeline needs, so the progress indicator
@@ -40,7 +51,7 @@ enum MotionVideoGenerator {
             guard let url = resolveURL(ref),
                   let data = try? Data(contentsOf: url),
                   let scene = try? MotionScene.decoded(from: data) else { continue }
-            let filename = cacheFilename(for: scene)
+            guard let filename = try? cacheFilename(for: scene) else { continue }
             guard !FileManager.default.fileExists(atPath: cacheDirectory.appendingPathComponent(filename).path) else { continue }
             pending.append((filename, scene.durationInFrames + 1))
         }
@@ -70,134 +81,92 @@ enum MotionVideoGenerator {
         }
     }
 
-    /// The scene declares its own size and timing, so no caller-supplied size is accepted here.
     @MainActor
-    static func motionVideo(for url: URL, mediaRef: String) async throws -> URL {
-        let scene = try await loadScene(at: url)
-        let target = scene.encodedSize
-        let filename = cacheFilename(for: scene)
-        let outputURL = cacheDirectory.appendingPathComponent(filename)
-        if FileManager.default.fileExists(atPath: outputURL.path) { return outputURL }
-
-        if let existing = inFlight[filename] { return try await existing.value }
-        let task = Task { @MainActor () throws -> URL in
-            defer { inFlight[filename] = nil }
-            MotionBakeProgress.shared.begin(id: filename, totalFrames: scene.durationInFrames + 1)
-            defer { MotionBakeProgress.shared.end(id: filename) }
-            do {
-                try await render(scene: scene, target: target, to: outputURL, progressId: filename)
-                return outputURL
-            } catch {
-                Log.preview.error("motionVideo failed mediaRef=\(mediaRef) size=\(Int(target.width))x\(Int(target.height)): \(Log.detail(error))")
-                throw error
+    static func motionVideo(for url: URL, mediaRef: String, outputDirectory: URL? = nil) async throws -> URL {
+        let prepared = try await prepare(url: url, outputDirectory: outputDirectory)
+        try Task.checkCancellation()
+        if prepared.cached { return prepared.output }
+        let requestID = UUID()
+        let output = prepared.output
+        let result = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, any Error>) in
+                guard !Task.isCancelled else { continuation.resume(throwing: CancellationError()); return }
+                if let work = inFlight[output] { work.waiters[requestID] = continuation; return }
+                let work = Work()
+                work.waiters[requestID] = continuation
+                inFlight[output] = work
+                work.task = Task { @MainActor in
+                    let result: Result<URL, any Error>
+                    do {
+                        try await renderGate.wait()
+                        do {
+                            try Task.checkCancellation()
+                            MotionBakeProgress.shared.begin(id: output.lastPathComponent, totalFrames: prepared.scene.durationInFrames + 1)
+                            defer { MotionBakeProgress.shared.end(id: output.lastPathComponent) }
+                            try await render(scene: prepared.scene, target: prepared.scene.encodedSize, to: output, progressID: output.lastPathComponent)
+                            await renderGate.signal()
+                            result = .success(output)
+                        } catch {
+                            await renderGate.signal()
+                            throw error
+                        }
+                    } catch {
+                        if !(error is CancellationError) { Log.preview.error("motion bake failed mediaRef=\(mediaRef): \(Log.detail(error))") }
+                        result = .failure(error)
+                    }
+                    guard inFlight[output] === work else { return }
+                    inFlight.removeValue(forKey: output)
+                    let waiting = work.waiters.values
+                    work.waiters.removeAll()
+                    for waiter in waiting { waiter.resume(with: result) }
+                }
+            }
+        } onCancel: {
+            Task { @MainActor in
+                guard let work = inFlight[output], let waiter = work.waiters.removeValue(forKey: requestID) else { return }
+                waiter.resume(throwing: CancellationError())
+                if work.waiters.isEmpty { inFlight.removeValue(forKey: output); work.task?.cancel() }
             }
         }
-        inFlight[filename] = task
-        return try await task.value
+        try Task.checkCancellation()
+        return result
     }
 
-    // MARK: - Private
+    private struct Prepared: Sendable { var scene: MotionScene; var output: URL; var cached: Bool }
 
-    // ponytail: baking runs on the main actor because WKWebView cannot leave it, so a long scene
-    // holds up the UI exactly like the Lottie path does. Move the web view into an XPC helper if
-    // that ever becomes the bottleneck.
+    @concurrent private static func prepare(url: URL, outputDirectory: URL?) async throws -> Prepared {
+        let scene = try await loadScene(at: url)
+        let output = (outputDirectory ?? cacheDirectory).appendingPathComponent(try cacheFilename(for: scene))
+        return Prepared(scene: scene, output: output, cached: FileManager.default.fileExists(atPath: output.path))
+    }
+
     @MainActor
-    private static func render(scene: MotionScene, target: CGSize, to outputURL: URL, progressId: String) async throws {
+    private static func render(scene: MotionScene, target: CGSize, to outputURL: URL, progressID: String) async throws {
         let renderer = try await MotionSceneRendererFactory.renderer(for: scene)
         defer { renderer.tearDown() }
-        try await renderer.load(scene: scene)
-
-        let fm = FileManager.default
-        let parentDirectory = outputURL.deletingLastPathComponent()
-        try? fm.createDirectory(at: parentDirectory, withIntermediateDirectories: true)
-        let tempURL = parentDirectory.appendingPathComponent(".writing-\(UUID().uuidString).mov")
-        defer { try? fm.removeItem(at: tempURL) }
-
-        let writer = try AVAssetWriter(outputURL: tempURL, fileType: .mov)
-        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: AVVideoCodecType.proRes4444,
-            AVVideoWidthKey: Int(target.width),
-            AVVideoHeightKey: Int(target.height),
-        ])
-        input.expectsMediaDataInRealTime = false
-        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
-            assetWriterInput: input,
-            sourcePixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-                kCVPixelBufferWidthKey as String: Int(target.width),
-                kCVPixelBufferHeightKey as String: Int(target.height),
-                kCVPixelBufferCGImageCompatibilityKey as String: true,
-                kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
-            ]
-        )
-        writer.add(input)
-        guard writer.startWriting() else { throw writer.error ?? MotionSceneError.writeFailed }
-        writer.startSession(atSourceTime: .zero)
-        guard let pool = adaptor.pixelBufferPool else { throw MotionSceneError.writeFailed }
-
-        var schedule = (0..<scene.durationInFrames).map { (frame: $0, seconds: Double($0) / scene.fps) }
-        schedule.append((frame: scene.durationInFrames - 1, seconds: max(holdTailSeconds, scene.duration + 1)))
-
-        var lastImage: CGImage?
-        for (frame, seconds) in schedule {
-            try Task.checkCancellation()
-            let image: CGImage
-            if let lastImage, frame == scene.durationInFrames - 1, seconds >= holdTailSeconds {
-                image = lastImage
-            } else {
-                try await renderer.seek(toMilliseconds: Double(frame) / scene.fps * 1000)
-                image = try await renderer.snapshot()
-                lastImage = image
-            }
-
-            var bufferOut: CVPixelBuffer?
-            guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &bufferOut) == kCVReturnSuccess,
-                  let buffer = bufferOut else { throw MotionSceneError.pixelBufferCreationFailed }
-            try draw(image, into: buffer, target: target)
-
-            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
-            guard adaptor.append(buffer, withPresentationTime: CMTimeMakeWithSeconds(seconds, preferredTimescale: 600)) else {
-                throw writer.error ?? MotionSceneError.appendFailed(frame: frame)
-            }
-            MotionBakeProgress.shared.advance(id: progressId)
-        }
-
-        // A scene that threw mid-animation would otherwise ship as a silently blank clip.
-        try await renderer.assertSceneHealthy()
-
-        input.markAsFinished()
-        await writer.finishWriting()
-        guard writer.status == .completed else { throw writer.error ?? MotionSceneError.writeFailed }
-
-        guard !fm.fileExists(atPath: outputURL.path) else { return }
+        let encoder = MotionVideoEncoder(target: target, output: outputURL)
         do {
-            try fm.moveItem(at: tempURL, to: outputURL)
+            try await renderer.load(scene: scene)
+            try await encoder.start()
+            let holdTime = CMTime(seconds: max(holdTailSeconds, scene.duration + 1), preferredTimescale: MotionScene.timeScale)
+            var lastImage: CGImage?
+            for frame in 0..<scene.durationInFrames {
+                try Task.checkCancellation()
+                try await renderer.seek(toMilliseconds: Double(frame) / scene.fps * 1000)
+                let image = try await renderer.snapshot()
+                lastImage = image
+                try await encoder.append(image, at: scene.time(forFrame: frame), frame: frame)
+                MotionBakeProgress.shared.advance(id: progressID)
+            }
+            if let lastImage {
+                try await encoder.append(lastImage, at: holdTime, frame: scene.durationInFrames - 1)
+                MotionBakeProgress.shared.advance(id: progressID)
+            }
+            try await renderer.assertSceneHealthy()
+            try await encoder.finish(scene: scene, endTime: holdTime + scene.time(forFrame: 1))
         } catch {
-            guard fm.fileExists(atPath: outputURL.path) else { throw error }
+            await encoder.cancel()
+            throw error
         }
-    }
-
-    /// Snapshots come back at the display's backing scale, so the draw also does the downsample to
-    /// the encoder's exact pixel size.
-    private static func draw(_ image: CGImage, into buffer: CVPixelBuffer, target: CGSize) throws {
-        CVPixelBufferLockBaseAddress(buffer, [])
-        defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
-
-        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
-        guard let context = CGContext(
-            data: CVPixelBufferGetBaseAddress(buffer),
-            width: Int(target.width),
-            height: Int(target.height),
-            bitsPerComponent: 8,
-            bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
-        ) else { throw MotionSceneError.pixelBufferCreationFailed }
-        CVBufferSetAttachment(buffer, kCVImageBufferCGColorSpaceKey, colorSpace, .shouldPropagate)
-
-        let rect = CGRect(origin: .zero, size: target)
-        context.clear(rect)
-        context.interpolationQuality = .high
-        context.draw(image, in: rect)
     }
 }

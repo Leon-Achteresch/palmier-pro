@@ -254,13 +254,15 @@ struct AgentInputBox<LeadingTools: View>: View {
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        let importingProject = editor.projectURL
         var handled = false
         for provider in providers where provider.canLoadObject(ofClass: URL.self) {
             handled = true
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
                 guard let url else { return }
                 Task { @MainActor in
-                    if let asset = editor.addMediaAsset(from: url) {
+                    guard editor.projectURL == importingProject else { return }
+                    if let asset = await editor.addMediaAsset(from: url), editor.mediaAssetsById[asset.id] === asset {
                         editor.agentService.attachMention(for: asset)
                     }
                 }
@@ -272,8 +274,15 @@ struct AgentInputBox<LeadingTools: View>: View {
     private func handlePaste(_: [NSItemProvider]) {
         let pb = NSPasteboard.general
         if let urls = pb.readObjects(forClasses: [NSURL.self]) as? [URL], !urls.isEmpty {
-            urls.compactMap { editor.addMediaAsset(from: $0) }
-                .forEach { editor.agentService.attachMention(for: $0) }
+            let importingProject = editor.projectURL
+            Task { @MainActor in
+                for url in urls {
+                    guard !Task.isCancelled, editor.projectURL == importingProject else { return }
+                    if let asset = await editor.addMediaAsset(from: url), editor.mediaAssetsById[asset.id] === asset {
+                        editor.agentService.attachMention(for: asset)
+                    }
+                }
+            }
             return
         }
         for (type, ext) in [(NSPasteboard.PasteboardType.png, "png"), (.tiff, "tiff")] {

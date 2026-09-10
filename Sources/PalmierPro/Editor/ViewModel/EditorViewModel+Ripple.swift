@@ -526,7 +526,7 @@ extension EditorViewModel {
             // auto-created audio partner would land on an un-pushed track and overlap.
             let targetIsVideo = timeline.tracks[trackIndex].type == .video
             let needsLinkedAudio = targetIsVideo && specs.contains {
-                $0.asset.hasAudio && ($0.asset.type == .video || $0.asset.type == .sequence)
+                $0.asset.hasAudio && ($0.asset.type == .video || $0.asset.type == .sequence || $0.asset.type == .motion)
             }
             let linkedAudioTrackIndex: Int? = needsLinkedAudio
                 ? (timeline.tracks.firstIndex { $0.type == .audio } ?? insertTrack(at: timeline.tracks.count, type: .audio))

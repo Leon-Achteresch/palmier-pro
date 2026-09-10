@@ -314,6 +314,8 @@ struct MediaTab: View {
                     toolbarButton(title: L10n.string("Generate"), prominent: true, action: toggleGenerationPanel)
                         .tourAnchor(.generateButton)
                 }
+                toolbarButton(title: L10n.string("Motion Design")) { editor.motionScenes.presentedMediaRef = "new" }
+                    .disabled(editor.projectURL == nil)
                 overflowMenu
                 Spacer(minLength: AppTheme.Spacing.zero)
             }
@@ -651,6 +653,10 @@ struct MediaTab: View {
 
     @ViewBuilder
     private var mediaBrowserContextMenu: some View {
+        Button { editor.motionScenes.presentedMediaRef = "new" } label: {
+            Label(L10n.string("New Motion Scene…"), systemImage: "square.stack.3d.up")
+        }.disabled(editor.projectURL == nil)
+
         Button(action: createNewFolderInCurrent) {
             Label(L10n.string("New Folder"), systemImage: "folder.badge.plus")
         }
@@ -799,6 +805,12 @@ struct MediaTab: View {
                     .font(.system(size: AppTheme.FontSize.title1, weight: .light))
                     .tracking(AppTheme.Tracking.tight)
                     .foregroundStyle(AppTheme.Text.primaryColor)
+
+                Button { editor.motionScenes.presentedMediaRef = "new" } label: {
+                    Label(L10n.string("Create Motion Design…"), systemImage: "square.stack.3d.up")
+                }
+                .buttonStyle(.capsule(.secondary))
+                .disabled(editor.projectURL == nil)
 
                 Text(L10n.string("Drop files here or import from disk"))
                     .font(.system(size: AppTheme.FontSize.sm))

@@ -93,7 +93,7 @@ final class ToolExecutor {
         args: [String: Any],
         origin: ToolOrigin.Value
     ) async -> ToolResult {
-        let args = Self.droppingAutofilledBlanks(from: args)
+        let args = name == ToolName.manageMotionScene.rawValue ? args : Self.droppingAutofilledBlanks(from: args)
         let started = ContinuousClock.now
         guard let tool = ToolName(rawValue: name),
               origin.source != "mcp"
@@ -132,7 +132,7 @@ final class ToolExecutor {
         var readRevision: Int?
         Log.agent.notice("tool start name=\(tool.rawValue)")
         do {
-            let resolved = try expandingIdPrefixes(in: args, editor: editor)
+            let resolved = try tool == .manageMotionScene ? motionArguments(args, editor: editor) : expandingIdPrefixes(in: args, editor: editor)
             readRevision = editor.beginAgentTimelineRead(
                 timelineReadActivity(for: tool, args: resolved, editor: editor)
             )
@@ -167,6 +167,7 @@ final class ToolExecutor {
         } else {
             Log.agent.notice("tool ok name=\(tool.rawValue) duration=\(elapsed)")
         }
+        if tool == .manageMotionScene { return result }
         // Shorten on pre ∪ post ids: new ids and just-removed ids both stay short.
         return await shorteningIds(in: result, editor: editor, alsoKnown: idsBefore)
     }

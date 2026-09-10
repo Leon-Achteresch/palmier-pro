@@ -176,14 +176,22 @@ final class VideoEngine {
             return
         }
         if asset.type == .motion {
-            // AVPlayer can't read scene source — bake (cached) to a playable mov first.
-            let url = asset.url, ref = asset.id
-            let startFrame = editor?.sourcePlayheadFrame ?? 0
-            Task { @MainActor [weak self] in
-                guard let self, let mov = try? await MotionVideoGenerator.motionVideo(for: url, mediaRef: ref) else { return }
-                guard case .mediaAsset(let activeId, _, _) = self.editor?.activePreviewTab, activeId == ref else { return }
-                self.replacePlayerItem(AVPlayerItem(url: mov), reason: "previewMotion")
-                self.seek(to: startFrame, mode: .exact)
+            let url = asset.url, ref = asset.id, generation = sourcePreviewGeneration
+            replacePlayerItem(nil, reason: "previewMotionLoading")
+            sourcePreviewTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                defer { if generation == sourcePreviewGeneration { sourcePreviewTask = nil } }
+                do {
+                    let mov = try await MotionVideoGenerator.motionVideo(for: url, mediaRef: ref)
+                    try Task.checkCancellation()
+                    guard isCurrentSourcePreview(id: ref, url: url, generation: generation) else { return }
+                    replacePlayerItem(AVPlayerItem(url: mov), reason: "previewMotion")
+                    seek(to: editor?.sourcePlayheadFrame ?? 0, mode: .exact)
+                } catch is CancellationError { }
+                catch {
+                    guard isCurrentSourcePreview(id: ref, url: url, generation: generation) else { return }
+                    editor?.mediaPanelToast = MediaPanelToast(message: L10n.string("Motion scene could not be rendered: \(error.localizedDescription)"))
+                }
             }
             return
         }
